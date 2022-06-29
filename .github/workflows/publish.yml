@@ -1,0 +1,27 @@
+name: Publish
+
+on:
+  workflow_dispatch
+
+env:
+  rust_toolchain: nightly-2022-04-07
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup | Checkout
+        uses: actions/checkout@v2
+      - name: Setup | Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.rust_toolchain }}
+      - name: Setup | Std
+        run: rustup component add rust-src --toolchain ${{ env.rust_toolchain }}-x86_64-unknown-linux-gnu
+      - name: Setup | Default to nightly
+        run: rustup default ${{ env.rust_toolchain }}
+      - name: Login
+        run: cargo login ${{ secrets.crates_io_token }}
+      - name: Build | Publish
+        run: cargo publish --target riscv32imc-esp-espidf -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort

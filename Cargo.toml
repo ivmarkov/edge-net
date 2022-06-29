@@ -1,0 +1,36 @@
+[package]
+name = "embedded-svc-impl"
+version = "0.1.0"
+authors = ["Ivan Markov <ivan.markov@gmail.com>"]
+edition = "2018"
+resolver = "2"
+categories = ["embedded", "hardware-support"]
+keywords = ["embedded", "svc", "network"]
+description = "Implementations of traits from embedded-svc."
+repository = "https://github.com/ivmarkov/embedded-svc-impl"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[features]
+default = ["std"]
+
+experimental = ["futures", "embedded-io/async"]
+
+std = ["alloc", "embedded-io/std", "embedded-svc/std"]
+alloc = ["embedded-io/alloc", "embedded-svc/alloc"]
+
+[dependencies]
+heapless = { version = "0.7", default-features = false }
+embedded-io = { version = "0.3", default-features = false }
+embedded-svc = { version = "0.22", default-features = false }
+log = { version = "0.4", default-features = false }
+no-std-net = { version = "0.5", default-features = false }
+serde = { version = "1", default-features = false, features = ["derive"] }
+enumset = { version = "1", default-features = false }
+strum = { version = "0.23", default-features = false, optional = true, features = ["derive"] }
+strum_macros = { version = "0.23", optional = true }
+num_enum = { version = "0.5", default-features = false, optional = true }
+futures = { version = "0.3", default-features = false, optional = true }
+serde_json = { version = "1", default-features = true, optional = true }
+serde-json-core = { version = "0.4", optional = true }
+async-task = { version = "4", default-features = false, optional = true }
