@@ -34,10 +34,7 @@ impl TcpClient for StdTcpClient {
         Self: 'm,
     = impl Future<Output = Result<Self::TcpConnection<'m>, Self::Error>> + 'm;
 
-    fn connect<'m>(
-        &'m mut self,
-        remote: embedded_nal_async::SocketAddr,
-    ) -> Self::ConnectFuture<'m> {
+    fn connect(&mut self, remote: embedded_nal_async::SocketAddr) -> Self::ConnectFuture<'_> {
         async move {
             Async::<TcpStream>::connect(
                 format!("{}:{}", remote.ip(), remote.port())
@@ -64,7 +61,7 @@ impl Read for StdTcpConnection {
     = impl Future<Output = Result<usize, Self::Error>>;
 
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-        async move { Ok(self.0.read(buf).await?) }
+        async move { self.0.read(buf).await }
     }
 }
 
@@ -75,7 +72,7 @@ impl Write for StdTcpConnection {
     = impl Future<Output = Result<usize, Self::Error>>;
 
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-        async move { Ok(self.0.write(buf).await?) }
+        async move { self.0.write(buf).await }
     }
 
     type FlushFuture<'a>
@@ -83,7 +80,7 @@ impl Write for StdTcpConnection {
         Self: 'a,
     = impl Future<Output = Result<(), Self::Error>>;
 
-    fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
-        async move { Ok(self.0.flush().await?) }
+    fn flush(&mut self) -> Self::FlushFuture<'_> {
+        async move { self.0.flush().await }
     }
 }
