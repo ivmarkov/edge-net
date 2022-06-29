@@ -1,81 +1,83 @@
-use std::io;
+use std::net::TcpStream;
+use std::{io, net::ToSocketAddrs};
 
 use core::future::Future;
 
-use embedded_nal_async::TcpClientStack;
+use async_io::Async;
+use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 
-pub struct StdTcpClientStack {}
+use embedded_io::asynch::{Read, Write};
+use embedded_io::Io;
 
-impl TcpClientStack for StdTcpClientStack {
-    type TcpSocket = StdTcpSocket;
+use embedded_nal_async::TcpClient;
 
+pub struct StdTcpClient {}
+
+impl Io for StdTcpClient {
     type Error = io::Error;
+}
 
-    type SocketFuture<'m>
+impl TcpClient for StdTcpClient {
+    type TcpConnection<'m>
     where
         Self: 'm,
-    = impl Future<Output = Result<Self::TcpSocket, Self::Error>> + 'm;
-
-    fn socket<'m>(&'m mut self) -> Self::SocketFuture<'m> {
-        async move { todo!() }
-    }
+    = StdTcpConnection;
 
     type ConnectFuture<'m>
     where
         Self: 'm,
-    = impl Future<Output = Result<(), Self::Error>> + 'm;
+    = impl Future<Output = Result<Self::TcpConnection<'m>, Self::Error>> + 'm;
 
     fn connect<'m>(
         &'m mut self,
-        socket: &'m mut Self::TcpSocket,
         remote: embedded_nal_async::SocketAddr,
     ) -> Self::ConnectFuture<'m> {
-        async move { todo!() }
-    }
-
-    type IsConnectedFuture<'m>
-    where
-        Self: 'm,
-    = impl Future<Output = Result<bool, Self::Error>> + 'm;
-
-    fn is_connected<'m>(&'m mut self, socket: &'m Self::TcpSocket) -> Self::IsConnectedFuture<'m> {
-        async move { todo!() }
-    }
-
-    type SendFuture<'m>
-    where
-        Self: 'm,
-    = impl Future<Output = Result<usize, Self::Error>> + 'm;
-
-    fn send<'m>(
-        &'m mut self,
-        socket: &'m mut Self::TcpSocket,
-        buffer: &'m [u8],
-    ) -> Self::SendFuture<'m> {
-        async move { todo!() }
-    }
-
-    type ReceiveFuture<'m>
-    where
-        Self: 'm,
-    = impl Future<Output = Result<usize, Self::Error>> + 'm;
-
-    fn receive<'m>(
-        &'m mut self,
-        socket: &'m mut Self::TcpSocket,
-        buffer: &'m mut [u8],
-    ) -> Self::ReceiveFuture<'m> {
-        async move { todo!() }
-    }
-
-    type CloseFuture<'m>
-    where
-        Self: 'm,
-    = impl Future<Output = Result<(), Self::Error>> + 'm;
-
-    fn close<'m>(&'m mut self, socket: Self::TcpSocket) -> Self::CloseFuture<'m> {
-        async move { todo!() }
+        async move {
+            Async::<TcpStream>::connect(
+                format!("{}:{}", remote.ip(), remote.port())
+                    .to_socket_addrs()?
+                    .next()
+                    .unwrap(),
+            )
+            .await
+            .map(StdTcpConnection)
+        }
     }
 }
 
-pub struct StdTcpSocket {}
+pub struct StdTcpConnection(Async<TcpStream>);
+
+impl Io for StdTcpConnection {
+    type Error = io::Error;
+}
+
+impl Read for StdTcpConnection {
+    type ReadFuture<'a>
+    where
+        Self: 'a,
+    = impl Future<Output = Result<usize, Self::Error>>;
+
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+        async move { Ok(self.0.read(buf).await?) }
+    }
+}
+
+impl Write for StdTcpConnection {
+    type WriteFuture<'a>
+    where
+        Self: 'a,
+    = impl Future<Output = Result<usize, Self::Error>>;
+
+    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+        async move { Ok(self.0.write(buf).await?) }
+    }
+
+    type FlushFuture<'a>
+    where
+        Self: 'a,
+    = impl Future<Output = Result<(), Self::Error>>;
+
+    fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+        async move { Ok(self.0.flush().await?) }
+    }
+}
