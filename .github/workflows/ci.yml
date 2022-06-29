@@ -30,7 +30,7 @@ jobs:
       - name: Build | Fmt Check
         run: cargo fmt -- --check
       - name: Build | Clippy
-        run: cargo clippy --no-deps -Dwarnings
+        run: cargo clippy --no-deps -- -Dwarnings
       - name: Build | Experimental
         run: cargo build --features experimental
       - name: Build | Compile / no_std

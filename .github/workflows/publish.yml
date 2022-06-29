@@ -24,4 +24,4 @@ jobs:
       - name: Login
         run: cargo login ${{ secrets.crates_io_token }}
       - name: Build | Publish
-        run: cargo publish --target riscv32imc-esp-espidf -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort
+        run: cargo publish

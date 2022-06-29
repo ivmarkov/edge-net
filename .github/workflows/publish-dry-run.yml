@@ -22,4 +22,4 @@ jobs:
       - name: Setup | Default to nightly
         run: rustup default ${{ env.rust_toolchain }}
       - name: Build | Publish Dry Run
-        run: cargo publish --dry-run --target riscv32imc-esp-espidf -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort
+        run: cargo publish --dry-run
