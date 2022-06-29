@@ -11,7 +11,13 @@ use embedded_io::Io;
 
 use embedded_nal_async::TcpClient;
 
-pub struct StdTcpClient {}
+pub struct StdTcpClient(());
+
+impl StdTcpClient {
+    pub const fn new() -> Self {
+        Self(())
+    }
+}
 
 impl Io for StdTcpClient {
     type Error = io::Error;
