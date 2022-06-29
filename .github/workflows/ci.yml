@@ -30,8 +30,8 @@ jobs:
       - name: Build | Fmt Check
         run: cargo fmt -- --check
       - name: Build | Clippy
-        run: cargo clippy --no-deps --target riscv32imc-esp-espidf -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort -- -Dwarnings
+        run: cargo clippy --no-deps -Dwarnings
       - name: Build | Experimental
-        run: cargo build --features experimental --target riscv32imc-esp-espidf -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort
+        run: cargo build --features experimental
       - name: Build | Compile / no_std
-        run: cargo build --no-default-features --features alloc,use_serde,use_strum,use_numenum --target riscv32imc-esp-espidf -Zbuild-std=core,alloc,panic_abort -Zbuild-std-features=panic_immediate_abort
+        run: cargo build --no-default-features --features alloc
