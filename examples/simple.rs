@@ -32,7 +32,7 @@ async fn read() -> anyhow::Result<()> {
     }
 
     println!(
-        "1.1.1.1 returned:\n=================\n{}\n=================\nSince it returned something, all is OK",
+        "1.1.1.1 returned:\n=================\n{}\n=================\nSince it returned something, all seems OK!",
         std::str::from_utf8(&result)?);
 
     Ok(())
