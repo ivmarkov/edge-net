@@ -4,8 +4,11 @@
 #![feature(cfg_target_has_atomic)] // Soon to be stabilized
 #![cfg_attr(feature = "experimental", feature(type_alias_impl_trait))] // For the Sender/Receiver adapters; hopefully soon to be stabilized
 #![cfg_attr(version("1.61"), allow(deprecated_where_clause_location))]
+#![feature(type_alias_impl_trait)]
 
 #[cfg(feature = "alloc")]
 #[allow(unused_imports)]
 #[macro_use]
 extern crate alloc;
+
+pub mod asynch;
