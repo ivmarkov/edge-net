@@ -1,4 +1,4 @@
-use core::cmp::{max, min};
+use core::cmp::{max, min, Ordering};
 use core::future::Future;
 use core::str;
 
@@ -207,6 +207,12 @@ impl<'b, const N: usize> Headers<'b, N> {
     }
 }
 
+impl<'b, const N: usize> Default for Headers<'b, N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct Body<'b, R> {
     buf: &'b [u8],
     content_len: usize,
@@ -359,22 +365,26 @@ impl<'a> SendHeaders<'a> {
     }
 
     fn shift(&mut self, old_offset: usize, new_offset: usize) {
-        if new_offset > old_offset {
-            let delta = new_offset - old_offset;
+        match new_offset.cmp(&old_offset) {
+            Ordering::Greater => {
+                let delta = new_offset - old_offset;
 
-            for index in (new_offset..self.len + delta).rev() {
-                self.buf[index] = self.buf[index - delta];
+                for index in (new_offset..self.len + delta).rev() {
+                    self.buf[index] = self.buf[index - delta];
+                }
+
+                self.len += delta;
             }
+            Ordering::Less => {
+                let delta = old_offset - new_offset;
 
-            self.len += delta;
-        } else if new_offset < old_offset {
-            let delta = old_offset - new_offset;
+                for index in new_offset..self.len - delta {
+                    self.buf[index] = self.buf[index + delta];
+                }
 
-            for index in new_offset..self.len - delta {
-                self.buf[index] = self.buf[index + delta];
+                self.len -= delta;
             }
-
-            self.len -= delta;
+            Ordering::Equal => {}
         }
     }
 
