@@ -26,6 +26,8 @@ embedded-nal-async = { git = "https://github.com/lulf/embedded-nal", branch = "s
 no-std-net = { version = "0.5", default-features = false }
 futures-lite = { version = "1", default-features = false, optional = true }
 async-io = { version = "1", default-features = false, optional = true }
+uncased = "0.9"
+httparse = "1.7"
 #log = { version = "0.4", default-features = false }
 #heapless = { version = "0.7", default-features = false }
 #serde = { version = "1", default-features = false, features = ["derive"] }

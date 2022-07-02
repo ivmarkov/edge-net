@@ -11,4 +11,5 @@
 #[macro_use]
 extern crate alloc;
 
+#[cfg(feature = "experimental")]
 pub mod asynch;
