@@ -171,6 +171,86 @@ mod embedded_svc_compat {
 
     use embedded_svc::io::asynch::{Io, Read, Write};
 
+    use embedded_nal_async::TcpClient;
+
+    pub struct Client<'b, const N: usize, T>
+    where
+        T: TcpClient + 'b,
+    {
+        buf: &'b mut [u8],
+        resp_headers: super::Headers<'b, N>,
+        tcp_client: &'b mut T,
+        connection: Option<T::TcpConnection<'b>>,
+    }
+
+    impl<'b, const N: usize, T> Client<'b, N, T>
+    where
+        T: TcpClient + 'b,
+    {
+        pub fn new(buf: &'b mut [u8], tcp_client: &'b mut T) -> Self {
+            Self {
+                buf,
+                resp_headers: super::Headers::<N>::new(),
+                tcp_client,
+                connection: None,
+            }
+        }
+    }
+
+    impl<'b, const N: usize, T> embedded_svc::io::asynch::Io for Client<'b, N, T>
+    where
+        T: TcpClient,
+    {
+        type Error = T::Error;
+    }
+
+    impl<'b, const N: usize, T> embedded_svc::http::client::asynch::Client for Client<'b, N, T>
+    where
+        T: TcpClient + 'b,
+    {
+        type Request<'a>
+        where
+            Self: 'a,
+        = ClientRequest<
+            'b,
+            'a,
+            N,
+            <T as TcpClient>::TcpConnection<'a>,
+            <T as TcpClient>::TcpConnection<'a>,
+        >;
+
+        type RequestFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<Self::Request<'a>, Self::Error>>;
+
+        fn request<'a>(
+            &'a mut self,
+            method: embedded_svc::http::Method,
+            uri: &str,
+        ) -> Self::RequestFuture<'a> {
+            // TODO: Logic to recycle the existing connection if it is still open and is for the same host
+            self.connection = None;
+
+            async move {
+                // TODO: We need a no_std URI parser
+                //self.connection = Some(self.tcp_client.connect("1.1.1.1:80".parse().unwrap()).await?);
+                let connection: <T as TcpClient>::TcpConnection<'a> = self
+                    .tcp_client
+                    .connect("1.1.1.1:80".parse().unwrap())
+                    .await?;
+
+                let buf: &'a mut [u8] = self.buf;
+                let resp_headers: &'a mut super::Headers<'b, N> = &mut self.resp_headers;
+                let connection: Option<<T as TcpClient>::TcpConnection<'a>> = None;
+                let connection2: Option<<T as TcpClient>::TcpConnection<'a>> = None;
+
+                //Ok(Self::Request::new(method, uri, buf, resp_headers, connection.unwrap(), connection2.unwrap()))
+                todo!()
+            }
+        }
+    }
+
     impl From<embedded_svc::http::client::asynch::Method> for super::Method {
         fn from(_: embedded_svc::http::client::asynch::Method) -> Self {
             todo!()
@@ -184,10 +264,32 @@ mod embedded_svc_compat {
     }
 
     pub struct ClientRequest<'b, 'h, const N: usize, R, W> {
-        req_headers: crate::asynch::http::SendHeaders<'b>,
+        req_headers: super::Request<'b>,
         resp_headers: &'h mut super::Headers<'b, N>,
         input: R,
         output: W,
+    }
+
+    impl<'b, 'h, const N: usize, R, W> ClientRequest<'b, 'h, N, R, W> {
+        pub fn new(
+            method: embedded_svc::http::client::asynch::Method,
+            uri: &str,
+            buf: &'b mut [u8],
+            resp_headers: &'h mut super::Headers<'b, N>,
+            input: R,
+            output: W,
+        ) -> Self
+        where
+            R: Read,
+            W: Write<Error = R::Error>,
+        {
+            Self {
+                req_headers: super::Request::new(method.into(), uri, buf),
+                resp_headers,
+                input,
+                output,
+            }
+        }
     }
 
     impl<'b, 'h, const N: usize, R, W> Io for ClientRequest<'b, 'h, N, R, W>
@@ -201,7 +303,7 @@ mod embedded_svc_compat {
         for ClientRequest<'b, 'h, N, R, W>
     {
         fn set_header(&mut self, name: &str, value: &str) -> &mut Self {
-            self.req_headers.set(name, value);
+            self.req_headers.header(name, value);
             self
         }
     }
