@@ -171,6 +171,12 @@ mod embedded_svc_compat {
 
     use embedded_svc::io::asynch::{Io, Read, Write};
 
+    impl From<embedded_svc::http::client::asynch::Method> for super::Method {
+        fn from(_: embedded_svc::http::client::asynch::Method) -> Self {
+            todo!()
+        }
+    }
+
     impl<'b> embedded_svc::http::client::asynch::SendHeaders for super::Request<'b> {
         fn set_header(&mut self, name: &str, value: &str) -> &mut Self {
             self.header(name, value)
