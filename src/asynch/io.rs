@@ -1,7 +1,5 @@
-use embedded_io::{
-    asynch::{Read, Write},
-    Error,
-};
+use embedded_io::asynch::{Read, Write};
+use embedded_io::Error;
 
 pub async fn try_read_full<R: Read>(
     mut read: R,

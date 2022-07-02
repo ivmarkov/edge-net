@@ -1,8 +1,14 @@
-use core::{cmp::max, str};
+use core::cmp::{max, min};
+use core::future::Future;
+use core::str;
+
+use embedded_io::asynch::Read;
+use embedded_io::Io;
 
 use uncased::UncasedStr;
 
 pub mod client;
+pub mod server;
 
 /// An error in parsing.
 #[derive(Debug)]
@@ -85,15 +91,70 @@ impl Method {
     }
 }
 
-struct HttpHeadersSplitter<'a>(&'a [u8], usize);
+pub struct Headers<'b, const N: usize>([httparse::Header<'b>; N]);
 
-impl<'a> HttpHeadersSplitter<'a> {
+impl<'b, const N: usize> Headers<'b, N> {
+    pub fn new() -> Self {
+        Self([httparse::EMPTY_HEADER; N])
+    }
+}
+
+pub struct Body<'b, R> {
+    buf: &'b [u8],
+    content_len: usize,
+    read_len: usize,
+    input: R,
+}
+
+impl<'b, R> Io for Body<'b, R>
+where
+    R: Io,
+{
+    type Error = R::Error;
+}
+
+impl<'b, R> Read for Body<'b, R>
+where
+    R: Read,
+{
+    type ReadFuture<'a>
+    where
+        Self: 'a,
+    = impl Future<Output = Result<usize, Self::Error>>;
+
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+        async move {
+            if self.buf.len() > self.read_len {
+                let len = min(buf.len(), self.buf.len() - self.read_len);
+                buf[..len].copy_from_slice(&self.buf[self.read_len..self.read_len + len]);
+
+                self.read_len += len;
+
+                Ok(len)
+            } else {
+                let len = min(buf.len(), self.content_len - self.read_len);
+                if len > 0 {
+                    let read = self.input.read(&mut buf[..len]).await?;
+                    self.read_len += read;
+
+                    Ok(read)
+                } else {
+                    Ok(0)
+                }
+            }
+        }
+    }
+}
+
+struct SendHeadersSplitter<'a>(&'a [u8], usize);
+
+impl<'a> SendHeadersSplitter<'a> {
     fn new(buf: &'a [u8]) -> Self {
         Self(buf, 0)
     }
 }
 
-impl<'a> Iterator for HttpHeadersSplitter<'a> {
+impl<'a> Iterator for SendHeadersSplitter<'a> {
     type Item = (usize, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -113,12 +174,12 @@ impl<'a> Iterator for HttpHeadersSplitter<'a> {
     }
 }
 
-pub(crate) struct HttpSendHeaders<'a> {
+pub(crate) struct SendHeaders<'a> {
     buf: &'a mut [u8],
     len: usize,
 }
 
-impl<'a> HttpSendHeaders<'a> {
+impl<'a> SendHeaders<'a> {
     pub(crate) fn new(buf: &'a mut [u8]) -> Self {
         Self { buf, len: 0 }
     }
@@ -170,11 +231,12 @@ impl<'a> HttpSendHeaders<'a> {
         } else {
             self.append(name.as_bytes());
             self.append(b":");
+            self.append(value);
             self.append(b"\r\n");
         }
     }
 
-    pub(crate) fn buf(&self) -> &[u8] {
+    pub(crate) fn payload(&self) -> &[u8] {
         &self.buf[..self.len]
     }
 
@@ -209,7 +271,7 @@ impl<'a> HttpSendHeaders<'a> {
     }
 
     fn get_loc(&self, name: &str) -> Option<(usize, usize)> {
-        for (start, end) in HttpHeadersSplitter::new(&self.buf[..self.len]).skip(1) {
+        for (start, end) in SendHeadersSplitter::new(&self.buf[..self.len]).skip(1) {
             let value_start = self.get_header_value_start(start, end).unwrap();
 
             if UncasedStr::new(name)
@@ -225,7 +287,7 @@ impl<'a> HttpSendHeaders<'a> {
     }
 
     fn get_status_len(&self) -> Option<usize> {
-        HttpHeadersSplitter::new(&self.buf[..self.len])
+        SendHeadersSplitter::new(&self.buf[..self.len])
             .next()
             .map(|(_, end)| end)
     }

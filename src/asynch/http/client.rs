@@ -1,131 +1,76 @@
-use core::cmp::min;
-use core::future::Future;
 use core::str;
 
-use embedded_io::{
-    asynch::{Read, Write},
-    Io,
-};
+use embedded_io::asynch::Read;
+
 use httparse::Status;
 use uncased::UncasedStr;
 
 use crate::asynch::io;
-use crate::asynch::io::CopyError;
 
 use super::*;
 
-pub struct Request<'b, W> {
-    headers: HttpSendHeaders<'b>,
-    output: W,
-}
+pub struct Request<'b>(SendHeaders<'b>);
 
-impl<'b, W> Io for Request<'b, W>
-where
-    W: Io,
-{
-    type Error = W::Error;
-}
-
-impl<'b, W> Request<'b, W>
-where
-    W: Write,
-{
-    pub fn get(uri: &str, write: W, buf: &'b mut [u8]) -> Self {
-        Self::new(Method::Get, uri, write, buf)
+impl<'b> Request<'b> {
+    pub fn get(uri: &str, buf: &'b mut [u8]) -> Self {
+        Self::new(Method::Get, uri, buf)
     }
 
-    pub fn post(uri: &str, write: W, buf: &'b mut [u8]) -> Self {
-        Self::new(Method::Post, uri, write, buf)
+    pub fn post(uri: &str, buf: &'b mut [u8]) -> Self {
+        Self::new(Method::Post, uri, buf)
     }
 
-    pub fn put(uri: &str, write: W, buf: &'b mut [u8]) -> Self {
-        Self::new(Method::Put, uri, write, buf)
+    pub fn put(uri: &str, buf: &'b mut [u8]) -> Self {
+        Self::new(Method::Put, uri, buf)
     }
 
-    pub fn delete(uri: &str, write: W, buf: &'b mut [u8]) -> Self {
-        Self::new(Method::Delete, uri, write, buf)
+    pub fn delete(uri: &str, buf: &'b mut [u8]) -> Self {
+        Self::new(Method::Delete, uri, buf)
     }
 
-    pub fn new(method: Method, uri: &str, write: W, buf: &'b mut [u8]) -> Self {
-        let mut this = Self {
-            headers: HttpSendHeaders::new(buf),
-            output: write,
-        };
+    pub fn new(method: Method, uri: &str, buf: &'b mut [u8]) -> Self {
+        let mut this = Self(SendHeaders::new(buf));
 
-        this.headers
+        this.0
             .set_status_tokens(&[method.as_str(), "HTTP/1.1", uri]);
 
         this
     }
 
     pub fn header(&mut self, name: &str, value: &str) -> &mut Self {
-        self.headers.set(name, value);
+        self.0.set(name, value);
         self
     }
 
     pub fn header_raw(&mut self, name: &str, value: &[u8]) -> &mut Self {
-        self.headers.set_raw(name, value);
+        self.0.set_raw(name, value);
         self
     }
 
-    pub async fn send_bytes<'a>(self, bytes: &'a [u8]) -> Result<W, W::Error>
-    where
-        Self: Sized + 'a,
-    {
-        let mut writer = self.into_writer().await?;
+    pub fn content_len(&mut self, content_len: usize) -> &mut Self {
+        let content_len_str = heapless::String::<20>::from(content_len as u64);
 
-        writer.write_all(bytes).await?;
-
-        Ok(writer)
+        self.header("Content-Length", &content_len_str)
     }
 
-    pub async fn send_str<'a>(self, s: &'a str) -> Result<W, W::Error>
-    where
-        Self: Sized + 'a,
-    {
-        self.send_bytes(s.as_bytes()).await
+    pub fn content_type(&mut self, content_type: &str) -> &mut Self {
+        self.header("Content-Type", content_type)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub async fn send_reader<R>(
-        self,
-        size: usize,
-        read: R,
-    ) -> Result<W, CopyError<R::Error, W::Error>>
-    where
-        R: Read,
-        Self: Sized,
-    {
-        let mut write = self.into_writer().await.map_err(CopyError::Write)?;
-
-        io::copy_len::<64, _, _>(read, &mut write, size as u64).await?;
-
-        Ok(write)
+    pub fn content_encoding(&mut self, content_encoding: &str) -> &mut Self {
+        self.header("Content-Encoding", content_encoding)
     }
 
-    pub async fn into_writer(mut self) -> Result<W, W::Error> {
-        self.output.write_all(self.headers.buf()).await?;
-
-        Ok(self.output)
+    pub fn transfer_encoding(&mut self, transfer_encoding: &str) -> &mut Self {
+        self.header("Transfer-Encoding", transfer_encoding)
     }
-}
 
-pub struct ResponseHeaders<'b, const N: usize>([httparse::Header<'b>; N]);
-
-impl<'b, const N: usize> ResponseHeaders<'b, N> {
-    pub fn new() -> Self {
-        Self([httparse::EMPTY_HEADER; N])
+    pub fn payload(&self) -> &[u8] {
+        self.0.payload()
     }
 }
 
 pub struct Response<'b, 'h, const N: usize>(httparse::Response<'b, 'h>);
-
-pub struct ResponseBody<'b, R> {
-    buf: &'b [u8],
-    content_len: usize,
-    read_len: usize,
-    input: R,
-}
 
 impl<'b, 'h, const N: usize> Response<'b, 'h, N>
 where
@@ -134,8 +79,8 @@ where
     pub async fn parse<R>(
         mut input: R,
         buf: &'b mut [u8],
-        headers: &'h mut ResponseHeaders<'b, N>,
-    ) -> Result<(Response<'b, 'h, N>, ResponseBody<'b, R>), Error<R::Error>>
+        headers: &'h mut Headers<'b, N>,
+    ) -> Result<(Response<'b, 'h, N>, Body<'b, R>), Error<R::Error>>
     where
         R: Read,
     {
@@ -150,9 +95,9 @@ where
         if let Status::Complete(response_len) = status {
             let response = Self(response);
 
-            let response_body = ResponseBody {
+            let response_body = Body {
                 buf: &buf[response_len..read_len],
-                content_len: usize::MAX, // TODO
+                content_len: response.content_len().unwrap_or(usize::MAX),
                 read_len: 0,
                 input,
             };
@@ -169,6 +114,23 @@ where
 
     pub fn status_message(&self) -> Option<&str> {
         self.0.reason
+    }
+
+    pub fn content_len(&self) -> Option<usize> {
+        self.header("Content-Length")
+            .map(|content_len_str| content_len_str.parse::<usize>().unwrap())
+    }
+
+    pub fn content_type(&self) -> Option<&str> {
+        self.header("Content-Type")
+    }
+
+    pub fn content_encoding(&self) -> Option<&str> {
+        self.header("Content-Encoding")
+    }
+
+    pub fn transfer_encoding(&self) -> Option<&str> {
+        self.header("Transfer-Encoding")
     }
 
     pub fn headers(&self) -> impl Iterator<Item = (&str, &str)> {
@@ -193,45 +155,5 @@ where
         self.headers_raw()
             .find(|(hname, _)| UncasedStr::new(name) == UncasedStr::new(hname))
             .map(|(_, value)| value)
-    }
-}
-
-impl<'b, R> Io for ResponseBody<'b, R>
-where
-    R: Io,
-{
-    type Error = R::Error;
-}
-
-impl<'b, R> Read for ResponseBody<'b, R>
-where
-    R: Read,
-{
-    type ReadFuture<'a>
-    where
-        Self: 'a,
-    = impl Future<Output = Result<usize, Self::Error>>;
-
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-        async move {
-            if self.buf.len() > self.read_len {
-                let len = min(buf.len(), self.buf.len() - self.read_len);
-                buf[..len].copy_from_slice(&self.buf[self.read_len..self.read_len + len]);
-
-                self.read_len += len;
-
-                Ok(len)
-            } else {
-                let len = min(buf.len(), self.content_len - self.read_len);
-                if len > 0 {
-                    let read = self.input.read(&mut buf[..len]).await?;
-                    self.read_len += read;
-
-                    Ok(read)
-                } else {
-                    Ok(0)
-                }
-            }
-        }
     }
 }
