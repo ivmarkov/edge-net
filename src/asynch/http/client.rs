@@ -303,7 +303,7 @@ mod embedded_svc_compat {
         for ClientRequest<'b, 'h, N, R, W>
     {
         fn set_header(&mut self, name: &str, value: &str) -> &mut Self {
-            self.req_headers.header(name, value);
+            self.req_headers.set_header(name, value);
             self
         }
     }
