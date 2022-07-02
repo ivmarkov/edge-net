@@ -86,8 +86,116 @@ pub enum Method {
 }
 
 impl Method {
-    fn as_str(&self) -> &str {
-        "TODO" // TODO
+    fn new(method: &str) -> Option<Self> {
+        let method = UncasedStr::new(method);
+
+        if method == UncasedStr::new("Delete") {
+            Some(Self::Delete)
+        } else if method == UncasedStr::new("Get") {
+            Some(Self::Get)
+        } else if method == UncasedStr::new("Head") {
+            Some(Self::Head)
+        } else if method == UncasedStr::new("Post") {
+            Some(Self::Post)
+        } else if method == UncasedStr::new("Put") {
+            Some(Self::Put)
+        } else if method == UncasedStr::new("Connect") {
+            Some(Self::Connect)
+        } else if method == UncasedStr::new("Options") {
+            Some(Self::Options)
+        } else if method == UncasedStr::new("Trace") {
+            Some(Self::Trace)
+        } else if method == UncasedStr::new("Copy") {
+            Some(Self::Copy)
+        } else if method == UncasedStr::new("Lock") {
+            Some(Self::Lock)
+        } else if method == UncasedStr::new("MkCol") {
+            Some(Self::MkCol)
+        } else if method == UncasedStr::new("Move") {
+            Some(Self::Move)
+        } else if method == UncasedStr::new("Propfind") {
+            Some(Self::Propfind)
+        } else if method == UncasedStr::new("Proppatch") {
+            Some(Self::Proppatch)
+        } else if method == UncasedStr::new("Search") {
+            Some(Self::Search)
+        } else if method == UncasedStr::new("Unlock") {
+            Some(Self::Unlock)
+        } else if method == UncasedStr::new("Bind") {
+            Some(Self::Bind)
+        } else if method == UncasedStr::new("Rebind") {
+            Some(Self::Rebind)
+        } else if method == UncasedStr::new("Unbind") {
+            Some(Self::Unbind)
+        } else if method == UncasedStr::new("Acl") {
+            Some(Self::Acl)
+        } else if method == UncasedStr::new("Report") {
+            Some(Self::Report)
+        } else if method == UncasedStr::new("MkActivity") {
+            Some(Self::MkActivity)
+        } else if method == UncasedStr::new("Checkout") {
+            Some(Self::Checkout)
+        } else if method == UncasedStr::new("Merge") {
+            Some(Self::Merge)
+        } else if method == UncasedStr::new("MSearch") {
+            Some(Self::MSearch)
+        } else if method == UncasedStr::new("Notify") {
+            Some(Self::Notify)
+        } else if method == UncasedStr::new("Subscribe") {
+            Some(Self::Subscribe)
+        } else if method == UncasedStr::new("Unsubscribe") {
+            Some(Self::Unsubscribe)
+        } else if method == UncasedStr::new("Patch") {
+            Some(Self::Patch)
+        } else if method == UncasedStr::new("Purge") {
+            Some(Self::Purge)
+        } else if method == UncasedStr::new("MkCalendar") {
+            Some(Self::MkCalendar)
+        } else if method == UncasedStr::new("Link") {
+            Some(Self::Link)
+        } else if method == UncasedStr::new("Unlink") {
+            Some(Self::Unlink)
+        } else {
+            None
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Delete => "DELETE",
+            Self::Get => "GET",
+            Self::Head => "HEAD",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Connect => "CONNECT",
+            Self::Options => "OPTIONS",
+            Self::Trace => "TRACE",
+            Self::Copy => "COPY",
+            Self::Lock => "LOCK",
+            Self::MkCol => "MKCOL",
+            Self::Move => "MOVE",
+            Self::Propfind => "PROPFIND",
+            Self::Proppatch => "PROPPATCH",
+            Self::Search => "SEARCH",
+            Self::Unlock => "UNLOCK",
+            Self::Bind => "BIND",
+            Self::Rebind => "REBIND",
+            Self::Unbind => "UNBIND",
+            Self::Acl => "ACL",
+            Self::Report => "REPORT",
+            Self::MkActivity => "MKACTIVITY",
+            Self::Checkout => "CHECKOUT",
+            Self::Merge => "MERGE",
+            Self::MSearch => "MSEARCH",
+            Self::Notify => "NOTIFY",
+            Self::Subscribe => "SUBSCRIBE",
+            Self::Unsubscribe => "UNSUBSCRIBE",
+            Self::Patch => "PATCH",
+            Self::Purge => "PURGE",
+            Self::MkCalendar => "MKCALENDAR",
+            Self::Link => "LINK",
+            Self::Unlink => "UNLINK",
+        }
     }
 }
 

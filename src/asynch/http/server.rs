@@ -47,8 +47,12 @@ where
         }
     }
 
-    pub fn method(&self) -> Method {
-        todo!()
+    pub fn method(&self) -> Option<Method> {
+        self.0.method.and_then(Method::new)
+    }
+
+    pub fn method_str(&self) -> Option<&str> {
+        self.0.method
     }
 
     pub fn uri(&self) -> Option<&str> {
