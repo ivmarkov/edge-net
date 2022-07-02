@@ -9,6 +9,9 @@ use crate::asynch::io;
 
 use super::*;
 
+#[cfg(feature = "embedded-svc")]
+pub use embedded_svc_compat::*;
+
 pub struct Request<'b>(SendHeaders<'b>);
 
 impl<'b> Request<'b> {
@@ -70,11 +73,11 @@ impl<'b> Request<'b> {
     }
 }
 
-pub struct Response<'b, 'h, const N: usize>(httparse::Response<'b, 'h>);
+pub struct Response<'b, 'h, const N: usize>(httparse::Response<'h, 'b>);
 
 impl<'b, 'h, const N: usize> Response<'b, 'h, N>
 where
-    'h: 'b,
+    'b: 'h,
 {
     pub async fn parse<R>(
         mut input: R,
@@ -155,5 +158,231 @@ where
         self.headers_raw()
             .find(|(hname, _)| UncasedStr::new(name) == UncasedStr::new(hname))
             .map(|(_, value)| value)
+    }
+}
+
+#[cfg(feature = "embedded-svc")]
+mod embedded_svc_compat {
+    use core::future::Future;
+
+    use embedded_svc::io::asynch::{Io, Read, Write};
+
+    impl<'b> embedded_svc::http::client::asynch::SendHeaders for super::Request<'b> {
+        fn set_header(&mut self, name: &str, value: &str) -> &mut Self {
+            self.header(name, value)
+        }
+    }
+
+    pub struct RequestWriteImpl<'b, 'h, const N: usize, R, W> {
+        buf: &'b mut [u8],
+        resp_headers: &'h mut super::Headers<'b, N>,
+        input: R,
+        output: W,
+    }
+
+    impl<'b, 'h, const N: usize, R, W> Io for RequestWriteImpl<'b, 'h, N, R, W>
+    where
+        W: Io,
+    {
+        type Error = W::Error;
+    }
+
+    impl<'b, 'h, const N: usize, R, W> Write for RequestWriteImpl<'b, 'h, N, R, W>
+    where
+        W: Write,
+    {
+        type WriteFuture<'a>
+        where
+            Self: 'a,
+        = W::WriteFuture<'a>;
+
+        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+            self.output.write(buf)
+        }
+
+        type FlushFuture<'a>
+        where
+            Self: 'a,
+        = W::FlushFuture<'a>;
+
+        fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+            self.output.flush()
+        }
+    }
+
+    impl<'b, 'h, const N: usize, R, W> embedded_svc::http::client::asynch::RequestWrite
+        for RequestWriteImpl<'b, 'h, N, R, W>
+    where
+        'b: 'h,
+        W: Write,
+        R: Read<Error = W::Error>,
+    {
+        type Response = ResponseImpl<'b, 'h, N, R>;
+
+        type IntoResponseFuture = impl Future<Output = Result<Self::Response, Self::Error>>;
+
+        fn into_response(mut self) -> Self::IntoResponseFuture
+        where
+            Self: Sized,
+        {
+            async move {
+                self.output.flush().await?;
+
+                let (response, body) =
+                    super::Response::parse(self.input, self.buf, self.resp_headers)
+                        .await
+                        .unwrap(); // TODO
+
+                Ok(Self::Response { response, body })
+            }
+        }
+    }
+
+    pub struct RequestImpl<'b, 'h, const N: usize, R, W> {
+        req_headers: crate::asynch::http::SendHeaders<'b>,
+        resp_headers: &'h mut super::Headers<'b, N>,
+        input: R,
+        output: W,
+    }
+
+    impl<'b, 'h, const N: usize, R, W> Io for RequestImpl<'b, 'h, N, R, W>
+    where
+        W: Io,
+    {
+        type Error = W::Error;
+    }
+
+    impl<'b, 'h, const N: usize, R, W> embedded_svc::http::client::asynch::SendHeaders
+        for RequestImpl<'b, 'h, N, R, W>
+    {
+        fn set_header(&mut self, name: &str, value: &str) -> &mut Self {
+            self.req_headers.set(name, value);
+            self
+        }
+    }
+
+    impl<'b, 'h, const N: usize, R, W> embedded_svc::http::client::asynch::Request
+        for RequestImpl<'b, 'h, N, R, W>
+    where
+        'b: 'h,
+        R: Read<Error = Self::Error>,
+        W: Write,
+    {
+        type Write = RequestWriteImpl<'b, 'h, N, R, W>;
+
+        type IntoWriterFuture =
+            impl Future<Output = Result<RequestWriteImpl<'b, 'h, N, R, W>, Self::Error>>;
+
+        type SubmitFuture = impl Future<Output = Result<ResponseImpl<'b, 'h, N, R>, Self::Error>>;
+
+        fn into_writer(mut self) -> Self::IntoWriterFuture
+        where
+            Self: Sized,
+        {
+            async move {
+                self.output.write_all(self.req_headers.payload()).await?;
+
+                Ok(RequestWriteImpl {
+                    buf: self.req_headers.release(),
+                    resp_headers: self.resp_headers,
+                    input: self.input,
+                    output: self.output,
+                })
+            }
+        }
+
+        fn submit(self) -> Self::SubmitFuture
+        where
+            Self: Sized,
+        {
+            use embedded_svc::http::client::asynch::RequestWrite;
+
+            async move { Ok(self.into_writer().await?.into_response().await?) }
+        }
+    }
+
+    impl<'b, 'h, const N: usize> embedded_svc::http::client::asynch::Status
+        for super::Response<'b, 'h, N>
+    {
+        fn status(&self) -> u16 {
+            super::Response::status_code(self)
+        }
+
+        fn status_message(&self) -> Option<&'_ str> {
+            super::Response::status_message(self)
+        }
+    }
+
+    impl<'b, 'h, const N: usize> embedded_svc::http::client::asynch::Headers
+        for super::Response<'b, 'h, N>
+    {
+        fn header(&self, name: &str) -> Option<&'_ str> {
+            super::Response::header(self, name)
+        }
+    }
+
+    pub struct ResponseImpl<'b, 'h, const N: usize, R> {
+        response: super::Response<'b, 'h, N>,
+        body: super::Body<'b, R>,
+    }
+
+    impl<'b, 'h, const N: usize, R> embedded_svc::http::client::asynch::Status
+        for ResponseImpl<'b, 'h, N, R>
+    {
+        fn status(&self) -> u16 {
+            self.response.status_code()
+        }
+
+        fn status_message(&self) -> Option<&'_ str> {
+            self.response.status_message()
+        }
+    }
+
+    impl<'b, 'h, const N: usize, R> embedded_svc::http::client::asynch::Headers
+        for ResponseImpl<'b, 'h, N, R>
+    {
+        fn header(&self, name: &str) -> Option<&'_ str> {
+            self.response.header(name)
+        }
+    }
+
+    impl<'b, 'h, const N: usize, R> embedded_svc::io::Io for ResponseImpl<'b, 'h, N, R>
+    where
+        R: Io,
+    {
+        type Error = R::Error;
+    }
+
+    impl<'b, 'h, const N: usize, R> embedded_svc::io::asynch::Read for ResponseImpl<'b, 'h, N, R>
+    where
+        'b: 'h,
+        R: Read,
+    {
+        type ReadFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<usize, Self::Error>>;
+
+        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+            async move { Ok(self.body.read(buf).await?) }
+        }
+    }
+
+    impl<'b, 'h, const N: usize, R> embedded_svc::http::client::asynch::Response
+        for ResponseImpl<'b, 'h, N, R>
+    where
+        'b: 'h,
+        R: Read,
+    {
+        type Headers = super::Response<'b, 'h, N>;
+
+        type Body = super::Body<'b, R>;
+
+        fn split(self) -> (Self::Headers, Self::Body)
+        where
+            Self: Sized,
+        {
+            (self.response, self.body)
+        }
     }
 }

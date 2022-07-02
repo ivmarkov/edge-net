@@ -354,6 +354,10 @@ impl<'a> SendHeaders<'a> {
         &self.buf[..self.len]
     }
 
+    pub(crate) fn release(self) -> &'a mut [u8] {
+        self.buf
+    }
+
     fn set_at(&mut self, value: &[u8], start: usize, end: usize) {
         self.shift(end, start + value.len());
         self.buf[start..start + value.len()].copy_from_slice(value);
