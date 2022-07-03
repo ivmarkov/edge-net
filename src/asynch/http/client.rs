@@ -226,7 +226,7 @@ mod embedded_svc_compat {
         fn request<'a>(
             &'a mut self,
             method: embedded_svc::http::Method,
-            uri: &str,
+            uri: &'a str,
         ) -> Self::RequestFuture<'a> {
             // TODO: Logic to recycle the existing connection if it is still open and is for the same host
             self.connection = None;
@@ -239,18 +239,13 @@ mod embedded_svc_compat {
                         .connect("1.1.1.1:80".parse().unwrap())
                         .await?,
                 );
-                // let connection: <T as TcpClient>::TcpConnection<'a> = self
-                //     .tcp_client
-                //     .connect("1.1.1.1:80".parse().unwrap())
-                //     .await?;
 
                 Ok(Self::Request::new(
                     method,
-                    "",
+                    uri,
                     &mut self.buf,
                     self.connection.as_mut().unwrap(),
                 ))
-                //todo!()
             }
         }
     }
