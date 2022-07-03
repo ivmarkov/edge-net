@@ -185,7 +185,7 @@ mod embedded_svc_compat {
         T: TcpClient + 'b,
     {
         buf: &'b mut [u8],
-        tcp_client: &'b mut T,
+        tcp_client: T,
         connection: Option<T::TcpConnection<'b>>,
     }
 
@@ -193,7 +193,7 @@ mod embedded_svc_compat {
     where
         T: TcpClient + 'b,
     {
-        pub fn new(buf: &'b mut [u8], tcp_client: &'b mut T) -> Self {
+        pub fn new(buf: &'b mut [u8], tcp_client: T) -> Self {
             Self {
                 buf,
                 tcp_client,
@@ -233,21 +233,14 @@ mod embedded_svc_compat {
 
             async move {
                 // TODO: We need a no_std URI parser
-                //self.connection = Some(self.tcp_client.connect("1.1.1.1:80".parse().unwrap()).await?);
-                // let connection: <T as TcpClient>::TcpConnection<'a> = self
-                //     .tcp_client
-                //     .connect("1.1.1.1:80".parse().unwrap())
-                //     .await?;
 
-                //let resp_headers: &'a mut super::Headers<'b, N> = &mut self.resp_headers;
-                let connection: Option<<T as TcpClient>::TcpConnection<'a>> = None;
+                // self.connection = Some(tcp_client.connect("1.1.1.1:80".parse().unwrap()).await?);
+                let connection: <T as TcpClient>::TcpConnection<'a> = self
+                    .tcp_client
+                    .connect("1.1.1.1:80".parse().unwrap())
+                    .await?;
 
-                Ok(Self::Request::new(
-                    method,
-                    "",
-                    &mut self.buf,
-                    connection.unwrap(),
-                ))
+                Ok(Self::Request::new(method, "", &mut self.buf, connection))
                 //todo!()
             }
         }
