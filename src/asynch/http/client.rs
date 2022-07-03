@@ -176,6 +176,7 @@ impl<'b, const N: usize> Response<'b, N> {
 mod embedded_svc_compat {
     use core::future::Future;
 
+    use embedded_svc::http::client::asynch::Method;
     use embedded_svc::io::asynch::{Io, Read, Write};
 
     use embedded_nal_async::TcpClient;
@@ -223,11 +224,7 @@ mod embedded_svc_compat {
             Self: 'a,
         = impl Future<Output = Result<Self::Request<'a>, Self::Error>>;
 
-        fn request<'a>(
-            &'a mut self,
-            method: embedded_svc::http::Method,
-            uri: &'a str,
-        ) -> Self::RequestFuture<'a> {
+        fn request<'a>(&'a mut self, method: Method, uri: &'a str) -> Self::RequestFuture<'a> {
             // TODO: Logic to recycle the existing connection if it is still open and is for the same host
             self.connection = None;
 
@@ -250,9 +247,43 @@ mod embedded_svc_compat {
         }
     }
 
-    impl From<embedded_svc::http::client::asynch::Method> for super::Method {
-        fn from(_: embedded_svc::http::client::asynch::Method) -> Self {
-            todo!()
+    impl From<Method> for super::Method {
+        fn from(method: Method) -> Self {
+            match method {
+                Method::Delete => super::Method::Delete,
+                Method::Get => super::Method::Get,
+                Method::Head => super::Method::Head,
+                Method::Post => super::Method::Post,
+                Method::Put => super::Method::Put,
+                Method::Connect => super::Method::Connect,
+                Method::Options => super::Method::Options,
+                Method::Trace => super::Method::Trace,
+                Method::Copy => super::Method::Copy,
+                Method::Lock => super::Method::Lock,
+                Method::MkCol => super::Method::MkCol,
+                Method::Move => super::Method::Move,
+                Method::Propfind => super::Method::Propfind,
+                Method::Proppatch => super::Method::Proppatch,
+                Method::Search => super::Method::Search,
+                Method::Unlock => super::Method::Unlock,
+                Method::Bind => super::Method::Bind,
+                Method::Rebind => super::Method::Rebind,
+                Method::Unbind => super::Method::Unbind,
+                Method::Acl => super::Method::Acl,
+                Method::Report => super::Method::Report,
+                Method::MkActivity => super::Method::MkActivity,
+                Method::Checkout => super::Method::Checkout,
+                Method::Merge => super::Method::Merge,
+                Method::MSearch => super::Method::MSearch,
+                Method::Notify => super::Method::Notify,
+                Method::Subscribe => super::Method::Subscribe,
+                Method::Unsubscribe => super::Method::Unsubscribe,
+                Method::Patch => super::Method::Patch,
+                Method::Purge => super::Method::Purge,
+                Method::MkCalendar => super::Method::MkCalendar,
+                Method::Link => super::Method::Link,
+                Method::Unlink => super::Method::Unlink,
+            }
         }
     }
 
