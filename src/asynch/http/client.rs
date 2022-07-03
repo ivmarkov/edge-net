@@ -182,7 +182,7 @@ mod embedded_svc_compat {
 
     pub struct Client<'b, const N: usize, T>
     where
-        T: TcpClient + 'b,
+        T: TcpClient<'b> + 'b,
     {
         buf: &'b mut [u8],
         tcp_client: T,
@@ -191,7 +191,7 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize, T> Client<'b, N, T>
     where
-        T: TcpClient + 'b,
+        T: TcpClient<'b>,
     {
         pub fn new(buf: &'b mut [u8], tcp_client: T) -> Self {
             Self {
@@ -204,19 +204,19 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize, T> embedded_svc::io::asynch::Io for Client<'b, N, T>
     where
-        T: TcpClient,
+        T: TcpClient<'b> + 'b,
     {
         type Error = T::Error;
     }
 
     impl<'b, const N: usize, T> embedded_svc::http::client::asynch::Client for Client<'b, N, T>
     where
-        T: TcpClient + 'b,
+        T: TcpClient<'b> + 'b,
     {
         type Request<'a>
         where
             Self: 'a,
-        = ClientRequest<'a, N, <T as TcpClient>::TcpConnection<'a>>;
+        = ClientRequest<'a, N, &'a mut <T as TcpClient<'b>>::TcpConnection<'b>>;
 
         type RequestFuture<'a>
         where
@@ -234,13 +234,22 @@ mod embedded_svc_compat {
             async move {
                 // TODO: We need a no_std URI parser
 
-                // self.connection = Some(tcp_client.connect("1.1.1.1:80".parse().unwrap()).await?);
-                let connection: <T as TcpClient>::TcpConnection<'a> = self
-                    .tcp_client
-                    .connect("1.1.1.1:80".parse().unwrap())
-                    .await?;
+                self.connection = Some(
+                    self.tcp_client
+                        .connect("1.1.1.1:80".parse().unwrap())
+                        .await?,
+                );
+                // let connection: <T as TcpClient>::TcpConnection<'a> = self
+                //     .tcp_client
+                //     .connect("1.1.1.1:80".parse().unwrap())
+                //     .await?;
 
-                Ok(Self::Request::new(method, "", &mut self.buf, connection))
+                Ok(Self::Request::new(
+                    method,
+                    "",
+                    &mut self.buf,
+                    self.connection.as_mut().unwrap(),
+                ))
                 //todo!()
             }
         }

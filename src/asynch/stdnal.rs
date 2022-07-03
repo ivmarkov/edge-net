@@ -23,7 +23,7 @@ impl Io for StdTcpClient {
     type Error = io::Error;
 }
 
-impl TcpClient for StdTcpClient {
+impl TcpClient<'static> for StdTcpClient {
     type TcpConnection<'m>
     where
         Self: 'm,
