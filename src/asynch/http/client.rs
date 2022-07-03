@@ -243,7 +243,7 @@ mod embedded_svc_compat {
                 Ok(Self::Request::new(
                     method,
                     uri,
-                    &mut self.buf,
+                    self.buf,
                     self.connection.as_mut().unwrap(),
                 ))
             }
@@ -331,7 +331,7 @@ mod embedded_svc_compat {
         {
             use embedded_svc::http::client::asynch::RequestWrite;
 
-            async move { Ok(self.into_writer().await?.into_response().await?) }
+            async move { self.into_writer().await?.into_response().await }
         }
     }
 
@@ -365,7 +365,7 @@ mod embedded_svc_compat {
             Self: 'a,
         = T::FlushFuture<'a>;
 
-        fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+        fn flush(&mut self) -> Self::FlushFuture<'_> {
             self.io.flush()
         }
     }
@@ -451,7 +451,7 @@ mod embedded_svc_compat {
         = impl Future<Output = Result<usize, Self::Error>>;
 
         fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-            async move { Ok(self.body.read(buf).await?) }
+            async move { self.body.read(buf).await }
         }
     }
 
