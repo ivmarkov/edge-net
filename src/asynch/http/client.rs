@@ -179,45 +179,40 @@ mod embedded_svc_compat {
     use embedded_svc::http::client::asynch::Method;
     use embedded_svc::io::asynch::{Io, Read, Write};
 
-    use embedded_nal_async::TcpClient;
+    use embedded_nal_async::TcpClientSocket;
 
     pub struct Client<'b, const N: usize, T>
     where
-        T: TcpClient + 'b,
+        T: TcpClientSocket + 'b,
     {
         buf: &'b mut [u8],
         tcp_client: T,
-        connection: Option<T::TcpConnection<'b>>,
     }
 
     impl<'b, const N: usize, T> Client<'b, N, T>
     where
-        T: TcpClient + 'b,
+        T: TcpClientSocket + 'b,
     {
         pub fn new(buf: &'b mut [u8], tcp_client: T) -> Self {
-            Self {
-                buf,
-                tcp_client,
-                connection: None,
-            }
+            Self { buf, tcp_client }
         }
     }
 
     impl<'b, const N: usize, T> embedded_svc::io::asynch::Io for Client<'b, N, T>
     where
-        T: TcpClient + 'b,
+        T: TcpClientSocket + 'b,
     {
         type Error = T::Error;
     }
 
     impl<'b, const N: usize, T> embedded_svc::http::client::asynch::Client for Client<'b, N, T>
     where
-        T: TcpClient + 'b,
+        T: TcpClientSocket + 'b,
     {
         type Request<'a>
         where
             Self: 'a,
-        = ClientRequest<'a, N, <T as TcpClient>::TcpConnection<'a>>;
+        = ClientRequest<'a, N, &'a mut T>;
 
         type RequestFuture<'a>
         where
@@ -226,24 +221,18 @@ mod embedded_svc_compat {
 
         fn request<'a>(&'a mut self, method: Method, uri: &'a str) -> Self::RequestFuture<'a> {
             async move {
-                // TODO: Logic to recycle the existing connection if it is still open and is for the same host
-                self.connection = None;
-
                 // TODO: We need a no_std URI parser
 
-                // TODO: This caching does not really work due to `self.connection` having a lifetime of 'a (as it holds an `&'a mut` reference to `self.tcp_client`)
-                // self.connection = Some(
-                //     self.tcp_client
-                //         .connect("1.1.1.1:80".parse().unwrap())
-                //         .await?,
-                // );
-
-                let connection = self
-                    .tcp_client
+                self.tcp_client
                     .connect("1.1.1.1:80".parse().unwrap())
                     .await?;
 
-                Ok(Self::Request::new(method, uri, self.buf, connection))
+                Ok(Self::Request::new(
+                    method,
+                    uri,
+                    self.buf,
+                    &mut self.tcp_client,
+                ))
             }
         }
     }
