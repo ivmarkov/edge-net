@@ -179,22 +179,23 @@ mod embedded_svc_compat {
     use embedded_svc::http::client::asynch::Method;
     use embedded_svc::io::asynch::{Io, Read, Write};
 
-    use embedded_nal_async::TcpClientSocket;
+    use embedded_nal_async::{SocketAddr, TcpClientSocket};
 
     pub struct Client<'b, const N: usize, T>
     where
         T: TcpClientSocket + 'b,
     {
         buf: &'b mut [u8],
-        tcp_client: T,
+        socket: T,
+        addr: SocketAddr,
     }
 
     impl<'b, const N: usize, T> Client<'b, N, T>
     where
         T: TcpClientSocket + 'b,
     {
-        pub fn new(buf: &'b mut [u8], tcp_client: T) -> Self {
-            Self { buf, tcp_client }
+        pub fn new(buf: &'b mut [u8], socket: T, addr: SocketAddr) -> Self {
+            Self { buf, socket, addr }
         }
     }
 
@@ -221,18 +222,13 @@ mod embedded_svc_compat {
 
         fn request<'a>(&'a mut self, method: Method, uri: &'a str) -> Self::RequestFuture<'a> {
             async move {
-                // TODO: We need a no_std URI parser
+                if !self.socket.is_connected() {
+                    // TODO: Need to validate that the socket is still alive
 
-                self.tcp_client
-                    .connect("1.1.1.1:80".parse().unwrap())
-                    .await?;
+                    self.socket.connect(self.addr).await?;
+                }
 
-                Ok(Self::Request::new(
-                    method,
-                    uri,
-                    self.buf,
-                    &mut self.tcp_client,
-                ))
+                Ok(Self::Request::new(method, uri, self.buf, &mut self.socket))
             }
         }
     }
