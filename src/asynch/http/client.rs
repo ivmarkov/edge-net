@@ -183,7 +183,7 @@ mod embedded_svc_compat {
 
     pub struct Client<'b, const N: usize, T>
     where
-        T: TcpClient<'b> + 'b,
+        T: TcpClient + 'b,
     {
         buf: &'b mut [u8],
         tcp_client: T,
@@ -192,7 +192,7 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize, T> Client<'b, N, T>
     where
-        T: TcpClient<'b>,
+        T: TcpClient + 'b,
     {
         pub fn new(buf: &'b mut [u8], tcp_client: T) -> Self {
             Self {
@@ -205,19 +205,19 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize, T> embedded_svc::io::asynch::Io for Client<'b, N, T>
     where
-        T: TcpClient<'b> + 'b,
+        T: TcpClient + 'b,
     {
         type Error = T::Error;
     }
 
     impl<'b, const N: usize, T> embedded_svc::http::client::asynch::Client for Client<'b, N, T>
     where
-        T: TcpClient<'b> + 'b,
+        T: TcpClient + 'b,
     {
         type Request<'a>
         where
             Self: 'a,
-        = ClientRequest<'a, N, &'a mut <T as TcpClient<'b>>::TcpConnection<'b>>;
+        = ClientRequest<'a, N, <T as TcpClient>::TcpConnection<'a>>;
 
         type RequestFuture<'a>
         where
@@ -225,24 +225,25 @@ mod embedded_svc_compat {
         = impl Future<Output = Result<Self::Request<'a>, Self::Error>>;
 
         fn request<'a>(&'a mut self, method: Method, uri: &'a str) -> Self::RequestFuture<'a> {
-            // TODO: Logic to recycle the existing connection if it is still open and is for the same host
-            self.connection = None;
-
             async move {
+                // TODO: Logic to recycle the existing connection if it is still open and is for the same host
+                self.connection = None;
+
                 // TODO: We need a no_std URI parser
 
-                self.connection = Some(
-                    self.tcp_client
-                        .connect("1.1.1.1:80".parse().unwrap())
-                        .await?,
-                );
+                // TODO: This caching does not really work due to `self.connection` having a lifetime of 'a (as it holds an `&'a mut` reference to `self.tcp_client`)
+                // self.connection = Some(
+                //     self.tcp_client
+                //         .connect("1.1.1.1:80".parse().unwrap())
+                //         .await?,
+                // );
 
-                Ok(Self::Request::new(
-                    method,
-                    uri,
-                    self.buf,
-                    self.connection.as_mut().unwrap(),
-                ))
+                let connection = self
+                    .tcp_client
+                    .connect("1.1.1.1:80".parse().unwrap())
+                    .await?;
+
+                Ok(Self::Request::new(method, uri, self.buf, connection))
             }
         }
     }

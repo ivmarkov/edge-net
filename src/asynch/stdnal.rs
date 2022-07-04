@@ -23,7 +23,7 @@ impl Io for StdTcpClient {
     type Error = io::Error;
 }
 
-impl TcpClient<'static> for StdTcpClient {
+impl TcpClient for StdTcpClient {
     type TcpConnection<'m>
     where
         Self: 'm,
@@ -32,7 +32,7 @@ impl TcpClient<'static> for StdTcpClient {
     type ConnectFuture<'m>
     where
         Self: 'm,
-    = impl Future<Output = Result<Self::TcpConnection<'static>, Self::Error>> + 'm;
+    = impl Future<Output = Result<Self::TcpConnection<'m>, Self::Error>> + 'm;
 
     fn connect(&mut self, remote: embedded_nal_async::SocketAddr) -> Self::ConnectFuture<'_> {
         async move {
