@@ -222,7 +222,7 @@ mod embedded_svc_compat {
 
         fn request<'a>(&'a mut self, method: Method, uri: &'a str) -> Self::RequestFuture<'a> {
             async move {
-                if !self.socket.is_connected() {
+                if !self.socket.is_connected().await? {
                     // TODO: Need to validate that the socket is still alive
 
                     self.socket.connect(self.addr).await?;

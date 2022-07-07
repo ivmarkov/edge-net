@@ -1,7 +1,7 @@
 use std::net::TcpStream;
 use std::{io, net::ToSocketAddrs};
 
-use core::future::Future;
+use core::future::{ready, Future};
 
 use async_io::Async;
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
@@ -9,44 +9,7 @@ use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 use embedded_io::asynch::{Read, Write};
 use embedded_io::Io;
 
-use embedded_nal_async::{TcpClient, TcpClientSocket};
-
-pub struct StdTcpClient(());
-
-impl StdTcpClient {
-    pub const fn new() -> Self {
-        Self(())
-    }
-}
-
-impl Io for StdTcpClient {
-    type Error = io::Error;
-}
-
-impl TcpClient for StdTcpClient {
-    type TcpConnection<'m>
-    where
-        Self: 'm,
-    = StdTcpConnection;
-
-    type ConnectFuture<'m>
-    where
-        Self: 'm,
-    = impl Future<Output = Result<Self::TcpConnection<'m>, Self::Error>> + 'm;
-
-    fn connect(&mut self, remote: embedded_nal_async::SocketAddr) -> Self::ConnectFuture<'_> {
-        async move {
-            Async::<TcpStream>::connect(
-                format!("{}:{}", remote.ip(), remote.port())
-                    .to_socket_addrs()?
-                    .next()
-                    .unwrap(),
-            )
-            .await
-            .map(StdTcpConnection)
-        }
-    }
-}
+use embedded_nal_async::TcpClientSocket;
 
 pub struct StdTcpConnection(Async<TcpStream>);
 
@@ -103,6 +66,11 @@ impl TcpClientSocket for StdTcpClientSocket {
         Self: 'm,
     = impl Future<Output = Result<(), Self::Error>>;
 
+    type IsConnectedFuture<'m>
+    where
+        Self: 'm,
+    = impl Future<Output = Result<bool, Self::Error>>;
+
     fn connect(&mut self, remote: embedded_nal_async::SocketAddr) -> Self::ConnectFuture<'_> {
         async move {
             self.disconnect()?;
@@ -121,14 +89,14 @@ impl TcpClientSocket for StdTcpClientSocket {
         }
     }
 
+    fn is_connected(&mut self) -> Self::IsConnectedFuture<'_> {
+        ready(Ok(self.0.is_some()))
+    }
+
     fn disconnect(&mut self) -> Result<(), Self::Error> {
         self.0 = None;
 
         Ok(())
-    }
-
-    fn is_connected(&self) -> bool {
-        self.0.is_some()
     }
 }
 
