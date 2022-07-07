@@ -103,14 +103,9 @@ impl TcpClientSocket for StdTcpClientSocket {
         Self: 'm,
     = impl Future<Output = Result<(), Self::Error>>;
 
-    type DisconnectFuture<'m>
-    where
-        Self: 'm,
-    = impl Future<Output = Result<(), Self::Error>>;
-
     fn connect(&mut self, remote: embedded_nal_async::SocketAddr) -> Self::ConnectFuture<'_> {
         async move {
-            self.disconnect().await?;
+            self.disconnect()?;
 
             self.0 = Some(
                 Async::<TcpStream>::connect(
@@ -126,16 +121,10 @@ impl TcpClientSocket for StdTcpClientSocket {
         }
     }
 
-    fn disconnect(&mut self) -> Self::DisconnectFuture<'_> {
-        async move {
-            if let Some(socket) = self.0.as_mut() {
-                socket.flush().await?;
-            }
+    fn disconnect(&mut self) -> Result<(), Self::Error> {
+        self.0 = None;
 
-            self.0 = None;
-
-            Ok(())
-        }
+        Ok(())
     }
 
     fn is_connected(&self) -> bool {

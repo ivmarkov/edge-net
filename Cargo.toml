@@ -26,6 +26,7 @@ embedded-nal-async = { git = "https://github.com/ivmarkov/embedded-nal", branch 
 #embedded-nal-async = { path = "../embedded-nal/embedded-nal-async" }
 #embedded-svc = { version = "0.22", default-features = false, optional = true }
 embedded-svc = { version = "0.22", git = "https://github.com/esp-rs/embedded-svc", optional = true }
+#embedded-svc = { version = "0.22", path = "../embedded-svc", optional = true }
 heapless = { version = "0.7", default-features = false }
 uncased = "0.9"
 httparse = "1.7"
