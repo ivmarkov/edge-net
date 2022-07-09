@@ -109,7 +109,7 @@ impl<'b> Response<'b> {
     }
 
     pub fn new(status: u16, message: Option<&str>, buf: &'b mut [u8]) -> Self {
-        let mut this = Self(SendHeaders::new(buf));
+        let mut this = Self(SendHeaders::new(buf, &[]));
 
         this.status(status, message);
 

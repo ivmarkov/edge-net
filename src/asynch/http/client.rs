@@ -33,12 +33,7 @@ impl<'b> Request<'b> {
     }
 
     pub fn new(method: Method, uri: &str, buf: &'b mut [u8]) -> Self {
-        let mut this = Self(SendHeaders::new(buf));
-
-        this.0
-            .set_status_tokens(&[method.as_str(), uri, "HTTP/1.1"]);
-
-        this
+        Self(SendHeaders::new(buf, &[method.as_str(), uri, "HTTP/1.1"]))
     }
 
     pub fn header(&mut self, name: &str, value: &str) -> &mut Self {
