@@ -1,8 +1,6 @@
 use embedded_io::asynch::{Read, Write};
 
-use embedded_nal_async::TcpClientSocket;
-
-use embedded_svc_impl::asynch::stdnal::StdTcpClientSocket;
+use embedded_svc_impl::asynch::{stdnal::StdTcpClientSocket, tcp::TcpClientSocket};
 
 fn main() {
     smol::block_on(read()).unwrap();

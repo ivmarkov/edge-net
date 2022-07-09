@@ -9,44 +9,7 @@ use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 use embedded_io::asynch::{Read, Write};
 use embedded_io::Io;
 
-use embedded_nal_async::TcpClientSocket;
-
-pub struct StdTcpConnection(Async<TcpStream>);
-
-impl Io for StdTcpConnection {
-    type Error = io::Error;
-}
-
-impl Read for StdTcpConnection {
-    type ReadFuture<'a>
-    where
-        Self: 'a,
-    = impl Future<Output = Result<usize, Self::Error>>;
-
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-        async move { self.0.read(buf).await }
-    }
-}
-
-impl Write for StdTcpConnection {
-    type WriteFuture<'a>
-    where
-        Self: 'a,
-    = impl Future<Output = Result<usize, Self::Error>>;
-
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-        async move { self.0.write(buf).await }
-    }
-
-    type FlushFuture<'a>
-    where
-        Self: 'a,
-    = impl Future<Output = Result<(), Self::Error>>;
-
-    fn flush(&mut self) -> Self::FlushFuture<'_> {
-        async move { self.0.flush().await }
-    }
-}
+use crate::asynch::tcp::TcpClientSocket;
 
 pub struct StdTcpClientSocket(Option<Async<TcpStream>>);
 

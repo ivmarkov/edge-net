@@ -274,13 +274,15 @@ impl<'a> Iterator for SendHeadersSplitter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let slice = &self.0[self.1..self.0.len()];
 
-        for (index, ch) in slice.iter().enumerate() {
-            if *ch == b'\r' && index < slice.len() - 1 && slice[index + 1] == b'\n' {
-                let result = (self.1, self.1 + index + 2);
+        if !slice.is_empty() {
+            for index in 0..slice.len() - 1 {
+                if &slice[index..index + 2] == &[13, 10] {
+                    let result = (self.1, self.1 + index + 2);
 
-                self.1 = result.1;
+                    self.1 = result.1;
 
-                return Some(result);
+                    return Some(result);
+                }
             }
         }
 
@@ -288,6 +290,7 @@ impl<'a> Iterator for SendHeadersSplitter<'a> {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct SendHeaders<'a> {
     buf: &'a mut [u8],
     len: usize,
@@ -350,7 +353,14 @@ impl<'a> SendHeaders<'a> {
         }
     }
 
-    pub(crate) fn payload(&self) -> &[u8] {
+    pub(crate) fn payload(&mut self) -> &[u8] {
+        self.buf[self.len] = b'\r';
+        self.buf[self.len + 1] = b'\n';
+
+        &self.buf[..self.len + 2]
+    }
+
+    pub(crate) fn raw_payload(&mut self) -> &[u8] {
         &self.buf[..self.len]
     }
 
@@ -425,4 +435,44 @@ impl<'a> SendHeaders<'a> {
 
         None
     }
+}
+
+#[test]
+fn test() {
+    fn compare_split(input: &str, outcome: &[&str]) {
+        let mut splitter = SendHeadersSplitter::new(input.as_bytes());
+        let mut outcome = outcome.iter();
+
+        loop {
+            let x = splitter.next();
+            let y = outcome.next();
+
+            assert_eq!(x.is_none(), y.is_none());
+
+            if let Some((start, end)) = x {
+                let x = &input[start..end];
+
+                assert_eq!(x, *y.unwrap());
+            } else {
+                break;
+            }
+        }
+    }
+
+    compare_split("", &[]);
+    compare_split("foo", &[]);
+    compare_split("foo\nbar\n", &[]);
+
+    compare_split("foo\r\nbar\n", &["foo\r\n"]);
+    compare_split("foo\r\nbar\n\r\r\n", &["foo\r\n", "bar\n\r\r\n"]);
+    compare_split(
+        "\r\n\r\nfoo\r\nbar\n\r\r\n\r\n",
+        &["\r\n", "\r\n", "foo\r\n", "bar\n\r\r\n", "\r\n"],
+    );
+
+    let mut buf = [0_u8; 1024];
+
+    let headers = SendHeaders::new(&mut buf);
+
+    compare_split(headers.payload())
 }

@@ -156,7 +156,7 @@ impl<'b> Response<'b> {
         self
     }
 
-    pub fn payload(&self) -> &[u8] {
+    pub fn payload(&mut self) -> &[u8] {
         self.0.payload()
     }
 }

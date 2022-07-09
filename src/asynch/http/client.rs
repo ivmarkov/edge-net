@@ -1,4 +1,4 @@
-use core::str;
+use core::{fmt::Display, str};
 
 use embedded_io::asynch::Read;
 
@@ -12,6 +12,7 @@ use super::*;
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
 
+#[derive(Debug)]
 pub struct Request<'b>(SendHeaders<'b>);
 
 impl<'b> Request<'b> {
@@ -35,7 +36,7 @@ impl<'b> Request<'b> {
         let mut this = Self(SendHeaders::new(buf));
 
         this.0
-            .set_status_tokens(&[method.as_str(), "HTTP/1.1", uri]);
+            .set_status_tokens(&[method.as_str(), uri, "HTTP/1.1"]);
 
         this
     }
@@ -68,7 +69,7 @@ impl<'b> Request<'b> {
         self.header("Transfer-Encoding", transfer_encoding)
     }
 
-    pub fn payload(&self) -> &[u8] {
+    pub fn payload(&mut self) -> &[u8] {
         self.0.payload()
     }
 
@@ -77,11 +78,12 @@ impl<'b> Request<'b> {
     }
 }
 
+#[derive(Debug)]
 pub struct Response<'b, const N: usize> {
-    pub version: Option<u8>,
-    pub code: Option<u16>,
-    pub reason: Option<&'b str>,
-    pub headers: [Header<'b>; N],
+    version: Option<u8>,
+    code: Option<u16>,
+    reason: Option<&'b str>,
+    headers: [Header<'b>; N],
 }
 
 impl<'b, const N: usize> Response<'b, N> {
@@ -172,6 +174,28 @@ impl<'b, const N: usize> Response<'b, N> {
     }
 }
 
+impl<'b, const N: usize> Display for Response<'b, N> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if let Some(version) = self.version {
+            write!(f, "Version {}\n", version)?;
+        }
+
+        if let Some(code) = self.code {
+            write!(f, "{} {}\n", code, self.reason.unwrap_or(""))?;
+        }
+
+        for (name, value) in self.headers() {
+            if name.is_empty() {
+                break;
+            }
+
+            write!(f, "{}: {}\n", name, value)?;
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
     use core::future::Future;
@@ -179,7 +203,139 @@ mod embedded_svc_compat {
     use embedded_svc::http::client::asynch::Method;
     use embedded_svc::io::asynch::{Io, Read, Write};
 
-    use embedded_nal_async::{SocketAddr, TcpClientSocket};
+    use embedded_nal_async::SocketAddr;
+
+    use crate::asynch::tcp::TcpClientSocket;
+
+    pub trait Close {
+        fn close(&mut self);
+    }
+
+    pub struct NoopClose<T>(T);
+
+    impl<T> NoopClose<T> {
+        pub const fn new(io: T) -> Self {
+            Self(io)
+        }
+    }
+
+    impl<T> Close for NoopClose<T> {
+        fn close(&mut self) {}
+    }
+
+    impl<T> Io for NoopClose<T>
+    where
+        T: Io,
+    {
+        type Error = T::Error;
+    }
+
+    impl<T> Read for NoopClose<T>
+    where
+        T: Read,
+    {
+        type ReadFuture<'a>
+        where
+            Self: 'a,
+        = T::ReadFuture<'a>;
+
+        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+            self.0.read(buf)
+        }
+    }
+
+    impl<T> Write for NoopClose<T>
+    where
+        T: Write,
+    {
+        type WriteFuture<'a>
+        where
+            Self: 'a,
+        = T::WriteFuture<'a>;
+
+        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+            self.0.write(buf)
+        }
+
+        type FlushFuture<'a>
+        where
+            Self: 'a,
+        = T::FlushFuture<'a>;
+
+        fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+            self.0.flush()
+        }
+    }
+
+    pub struct CloseableSocket<T>(T);
+
+    impl<T> Close for CloseableSocket<T>
+    where
+        T: TcpClientSocket,
+    {
+        fn close(&mut self) {
+            let _ = self.0.disconnect();
+        }
+    }
+
+    impl<T> Io for CloseableSocket<T>
+    where
+        T: Io,
+    {
+        type Error = T::Error;
+    }
+
+    impl<T> Read for CloseableSocket<T>
+    where
+        T: TcpClientSocket,
+    {
+        type ReadFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<usize, Self::Error>>;
+
+        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+            async move {
+                self.0.read(buf).await.map_err(|e| {
+                    self.close();
+                    e
+                })
+            }
+        }
+    }
+
+    impl<T> Write for CloseableSocket<T>
+    where
+        T: TcpClientSocket,
+    {
+        type WriteFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<usize, Self::Error>>;
+
+        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+            async move {
+                self.0.write(buf).await.map_err(|e| {
+                    self.close();
+                    e
+                })
+            }
+        }
+
+        type FlushFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<(), Self::Error>>;
+
+        fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+            async move {
+                self.0.flush().await.map_err(|e| {
+                    self.close();
+                    e
+                })
+            }
+        }
+    }
 
     pub struct Client<'b, const N: usize, T>
     where
@@ -213,7 +369,7 @@ mod embedded_svc_compat {
         type Request<'a>
         where
             Self: 'a,
-        = ClientRequest<'a, N, &'a mut T>;
+        = ClientRequest<'a, N, CloseableSocket<&'a mut T>>;
 
         type RequestFuture<'a>
         where
@@ -228,7 +384,12 @@ mod embedded_svc_compat {
                     self.socket.connect(self.addr).await?;
                 }
 
-                Ok(Self::Request::new(method, uri, self.buf, &mut self.socket))
+                Ok(Self::Request::new(
+                    method,
+                    uri,
+                    self.buf,
+                    CloseableSocket(&mut self.socket),
+                ))
             }
         }
     }
@@ -319,7 +480,7 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize, T> embedded_svc::http::client::asynch::Request for ClientRequest<'b, N, T>
     where
-        T: Read + Write,
+        T: Read + Write + Close,
     {
         type Write = ClientRequestWrite<'b, N, T>;
 
@@ -390,7 +551,7 @@ mod embedded_svc_compat {
     impl<'b, const N: usize, T> embedded_svc::http::client::asynch::RequestWrite
         for ClientRequestWrite<'b, N, T>
     where
-        T: Read + Write,
+        T: Read + Write + Close,
     {
         type Response = ClientResponse<'b, N, T>;
 
@@ -404,8 +565,12 @@ mod embedded_svc_compat {
                 self.io.flush().await?;
 
                 let (response, body) = super::Response::parse(self.io, self.buf).await.unwrap(); // TODO
+                let should_close = response.header("Connection") == Some("close");
 
-                Ok(Self::Response { response, body })
+                Ok(Self::Response {
+                    response,
+                    body: ClientResponseRead(body, should_close),
+                })
             }
         }
     }
@@ -428,7 +593,7 @@ mod embedded_svc_compat {
 
     pub struct ClientResponse<'b, const N: usize, R> {
         response: super::Response<'b, N>,
-        body: super::Body<'b, R>,
+        body: ClientResponseRead<'b, R>,
     }
 
     impl<'b, const N: usize, R> embedded_svc::http::client::asynch::Status
@@ -460,7 +625,7 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize, R> embedded_svc::io::asynch::Read for ClientResponse<'b, N, R>
     where
-        R: Read,
+        R: Read + Close,
     {
         type ReadFuture<'a>
         where
@@ -475,17 +640,48 @@ mod embedded_svc_compat {
     impl<'b, const N: usize, R> embedded_svc::http::client::asynch::Response
         for ClientResponse<'b, N, R>
     where
-        R: Read,
+        R: Read + Close,
     {
         type Headers = super::Response<'b, N>;
 
-        type Body = super::Body<'b, R>;
+        type Body = ClientResponseRead<'b, R>;
 
         fn split(self) -> (Self::Headers, Self::Body)
         where
             Self: Sized,
         {
             (self.response, self.body)
+        }
+    }
+
+    pub struct ClientResponseRead<'b, R>(super::Body<'b, R>, bool);
+
+    impl<'b, R> Io for ClientResponseRead<'b, R>
+    where
+        R: Io,
+    {
+        type Error = R::Error;
+    }
+
+    impl<'b, R> Read for ClientResponseRead<'b, R>
+    where
+        R: Read + Close,
+    {
+        type ReadFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<usize, Self::Error>>;
+
+        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+            async move {
+                let len = self.0.read(buf).await?;
+
+                if self.1 && len == 0 {
+                    self.0.input.close();
+                }
+
+                Ok(len)
+            }
         }
     }
 }
