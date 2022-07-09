@@ -41,6 +41,7 @@ where
 
     let (header, mut body) = request
         .header("Connection", "close")
+        .header("accept", "*")
         .content_len(0)
         .submit()
         .await?

@@ -306,10 +306,9 @@ impl<'a> SendHeaders<'a> {
             let new_end = tokens
                 .iter()
                 .map(|token| token.as_bytes().len())
-                .max()
-                .unwrap_or(0)
+                .sum::<usize>()
                 + max(tokens.len(), 1)
-                - 1;
+                + 1; /* last separator is not a single space but \r\n */
 
             self.shift(old_end, new_end);
 
@@ -317,19 +316,22 @@ impl<'a> SendHeaders<'a> {
             for (index, token) in tokens.iter().enumerate() {
                 let bytes = token.as_bytes();
 
-                self.buf[offset..bytes.len()].copy_from_slice(bytes);
+                self.buf[offset..offset + bytes.len()].copy_from_slice(bytes);
                 offset += bytes.len();
 
-                if index < tokens.len() {
+                if index < tokens.len() - 1 {
                     self.buf[offset] = b' ';
                     offset += 1;
                 }
             }
+
+            self.buf[offset] = b'\r';
+            self.buf[offset + 1] = b'\n';
         } else {
             for (index, token) in tokens.iter().enumerate() {
                 self.append(token.as_bytes());
 
-                if index < tokens.len() {
+                if index < tokens.len() - 1 {
                     self.append(b" ");
                 }
             }
@@ -360,7 +362,7 @@ impl<'a> SendHeaders<'a> {
         &self.buf[..self.len + 2]
     }
 
-    pub(crate) fn raw_payload(&mut self) -> &[u8] {
+    pub(crate) fn raw_payload(&self) -> &[u8] {
         &self.buf[..self.len]
     }
 
@@ -429,7 +431,7 @@ impl<'a> SendHeaders<'a> {
 
         for (index, ch) in slice.iter().enumerate() {
             if *ch == b':' {
-                return Some(index + 1);
+                return Some(start + index + 1);
             }
         }
 
@@ -440,19 +442,35 @@ impl<'a> SendHeaders<'a> {
 #[test]
 fn test() {
     fn compare_split(input: &str, outcome: &[&str]) {
-        let mut splitter = SendHeadersSplitter::new(input.as_bytes());
-        let mut outcome = outcome.iter();
+        compare_split_buf(input.as_bytes(), outcome);
+    }
+
+    fn compare_split_buf(input: &[u8], outcome: &[&str]) {
+        let mut splitter = SendHeadersSplitter::new(input);
+        let mut outcome_splitter = outcome.iter();
 
         loop {
             let x = splitter.next();
-            let y = outcome.next();
+            let y = outcome_splitter.next();
 
-            assert_eq!(x.is_none(), y.is_none());
+            assert_eq!(
+                x.is_none(),
+                y.is_none(),
+                "Buf is {}, outcome is: {:?}",
+                unsafe { str::from_utf8_unchecked(input) },
+                outcome
+            );
 
             if let Some((start, end)) = x {
-                let x = &input[start..end];
+                let x = unsafe { str::from_utf8_unchecked(&input[start..end]) };
 
-                assert_eq!(x, *y.unwrap());
+                assert_eq!(
+                    x,
+                    *y.unwrap(),
+                    "Buf is {}, outcome is: {:?}",
+                    unsafe { str::from_utf8_unchecked(input) },
+                    outcome
+                );
             } else {
                 break;
             }
@@ -472,7 +490,43 @@ fn test() {
 
     let mut buf = [0_u8; 1024];
 
-    let headers = SendHeaders::new(&mut buf);
+    let mut headers = SendHeaders::new(&mut buf);
+    compare_split_buf(headers.raw_payload(), &[]);
 
-    compare_split(headers.payload())
+    headers.set_status_tokens(&["GET", "/ip", "HTTP/1.1"]);
+    compare_split_buf(headers.raw_payload(), &["GET /ip HTTP/1.1\r\n"]);
+
+    headers.set_status_tokens(&["GET", "/", "HTTP/1.1"]);
+    compare_split_buf(headers.raw_payload(), &["GET / HTTP/1.1\r\n"]);
+
+    headers.set("Content-Length", "42");
+    headers.set("Content-Type", "text/html");
+    compare_split_buf(
+        headers.raw_payload(),
+        &[
+            "GET / HTTP/1.1\r\n",
+            "Content-Length:42\r\n",
+            "Content-Type:text/html\r\n",
+        ],
+    );
+
+    headers.set("Content-Length", "0");
+    compare_split_buf(
+        headers.raw_payload(),
+        &[
+            "GET / HTTP/1.1\r\n",
+            "Content-Length:0\r\n",
+            "Content-Type:text/html\r\n",
+        ],
+    );
+
+    headers.set("Content-Length", "65536");
+    compare_split_buf(
+        headers.raw_payload(),
+        &[
+            "GET / HTTP/1.1\r\n",
+            "Content-Length:65536\r\n",
+            "Content-Type:text/html\r\n",
+        ],
+    );
 }
