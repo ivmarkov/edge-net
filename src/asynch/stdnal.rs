@@ -8,6 +8,7 @@ use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 
 use embedded_io::asynch::{Read, Write};
 use embedded_io::Io;
+use no_std_net::SocketAddr;
 
 use crate::asynch::tcp::TcpClientSocket;
 use crate::close::Close;
@@ -41,7 +42,7 @@ impl TcpClientSocket for StdTcpClientSocket {
         Self: 'm,
     = impl Future<Output = Result<bool, Self::Error>>;
 
-    fn connect(&mut self, remote: embedded_nal_async::SocketAddr) -> Self::ConnectFuture<'_> {
+    fn connect(&mut self, remote: SocketAddr) -> Self::ConnectFuture<'_> {
         async move {
             self.disconnect()?;
 
