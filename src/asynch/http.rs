@@ -602,11 +602,9 @@ where
     // Consume and discard current chunk extension.
     // This doesn't check whether the characters up to CRLF actually have correct syntax.
     async fn consume_ext(&mut self) -> Result<(), Error<R::Error>> {
-        loop {
-            if self.input_fetch().await? == b'\r' {
-                return self.consume(b'\n').await;
-            }
-        }
+        self.consume_header().await?;
+
+        Ok(())
     }
 
     // Consume and discard the optional trailer following the last chunk.
