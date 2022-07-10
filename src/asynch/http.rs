@@ -1,5 +1,5 @@
 use core::cmp::{max, min, Ordering};
-use core::fmt::Display;
+use core::fmt::{Display, Write as _};
 use core::future::Future;
 use core::str;
 
@@ -13,14 +13,16 @@ use crate::close::Close;
 pub mod client;
 pub mod server;
 
-/// An error in parsing.
+/// An error in parsing the headers or the body.
 #[derive(Debug)]
 pub enum Error<E> {
     InvalidHeaders,
+    InvalidBody,
     TooManyHeaders,
     TooLongHeaders,
     TooLongBody,
-    Incomplete,
+    IncompleteHeaders,
+    IncompleteBody,
     Io(E),
 }
 
@@ -57,12 +59,14 @@ where
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::InvalidHeaders => write!(f, "Invalid HTTP headers or status line"),
+            Self::InvalidBody => write!(f, "Invalid HTTP body"),
             Self::TooManyHeaders => write!(f, "Too many HTTP headers"),
             Self::TooLongHeaders => {
                 write!(f, "HTTP headers section is too long")
             }
             Self::TooLongBody => write!(f, "HTTP body is too long"),
-            Self::Incomplete => write!(f, "HTTP headers section is incomplete"),
+            Self::IncompleteHeaders => write!(f, "HTTP headers section is incomplete"),
+            Self::IncompleteBody => write!(f, "HTTP body is incomplete"),
             Self::Io(e) => write!(f, "{}", e),
         }
     }
@@ -280,13 +284,16 @@ impl<'b, const N: usize> Default for Headers<'b, N> {
     }
 }
 
-pub enum Body<R> {
+pub enum Body<'b, R> {
     Close(R),
     ContentLen(ContentLenRead<R>),
-    Chunked(ChunkedRead<R>),
+    Chunked(ChunkedRead<'b, R>),
 }
 
-impl<R> Body<R> {
+impl<'b, R> Body<'b, R>
+where
+    R: Read,
+{
     pub fn is_complete(&self) -> bool {
         match self {
             Self::Close(_) => true,
@@ -304,14 +311,14 @@ impl<R> Body<R> {
     }
 }
 
-impl<R> Io for Body<R>
+impl<'b, R> Io for Body<'b, R>
 where
     R: Io,
 {
     type Error = Error<R::Error>;
 }
 
-impl<R> Close for Body<R>
+impl<'b, R> Close for Body<'b, R>
 where
     R: Close,
 {
@@ -324,7 +331,7 @@ where
     }
 }
 
-impl<R> Read for Body<R>
+impl<'b, R> Read for Body<'b, R>
 where
     R: Read + Close,
 {
@@ -465,34 +472,207 @@ where
     }
 }
 
-pub struct ChunkedRead<R> {
-    read_len: usize,
-    content_len: usize,
+pub struct ChunkedRead<'b, R> {
+    buf: &'b mut [u8],
+    buf_offset: usize,
+    buf_len: usize,
     input: R,
+    remain: u64,
+    complete: bool,
 }
 
-impl<R> ChunkedRead<R> {
-    pub const fn new(input: R) -> Self {
+impl<'b, R> ChunkedRead<'b, R>
+where
+    R: Read,
+{
+    pub fn new(input: R, buf: &'b mut [u8], buf_len: usize) -> Self {
         Self {
-            read_len: 0,
-            content_len: 0,
+            buf,
+            buf_offset: 0,
+            buf_len,
             input,
+            remain: 0,
+            complete: false,
         }
     }
 
     pub fn is_complete(&self) -> bool {
-        self.content_len == self.read_len
+        self.complete
+    }
+
+    // The elegant push parser taken from here:
+    // https://github.com/kchmck/uhttp_chunked_bytes.rs/blob/master/src/lib.rs
+    // Changes:
+    // - Converted to async
+    // - Iterators removed
+    // - Simpler error handling
+    // - Consumption of trailer
+    async fn next(&mut self) -> Result<Option<u8>, Error<R::Error>> {
+        if self.complete {
+            return Ok(None);
+        }
+
+        if self.remain == 0 {
+            if let Some(size) = self.parse_size().await? {
+                // If chunk size is zero (final chunk), the stream is finished [RFC7230§4.1].
+                if size == 0 {
+                    self.consume_trailer().await?;
+                    self.complete = true;
+                    return Ok(None);
+                }
+
+                self.remain = size;
+            } else {
+                self.complete = true;
+                return Ok(None);
+            }
+        }
+
+        let next = self.input_next().await?;
+        self.remain -= 1;
+
+        // If current chunk is finished, verify it ends with CRLF [RFC7230§4.1].
+        if self.remain == 0 {
+            self.consume_multi(b"\r\n").await?;
+        }
+
+        Ok(next)
+    }
+
+    // Parse the number of bytes in the next chunk.
+    async fn parse_size(&mut self) -> Result<Option<u64>, Error<R::Error>> {
+        let mut digits = [0_u8; 16];
+
+        let slice = match self.parse_digits(&mut digits[..]).await? {
+            // This is safe because the following call to `from_str_radix` does
+            // its own verification on the bytes.
+            Some(s) => unsafe { std::str::from_utf8_unchecked(s) },
+            None => return Ok(None),
+        };
+
+        let size = u64::from_str_radix(slice, 16).map_err(|_| Error::InvalidBody)?;
+
+        Ok(Some(size))
+    }
+
+    // Extract the hex digits for the current chunk size.
+    async fn parse_digits<'a>(
+        &mut self,
+        digits: &'a mut [u8],
+    ) -> Result<Option<&'a [u8]>, Error<R::Error>> {
+        // Number of hex digits that have been extracted.
+        let mut len = 0;
+
+        loop {
+            let b = match self.input_next().await? {
+                Some(b) => b,
+                None => {
+                    return if len == 0 {
+                        // If EOF at the beginning of a new chunk, the stream is finished.
+                        Ok(None)
+                    } else {
+                        Err(Error::IncompleteBody)
+                    };
+                }
+            };
+
+            match b {
+                b'\r' => {
+                    self.consume(b'\n').await?;
+                    break;
+                }
+                b';' => {
+                    self.consume_ext().await?;
+                    break;
+                }
+                _ => {
+                    match digits.get_mut(len) {
+                        Some(d) => *d = b,
+                        None => return Err(Error::InvalidBody),
+                    }
+
+                    len += 1;
+                }
+            }
+        }
+
+        Ok(Some(&digits[..len]))
+    }
+
+    // Consume and discard current chunk extension.
+    // This doesn't check whether the characters up to CRLF actually have correct syntax.
+    async fn consume_ext(&mut self) -> Result<(), Error<R::Error>> {
+        loop {
+            if self.input_fetch().await? == b'\r' {
+                return self.consume(b'\n').await;
+            }
+        }
+    }
+
+    // Consume and discard the optional trailer following the last chunk.
+    async fn consume_trailer(&mut self) -> Result<(), Error<R::Error>> {
+        while self.consume_header().await? {}
+
+        Ok(())
+    }
+
+    // Consume and discard each header in the optional trailer following the last chunk.
+    async fn consume_header(&mut self) -> Result<bool, Error<R::Error>> {
+        let mut first = self.input_fetch().await?;
+        let mut len = 1;
+
+        loop {
+            let second = self.input_fetch().await?;
+            len += 1;
+
+            if first == b'\r' && second == b'\n' {
+                return Ok(len > 2);
+            }
+
+            first = second;
+        }
+    }
+
+    // Verify the next bytes in the stream match the expectation.
+    async fn consume_multi(&mut self, bytes: &[u8]) -> Result<(), Error<R::Error>> {
+        for byte in bytes {
+            self.consume(*byte).await?;
+        }
+
+        Ok(())
+    }
+
+    // Verify the next byte in the stream is matching the expectation.
+    async fn consume(&mut self, byte: u8) -> Result<(), Error<R::Error>> {
+        if self.input_fetch().await? == byte {
+            Ok(())
+        } else {
+            Err(Error::InvalidBody)
+        }
+    }
+
+    async fn input_fetch(&mut self) -> Result<u8, Error<R::Error>> {
+        self.input_next().await?.ok_or(Error::IncompleteBody)
+    }
+
+    async fn input_next(&mut self) -> Result<Option<u8>, Error<R::Error>> {
+        if self.buf_offset == self.buf_len {
+            self.buf_len = self.input.read(self.buf).await.map_err(Error::Io)?;
+            self.buf_offset = 0;
+        }
+
+        if self.buf_len > 0 {
+            let byte = self.buf[self.buf_offset];
+            self.buf_offset += 1;
+
+            Ok(Some(byte))
+        } else {
+            Ok(None)
+        }
     }
 }
 
-impl<R> Io for ChunkedRead<R>
-where
-    R: Io,
-{
-    type Error = Error<R::Error>;
-}
-
-impl<R> Close for ChunkedRead<R>
+impl<'b, R> Close for ChunkedRead<'b, R>
 where
     R: Close,
 {
@@ -501,7 +681,14 @@ where
     }
 }
 
-impl<R> Read for ChunkedRead<R>
+impl<'b, R> Io for ChunkedRead<'b, R>
+where
+    R: Io,
+{
+    type Error = Error<R::Error>;
+}
+
+impl<'b, R> Read for ChunkedRead<'b, R>
 where
     R: Read,
 {
@@ -512,15 +699,15 @@ where
 
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
         async move {
-            let len = min(buf.len(), self.content_len - self.read_len);
-            if len > 0 {
-                let read = self.input.read(&mut buf[..len]).await.map_err(Error::Io)?;
-                self.read_len += read;
-
-                Ok(read)
-            } else {
-                Ok(0)
+            for (index, byte_pos) in buf.iter_mut().enumerate() {
+                if let Some(byte) = self.next().await? {
+                    *byte_pos = byte;
+                } else {
+                    return Ok(index);
+                }
             }
+
+            Ok(buf.len())
         }
     }
 }
@@ -818,10 +1005,22 @@ pub enum SendBody<W> {
 impl<W> SendBody<W> {
     pub fn is_complete(&self) -> bool {
         match self {
-            Self::Close(_) => true,
             Self::ContentLen(w) => w.is_complete(),
-            Self::Chunked(w) => w.is_complete(),
+            _ => true,
         }
+    }
+
+    pub async fn finish(&mut self) -> Result<(), Error<W::Error>>
+    where
+        W: Write,
+    {
+        match self {
+            Self::Close(_) => (),
+            Self::ContentLen(_) => (),
+            Self::Chunked(w) => w.finish().await?,
+        }
+
+        Ok(())
     }
 
     pub fn as_raw_writer(&mut self) -> &mut W {
@@ -977,8 +1176,11 @@ impl<W> ChunkedWrite<W> {
         Self { output }
     }
 
-    pub fn is_complete(&self) -> bool {
-        false // TODO
+    pub async fn finish(&mut self) -> Result<(), Error<W::Error>>
+    where
+        W: Write,
+    {
+        self.output.write_all(b"\r\n").await.map_err(Error::Io)
     }
 
     pub fn release(self) -> W {
@@ -1012,7 +1214,26 @@ where
     = impl Future<Output = Result<usize, Self::Error>>;
 
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-        async move { self.output.write(buf).await.map_err(Error::Io) }
+        async move {
+            if !buf.is_empty() {
+                let mut len_str = heapless::String::<10>::new();
+                write!(&mut len_str, "{:X}\r\n", buf.len()).unwrap();
+                self.output
+                    .write_all(len_str.as_bytes())
+                    .await
+                    .map_err(Error::Io)?;
+
+                self.output.write_all(buf).await.map_err(Error::Io)?;
+                self.output
+                    .write_all("\r\n".as_bytes())
+                    .await
+                    .map_err(Error::Io)?;
+
+                Ok(buf.len())
+            } else {
+                Ok(0)
+            }
+        }
     }
 
     type FlushFuture<'a>
@@ -1028,7 +1249,7 @@ where
 pub async fn receive_headers<const N: usize, R>(
     mut input: R,
     buf: &mut [u8],
-) -> Result<usize, Error<R::Error>>
+) -> Result<(usize, usize), Error<R::Error>>
 where
     R: Read,
 {
@@ -1045,8 +1266,8 @@ where
         let mut http_response = httparse::Response::new(&mut headers);
 
         let status = http_response.parse(&buf[..size])?;
-        if let httparse::Status::Complete(_) = status {
-            return Ok(size);
+        if let httparse::Status::Complete(response_len) = status {
+            return Ok((size, response_len));
         }
     }
 

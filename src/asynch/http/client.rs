@@ -76,11 +76,11 @@ where
 pub async fn receive<'b, const N: usize, R>(
     buf: &'b mut [u8],
     mut input: R,
-) -> Result<(Response<N>, Body<super::PartiallyRead<'b, R>>), (R, Error<R::Error>)>
+) -> Result<(Response<'b, N>, Body<'b, super::PartiallyRead<'b, R>>), (R, Error<R::Error>)>
 where
     R: Read,
 {
-    let read_len = match receive_headers::<N, _>(&mut input, buf).await {
+    let (read_len, response_len) = match receive_headers::<N, _>(&mut input, buf).await {
         Ok(read_len) => read_len,
         Err(e) => return Err((input, e)),
     };
@@ -94,19 +94,23 @@ where
 
     let mut http_response = httparse::Response::new(&mut response.headers.0);
 
-    let status = match http_response.parse(&buf[..read_len]) {
+    let (response_buf, body_buf) = buf.split_at_mut(response_len);
+
+    let status = match http_response.parse(response_buf) {
         Ok(status) => status,
         Err(e) => return Err((input, e.into())),
     };
 
-    if let Status::Complete(response_len) = status {
+    if let Status::Complete(response_len2) = status {
+        if response_len != response_len2 {
+            panic!("Should not happen. HTTP header parsing is indeterminate.")
+        }
+
         response.version = http_response.version;
         response.code = http_response.code;
         response.reason = http_response.reason;
 
         trace!("Got response:\n{}", response);
-
-        let partially_read = PartiallyRead::new(&buf[response_len..read_len], input);
 
         let body = if response
             .headers
@@ -114,18 +118,25 @@ where
             .map(|value| UncasedStr::new(value) == UncasedStr::new("chunked"))
             .unwrap_or(false)
         {
-            Body::Chunked(ChunkedRead::new(partially_read))
+            Body::Chunked(ChunkedRead::new(
+                PartiallyRead::new(&[], input),
+                body_buf,
+                read_len - response_len,
+            ))
         } else if let Some(content_len) = response.headers.content_len() {
-            Body::ContentLen(ContentLenRead::new(content_len, partially_read))
+            Body::ContentLen(ContentLenRead::new(
+                content_len,
+                PartiallyRead::new(body_buf, input),
+            ))
         } else if response
             .headers
             .connection()
             .map(|value| UncasedStr::new(value) == UncasedStr::new("close"))
             .unwrap_or(false)
         {
-            Body::Close(partially_read)
+            Body::Close(PartiallyRead::new(body_buf, input))
         } else {
-            Body::ContentLen(ContentLenRead::new(0, partially_read))
+            Body::ContentLen(ContentLenRead::new(0, PartiallyRead::new(body_buf, input)))
         };
 
         Ok((response, body))
@@ -430,7 +441,7 @@ mod embedded_svc_compat {
                 if !body.is_complete() {
                     body.close();
 
-                    Err(Error::Incomplete)
+                    Err(Error::IncompleteBody)
                 } else {
                     match super::receive(self.buf, body.release()).await {
                         Ok((response, mut body)) => {
@@ -630,7 +641,7 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct BodyCompletionTracker<'b, T>(super::Body<PartiallyRead<'b, Completion<T>>>)
+    pub struct BodyCompletionTracker<'b, T>(super::Body<'b, PartiallyRead<'b, Completion<T>>>)
     where
         T: Close;
 
