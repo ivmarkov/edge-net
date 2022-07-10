@@ -528,7 +528,7 @@ where
             }
         }
 
-        let next = self.input_next().await?;
+        let next = self.input_fetch().await?;
         self.remain -= 1;
 
         // If current chunk is finished, verify it ends with CRLF [RFC7230§4.1].
@@ -536,7 +536,7 @@ where
             self.consume_multi(b"\r\n").await?;
         }
 
-        Ok(next)
+        Ok(Some(next))
     }
 
     // Parse the number of bytes in the next chunk.
