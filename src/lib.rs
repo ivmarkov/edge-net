@@ -13,3 +13,4 @@ extern crate alloc;
 
 #[cfg(feature = "experimental")]
 pub mod asynch;
+pub mod close;

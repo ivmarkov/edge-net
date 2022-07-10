@@ -10,6 +10,7 @@ use embedded_io::asynch::{Read, Write};
 use embedded_io::Io;
 
 use crate::asynch::tcp::TcpClientSocket;
+use crate::close::Close;
 
 pub struct StdTcpClientSocket(Option<Async<TcpStream>>);
 
@@ -21,6 +22,12 @@ impl StdTcpClientSocket {
 
 impl Io for StdTcpClientSocket {
     type Error = io::Error;
+}
+
+impl Close for StdTcpClientSocket {
+    fn close(&mut self) {
+        let _ = self.disconnect();
+    }
 }
 
 impl TcpClientSocket for StdTcpClientSocket {

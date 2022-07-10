@@ -1,4 +1,4 @@
-use embedded_io::asynch::{Read, Write};
+use embedded_io::asynch::Read;
 
 use embedded_svc::http::client::asynch::{Client as _, Request, Response, SendHeaders};
 
@@ -7,6 +7,8 @@ use embedded_svc_impl::asynch::stdnal::StdTcpClientSocket;
 use embedded_svc_impl::asynch::tcp::TcpClientSocket;
 
 fn main() {
+    simple_logger::SimpleLogger::new().env().init().unwrap();
+
     smol::block_on(read()).unwrap();
 }
 
@@ -22,7 +24,7 @@ async fn read() -> anyhow::Result<()> {
         "34.227.213.82:80".parse().unwrap(), /*httpbin.org*/
     );
 
-    for uri in ["/", "/ip"] {
+    for uri in ["/ip", "/headers"] {
         request(&mut client, uri).await?;
     }
 
@@ -40,9 +42,7 @@ where
     let request = client.get(uri).await?;
 
     let (header, mut body) = request
-        .header("Connection", "close")
-        .header("accept", "*")
-        .content_len(0)
+        .header("Host", "34.227.213.82")
         .submit()
         .await?
         .split();
