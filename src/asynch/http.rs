@@ -500,7 +500,7 @@ where
         self.complete
     }
 
-    // The elegant push parser taken from here:
+    // The elegant pull parser taken from here:
     // https://github.com/kchmck/uhttp_chunked_bytes.rs/blob/master/src/lib.rs
     // Changes:
     // - Converted to async
