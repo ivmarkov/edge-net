@@ -4,8 +4,6 @@ use embedded_io::asynch::Read;
 
 use httparse::Status;
 
-use uncased::UncasedStr;
-
 use log::trace;
 
 use super::*;
@@ -34,45 +32,6 @@ pub fn request<'b>(method: Method, uri: &str, buf: &'b mut [u8]) -> SendHeaders<
 }
 
 #[allow(clippy::needless_lifetimes)]
-pub async fn send<'b, W>(
-    headers: SendHeaders<'b>,
-    mut output: W,
-) -> Result<(&'b mut [u8], SendBody<W>), (W, W::Error)>
-where
-    W: Write,
-{
-    trace!("Sending request:\n{}", headers);
-
-    match output.write_all(headers.payload()).await {
-        Ok(_) => match output.flush().await {
-            Ok(_) => {
-                let body = if headers
-                    .get_transfer_encoding()
-                    .map(|value| UncasedStr::new(value) == UncasedStr::new("chunked"))
-                    .unwrap_or(false)
-                {
-                    SendBody::Chunked(ChunkedWrite::new(output))
-                } else if let Some(content_len) = headers.get_content_len() {
-                    SendBody::ContentLen(ContentLenWrite::new(content_len, output))
-                } else if headers
-                    .get_connection()
-                    .map(|value| UncasedStr::new(value) == UncasedStr::new("close"))
-                    .unwrap_or(false)
-                {
-                    SendBody::Close(output)
-                } else {
-                    SendBody::ContentLen(ContentLenWrite::new(0, output))
-                };
-
-                Ok((headers.release(), body))
-            }
-            Err(e) => Err((output, e)),
-        },
-        Err(e) => Err((output, e)),
-    }
-}
-
-#[allow(clippy::needless_lifetimes)]
 pub async fn receive<'b, const N: usize, R>(
     buf: &'b mut [u8],
     mut input: R,
@@ -80,7 +39,7 @@ pub async fn receive<'b, const N: usize, R>(
 where
     R: Read,
 {
-    let (read_len, response_len) = match receive_headers::<N, _>(&mut input, buf).await {
+    let (read_len, headers_len) = match receive_headers::<N, _>(&mut input, buf, false).await {
         Ok(read_len) => read_len,
         Err(e) => return Err((input, e)),
     };
@@ -92,52 +51,27 @@ where
         headers: Headers::new(),
     };
 
-    let mut http_response = httparse::Response::new(&mut response.headers.0);
+    let mut parser = httparse::Response::new(&mut response.headers.0);
 
-    let (response_buf, body_buf) = buf.split_at_mut(response_len);
+    let (headers_buf, body_buf) = buf.split_at_mut(headers_len);
 
-    let status = match http_response.parse(response_buf) {
+    let status = match parser.parse(headers_buf) {
         Ok(status) => status,
         Err(e) => return Err((input, e.into())),
     };
 
-    if let Status::Complete(response_len2) = status {
-        if response_len != response_len2 {
+    if let Status::Complete(headers_len2) = status {
+        if headers_len != headers_len2 {
             panic!("Should not happen. HTTP header parsing is indeterminate.")
         }
 
-        response.version = http_response.version;
-        response.code = http_response.code;
-        response.reason = http_response.reason;
+        response.version = parser.version;
+        response.code = parser.code;
+        response.reason = parser.reason;
 
-        trace!("Got response:\n{}", response);
+        trace!("Received:\n{}", response);
 
-        let body = if response
-            .headers
-            .transfer_encoding()
-            .map(|value| UncasedStr::new(value) == UncasedStr::new("chunked"))
-            .unwrap_or(false)
-        {
-            Body::Chunked(ChunkedRead::new(
-                PartiallyRead::new(&[], input),
-                body_buf,
-                read_len - response_len,
-            ))
-        } else if let Some(content_len) = response.headers.content_len() {
-            Body::ContentLen(ContentLenRead::new(
-                content_len,
-                PartiallyRead::new(body_buf, input),
-            ))
-        } else if response
-            .headers
-            .connection()
-            .map(|value| UncasedStr::new(value) == UncasedStr::new("close"))
-            .unwrap_or(false)
-        {
-            Body::Close(PartiallyRead::new(body_buf, input))
-        } else {
-            Body::ContentLen(ContentLenRead::new(0, PartiallyRead::new(body_buf, input)))
-        };
+        let body = super::receive_body(&response.headers, body_buf, read_len, input)?;
 
         Ok((response, body))
     } else {

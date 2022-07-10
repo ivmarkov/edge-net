@@ -6,6 +6,7 @@ use core::str;
 use embedded_io::asynch::{Read, Write};
 use embedded_io::Io;
 
+use log::trace;
 use uncased::UncasedStr;
 
 use crate::close::Close;
@@ -1244,9 +1245,49 @@ where
     }
 }
 
-pub async fn receive_headers<const N: usize, R>(
+#[allow(clippy::needless_lifetimes)]
+pub async fn send<'b, W>(
+    headers: SendHeaders<'b>,
+    mut output: W,
+) -> Result<(&'b mut [u8], SendBody<W>), (W, W::Error)>
+where
+    W: Write,
+{
+    trace!("Sending:\n{}", headers);
+
+    match output.write_all(headers.payload()).await {
+        Ok(_) => match output.flush().await {
+            Ok(_) => {
+                let body = if headers
+                    .get_transfer_encoding()
+                    .map(|value| UncasedStr::new(value) == UncasedStr::new("chunked"))
+                    .unwrap_or(false)
+                {
+                    SendBody::Chunked(ChunkedWrite::new(output))
+                } else if let Some(content_len) = headers.get_content_len() {
+                    SendBody::ContentLen(ContentLenWrite::new(content_len, output))
+                } else if headers
+                    .get_connection()
+                    .map(|value| UncasedStr::new(value) == UncasedStr::new("close"))
+                    .unwrap_or(false)
+                {
+                    SendBody::Close(output)
+                } else {
+                    SendBody::ContentLen(ContentLenWrite::new(0, output))
+                };
+
+                Ok((headers.release(), body))
+            }
+            Err(e) => Err((output, e)),
+        },
+        Err(e) => Err((output, e)),
+    }
+}
+
+async fn receive_headers<const N: usize, R>(
     mut input: R,
     buf: &mut [u8],
+    request: bool,
 ) -> Result<(usize, usize), Error<R::Error>>
 where
     R: Read,
@@ -1261,15 +1302,60 @@ where
         size += read;
 
         let mut headers = [httparse::EMPTY_HEADER; N];
-        let mut http_response = httparse::Response::new(&mut headers);
 
-        let status = http_response.parse(&buf[..size])?;
-        if let httparse::Status::Complete(response_len) = status {
-            return Ok((size, response_len));
+        let status = if request {
+            httparse::Request::new(&mut headers).parse(&buf[..size])?
+        } else {
+            httparse::Response::new(&mut headers).parse(&buf[..size])?
+        };
+
+        if let httparse::Status::Complete(headers_len) = status {
+            return Ok((size, headers_len));
         }
     }
 
     Err(Error::TooManyHeaders)
+}
+
+#[allow(clippy::type_complexity)]
+fn receive_body<'b, const N: usize, R>(
+    headers: &Headers<'b, N>,
+    buf: &'b mut [u8],
+    read_len: usize,
+    input: R,
+) -> Result<Body<'b, PartiallyRead<'b, R>>, (R, Error<R::Error>)>
+where
+    R: Read,
+{
+    let body = if headers
+        .transfer_encoding()
+        .map(|value| UncasedStr::new(value) == UncasedStr::new("chunked"))
+        .unwrap_or(false)
+    {
+        Body::Chunked(ChunkedRead::new(
+            PartiallyRead::new(&[], input),
+            buf,
+            read_len,
+        ))
+    } else if let Some(content_len) = headers.content_len() {
+        Body::ContentLen(ContentLenRead::new(
+            content_len,
+            PartiallyRead::new(&buf[..read_len], input),
+        ))
+    } else if headers
+        .connection()
+        .map(|value| UncasedStr::new(value) == UncasedStr::new("close"))
+        .unwrap_or(false)
+    {
+        Body::Close(PartiallyRead::new(&buf[..read_len], input))
+    } else {
+        Body::ContentLen(ContentLenRead::new(
+            0,
+            PartiallyRead::new(&buf[..read_len], input),
+        ))
+    };
+
+    Ok(body)
 }
 
 #[test]
