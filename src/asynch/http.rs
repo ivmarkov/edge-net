@@ -15,6 +15,7 @@ use crate::close::Close;
 pub use embedded_svc_compat::*;
 
 pub mod client;
+pub mod completion;
 pub mod server;
 
 /// An error in parsing the headers or the body.
@@ -298,6 +299,42 @@ impl<'b, R> Body<'b, R>
 where
     R: Read,
 {
+    #[allow(clippy::type_complexity)]
+    pub fn new<const N: usize>(
+        headers: &Headers<'b, N>,
+        buf: &'b mut [u8],
+        read_len: usize,
+        input: R,
+    ) -> Body<'b, PartiallyRead<'b, R>> {
+        if headers
+            .transfer_encoding()
+            .map(|value| UncasedStr::new(value) == UncasedStr::new("chunked"))
+            .unwrap_or(false)
+        {
+            Body::Chunked(ChunkedRead::new(
+                PartiallyRead::new(&[], input),
+                buf,
+                read_len,
+            ))
+        } else if let Some(content_len) = headers.content_len() {
+            Body::ContentLen(ContentLenRead::new(
+                content_len,
+                PartiallyRead::new(&buf[..read_len], input),
+            ))
+        } else if headers
+            .connection()
+            .map(|value| UncasedStr::new(value) == UncasedStr::new("close"))
+            .unwrap_or(false)
+        {
+            Body::Close(PartiallyRead::new(&buf[..read_len], input))
+        } else {
+            Body::ContentLen(ContentLenRead::new(
+                0,
+                PartiallyRead::new(&buf[..read_len], input),
+            ))
+        }
+    }
+
     pub fn is_complete(&self) -> bool {
         match self {
             Self::Close(_) => true,
@@ -311,6 +348,14 @@ where
             Self::Close(r) => r,
             Self::ContentLen(r) => &mut r.input,
             Self::Chunked(r) => &mut r.input,
+        }
+    }
+
+    pub fn release(self) -> R {
+        match self {
+            Self::Close(r) => r,
+            Self::ContentLen(r) => r.release(),
+            Self::Chunked(r) => r.release(),
         }
     }
 }
@@ -373,6 +418,10 @@ impl<'b, R> PartiallyRead<'b, R> {
     pub fn as_raw_reader(&mut self) -> &mut R {
         &mut self.input
     }
+
+    pub fn release(self) -> R {
+        self.input
+    }
 }
 
 impl<'b, R> Io for PartiallyRead<'b, R>
@@ -433,6 +482,10 @@ impl<R> ContentLenRead<R> {
 
     pub fn is_complete(&self) -> bool {
         self.content_len == self.read_len
+    }
+
+    pub fn release(self) -> R {
+        self.input
     }
 }
 
@@ -502,6 +555,10 @@ where
 
     pub fn is_complete(&self) -> bool {
         self.complete
+    }
+
+    pub fn release(self) -> R {
+        self.input
     }
 
     // The elegant pull parser taken from here:
@@ -1004,7 +1061,31 @@ pub enum SendBody<W> {
     Chunked(ChunkedWrite<W>),
 }
 
-impl<W> SendBody<W> {
+impl<W> SendBody<W>
+where
+    W: Write,
+{
+    #[allow(clippy::type_complexity)]
+    pub fn new<'b>(headers: &'b SendHeaders<'b>, output: W) -> SendBody<W> {
+        if headers
+            .get_transfer_encoding()
+            .map(|value| UncasedStr::new(value) == UncasedStr::new("chunked"))
+            .unwrap_or(false)
+        {
+            SendBody::Chunked(ChunkedWrite::new(output))
+        } else if let Some(content_len) = headers.get_content_len() {
+            SendBody::ContentLen(ContentLenWrite::new(content_len, output))
+        } else if headers
+            .get_connection()
+            .map(|value| UncasedStr::new(value) == UncasedStr::new("close"))
+            .unwrap_or(false)
+        {
+            SendBody::Close(output)
+        } else {
+            SendBody::ContentLen(ContentLenWrite::new(0, output))
+        }
+    }
+
     pub fn is_complete(&self) -> bool {
         match self {
             Self::ContentLen(w) => w.is_complete(),
@@ -1318,47 +1399,6 @@ where
     }
 
     Err(Error::TooManyHeaders)
-}
-
-#[allow(clippy::type_complexity)]
-fn receive_body<'b, const N: usize, R>(
-    headers: &Headers<'b, N>,
-    buf: &'b mut [u8],
-    read_len: usize,
-    input: R,
-) -> Result<Body<'b, PartiallyRead<'b, R>>, (R, Error<R::Error>)>
-where
-    R: Read,
-{
-    let body = if headers
-        .transfer_encoding()
-        .map(|value| UncasedStr::new(value) == UncasedStr::new("chunked"))
-        .unwrap_or(false)
-    {
-        Body::Chunked(ChunkedRead::new(
-            PartiallyRead::new(&[], input),
-            buf,
-            read_len,
-        ))
-    } else if let Some(content_len) = headers.content_len() {
-        Body::ContentLen(ContentLenRead::new(
-            content_len,
-            PartiallyRead::new(&buf[..read_len], input),
-        ))
-    } else if headers
-        .connection()
-        .map(|value| UncasedStr::new(value) == UncasedStr::new("close"))
-        .unwrap_or(false)
-    {
-        Body::Close(PartiallyRead::new(&buf[..read_len], input))
-    } else {
-        Body::ContentLen(ContentLenRead::new(
-            0,
-            PartiallyRead::new(&buf[..read_len], input),
-        ))
-    };
-
-    Ok(body)
 }
 
 #[cfg(feature = "embedded-svc")]

@@ -71,7 +71,7 @@ where
 
         trace!("Received:\n{}", response);
 
-        let body = super::receive_body(&response.headers, body_buf, read_len, input)?;
+        let body = Body::new(&response.headers, body_buf, read_len, input);
 
         Ok((response, body))
     } else {
