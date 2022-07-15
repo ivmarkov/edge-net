@@ -39,7 +39,7 @@ pub async fn receive<'b, const N: usize, R>(
 where
     R: Read,
 {
-    let (read_len, headers_len) = match receive_headers::<N, _>(&mut input, buf, false).await {
+    let (read_len, headers_len) = match load_headers::<N, _>(&mut input, buf, false).await {
         Ok(read_len) => read_len,
         Err(e) => return Err((input, e)),
     };
@@ -114,13 +114,15 @@ mod embedded_svc_compat {
     use core::future::Future;
     use core::str;
 
-    use log::info;
     use no_std_net::SocketAddr;
 
     use embedded_svc::http::client::asynch::Method;
     use embedded_svc::io::asynch::{Io, Read, Write};
 
-    use crate::asynch::http::{Error, PartiallyRead, SendHeaders};
+    use crate::asynch::http::completion::{
+        BodyCompletionTracker, Complete, CompletionTracker, SendBodyCompletionTracker,
+    };
+    use crate::asynch::http::{Error, SendHeaders};
     use crate::asynch::tcp::TcpClientSocket;
     use crate::close::Close;
 
@@ -156,7 +158,7 @@ mod embedded_svc_compat {
         type Request<'a>
         where
             Self: 'a,
-        = ClientRequest<'a, N, Completion<&'a mut T>>;
+        = ClientRequest<'a, N, CompletionTracker<&'a mut T>>;
 
         type RequestFuture<'a>
         where
@@ -175,7 +177,7 @@ mod embedded_svc_compat {
                     method,
                     uri,
                     self.buf,
-                    Completion::new(&mut self.socket),
+                    CompletionTracker::new(&mut self.socket),
                 ))
             }
         }
@@ -186,7 +188,7 @@ mod embedded_svc_compat {
         T: Close,
     {
         headers: SendHeaders<'b>,
-        io: Completion<T>,
+        io: T,
     }
 
     impl<'b, const N: usize, T> ClientRequest<'b, N, T>
@@ -201,7 +203,7 @@ mod embedded_svc_compat {
         ) -> Self {
             Self {
                 headers: super::request(method.into(), uri, buf),
-                io: Completion::new(io),
+                io,
             }
         }
     }
@@ -226,7 +228,7 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize, T> embedded_svc::http::client::asynch::Request for ClientRequest<'b, N, T>
     where
-        T: Read + Write + Close,
+        T: Read + Write + Close + Complete,
     {
         type Write = ClientRequestWrite<'b, N, SendBodyCompletionTracker<T>>;
 
@@ -247,11 +249,11 @@ mod embedded_svc_compat {
                     Ok((buf, mut body)) => {
                         let complete = body.is_complete();
 
-                        body.as_raw_writer().write_complete(complete);
+                        body.as_raw_writer().complete_write(complete);
 
                         Ok(ClientRequestWrite {
                             buf,
-                            io: SendBodyCompletionTracker(body),
+                            io: SendBodyCompletionTracker::wrap(body),
                         })
                     }
                     Err((mut io, e)) => {
@@ -311,7 +313,7 @@ mod embedded_svc_compat {
     impl<'b, const N: usize, T> embedded_svc::http::client::asynch::RequestWrite
         for ClientRequestWrite<'b, N, SendBodyCompletionTracker<T>>
     where
-        T: Read + Write + Close,
+        T: Read + Write + Close + Complete,
     {
         type Response = ClientResponse<'b, N, BodyCompletionTracker<'b, T>>;
 
@@ -324,7 +326,7 @@ mod embedded_svc_compat {
             async move {
                 self.io.flush().await?;
 
-                let mut body = self.io.0;
+                let mut body = self.io.release();
 
                 if !body.is_complete() {
                     body.close();
@@ -336,11 +338,11 @@ mod embedded_svc_compat {
                             let read_complete = body.is_complete();
                             body.as_raw_reader()
                                 .as_raw_reader()
-                                .read_complete(read_complete);
+                                .complete_read(read_complete);
 
                             Ok(Self::Response {
                                 response,
-                                io: BodyCompletionTracker(body),
+                                io: BodyCompletionTracker::wrap(body),
                             })
                         }
                         Err((mut io, e)) => {
@@ -430,189 +432,6 @@ mod embedded_svc_compat {
             Self: Sized,
         {
             (self.response, self.io)
-        }
-    }
-
-    pub struct Completion<T>
-    where
-        T: Close,
-    {
-        io: T,
-        read_complete: bool,
-        write_complete: bool,
-    }
-
-    impl<T> Completion<T>
-    where
-        T: Close,
-    {
-        const fn new(io: T) -> Self {
-            Self {
-                io,
-                read_complete: true,
-                write_complete: true,
-            }
-        }
-
-        fn read_complete(&mut self, complete: bool) {
-            self.read_complete = complete;
-        }
-
-        fn write_complete(&mut self, complete: bool) {
-            self.write_complete = complete;
-        }
-    }
-
-    impl<T> Drop for Completion<T>
-    where
-        T: Close,
-    {
-        fn drop(&mut self) {
-            if !self.read_complete || !self.write_complete {
-                self.close();
-            }
-        }
-    }
-
-    impl<T> Close for Completion<T>
-    where
-        T: Close,
-    {
-        fn close(&mut self) {
-            info!("Socket closed");
-
-            self.io.close();
-        }
-    }
-
-    impl<T> Io for Completion<T>
-    where
-        T: Io + Close,
-    {
-        type Error = T::Error;
-    }
-
-    impl<T> Read for Completion<T>
-    where
-        T: Read + Close,
-    {
-        type ReadFuture<'a>
-        where
-            Self: 'a,
-        = T::ReadFuture<'a>;
-
-        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-            self.io.read(buf)
-        }
-    }
-
-    impl<T> Write for Completion<T>
-    where
-        T: Write + Close,
-    {
-        type WriteFuture<'a>
-        where
-            Self: 'a,
-        = T::WriteFuture<'a>;
-
-        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-            self.io.write(buf)
-        }
-
-        type FlushFuture<'a>
-        where
-            Self: 'a,
-        = T::FlushFuture<'a>;
-
-        fn flush(&mut self) -> Self::FlushFuture<'_> {
-            self.io.flush()
-        }
-    }
-
-    pub struct BodyCompletionTracker<'b, T>(super::Body<'b, PartiallyRead<'b, Completion<T>>>)
-    where
-        T: Close;
-
-    impl<'b, T> Io for BodyCompletionTracker<'b, T>
-    where
-        T: Io + Close,
-    {
-        type Error = super::Error<T::Error>;
-    }
-
-    impl<'b, T> Read for BodyCompletionTracker<'b, T>
-    where
-        T: Read + Close,
-    {
-        type ReadFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<usize, Self::Error>>;
-
-        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-            async move {
-                let size = self.0.read(buf).await.map_err(|e| {
-                    self.0.close();
-                    e
-                })?;
-
-                let complete = self.0.is_complete();
-                self.0
-                    .as_raw_reader()
-                    .as_raw_reader()
-                    .read_complete(complete);
-
-                Ok(size)
-            }
-        }
-    }
-
-    pub struct SendBodyCompletionTracker<T>(super::SendBody<Completion<T>>)
-    where
-        T: Close;
-
-    impl<T> Io for SendBodyCompletionTracker<T>
-    where
-        T: Io + Close,
-    {
-        type Error = super::Error<T::Error>;
-    }
-
-    impl<T> Write for SendBodyCompletionTracker<T>
-    where
-        T: Write + Close,
-    {
-        type WriteFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<usize, Self::Error>>;
-
-        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-            async move {
-                let size = self.0.write(buf).await.map_err(|e| {
-                    self.0.close();
-                    e
-                })?;
-
-                let complete = self.0.is_complete();
-                self.0.as_raw_writer().write_complete(complete);
-
-                Ok(size)
-            }
-        }
-
-        type FlushFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<(), Self::Error>>;
-
-        fn flush(&mut self) -> Self::FlushFuture<'_> {
-            async move {
-                self.0.flush().await.map_err(|e| {
-                    self.0.close();
-                    e
-                })
-            }
         }
     }
 }

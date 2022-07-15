@@ -382,7 +382,7 @@ where
 
 impl<'b, R> Read for Body<'b, R>
 where
-    R: Read + Close,
+    R: Read,
 {
     type ReadFuture<'a>
     where
@@ -413,6 +413,10 @@ impl<'b, R> PartiallyRead<'b, R> {
             read_len: 0,
             input,
         }
+    }
+
+    pub fn buf_len(&self) -> usize {
+        self.buf.len()
     }
 
     pub fn as_raw_reader(&mut self) -> &mut R {
@@ -1368,7 +1372,7 @@ where
     }
 }
 
-async fn receive_headers<const N: usize, R>(
+async fn load_headers<const N: usize, R>(
     mut input: R,
     buf: &mut [u8],
     request: bool,
@@ -1446,6 +1450,56 @@ mod embedded_svc_compat {
                 Method::Link => super::Method::Link,
                 Method::Unlink => super::Method::Unlink,
             }
+        }
+    }
+
+    impl From<super::Method> for Method {
+        fn from(method: super::Method) -> Self {
+            match method {
+                super::Method::Delete => Method::Delete,
+                super::Method::Get => Method::Get,
+                super::Method::Head => Method::Head,
+                super::Method::Post => Method::Post,
+                super::Method::Put => Method::Put,
+                super::Method::Connect => Method::Connect,
+                super::Method::Options => Method::Options,
+                super::Method::Trace => Method::Trace,
+                super::Method::Copy => Method::Copy,
+                super::Method::Lock => Method::Lock,
+                super::Method::MkCol => Method::MkCol,
+                super::Method::Move => Method::Move,
+                super::Method::Propfind => Method::Propfind,
+                super::Method::Proppatch => Method::Proppatch,
+                super::Method::Search => Method::Search,
+                super::Method::Unlock => Method::Unlock,
+                super::Method::Bind => Method::Bind,
+                super::Method::Rebind => Method::Rebind,
+                super::Method::Unbind => Method::Unbind,
+                super::Method::Acl => Method::Acl,
+                super::Method::Report => Method::Report,
+                super::Method::MkActivity => Method::MkActivity,
+                super::Method::Checkout => Method::Checkout,
+                super::Method::Merge => Method::Merge,
+                super::Method::MSearch => Method::MSearch,
+                super::Method::Notify => Method::Notify,
+                super::Method::Subscribe => Method::Subscribe,
+                super::Method::Unsubscribe => Method::Unsubscribe,
+                super::Method::Patch => Method::Patch,
+                super::Method::Purge => Method::Purge,
+                super::Method::MkCalendar => Method::MkCalendar,
+                super::Method::Link => Method::Link,
+                super::Method::Unlink => Method::Unlink,
+            }
+        }
+    }
+
+    impl<'b> embedded_svc::http::SendStatus for SendHeaders<'b> {
+        fn set_status(&mut self, status: u16) -> &mut Self {
+            todo!()
+        }
+
+        fn set_status_message(&mut self, message: &str) -> &mut Self {
+            todo!()
         }
     }
 

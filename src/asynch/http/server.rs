@@ -19,9 +19,26 @@ pub async fn receive<'b, const N: usize, R>(
 where
     R: Read,
 {
-    let (read_len, headers_len) = match receive_headers::<N, _>(&mut input, buf, true).await {
+    match receive_headers(buf, &mut input).await {
+        Ok((request, body_buf, read_len)) => {
+            let body = Body::new(&request.headers, body_buf, read_len, input);
+            Ok((request, body))
+        }
+        Err(e) => Err((input, e)),
+    }
+}
+
+#[allow(clippy::needless_lifetimes)]
+pub async fn receive_headers<'b, const N: usize, R>(
+    buf: &'b mut [u8],
+    mut input: R,
+) -> Result<(Request<'b, N>, &'b mut [u8], usize), Error<R::Error>>
+where
+    R: Read,
+{
+    let (read_len, headers_len) = match load_headers::<N, _>(&mut input, buf, true).await {
         Ok(read_len) => read_len,
-        Err(e) => return Err((input, e)),
+        Err(e) => return Err(e),
     };
 
     let mut request = Request {
@@ -37,7 +54,7 @@ where
 
     let status = match parser.parse(headers_buf) {
         Ok(status) => status,
-        Err(e) => return Err((input, e.into())),
+        Err(e) => return Err(e.into()),
     };
 
     if let Status::Complete(headers_len2) = status {
@@ -51,9 +68,7 @@ where
 
         trace!("Received:\n{}", request);
 
-        let body = Body::new(&request.headers, body_buf, read_len, input);
-
-        Ok((request, body))
+        Ok((request, body_buf, read_len))
     } else {
         panic!("Secondary parse of already loaded buffer failed.")
     }
@@ -92,131 +107,66 @@ impl<'b, const N: usize> Display for Request<'b, N> {
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
     use core::future::Future;
-    use core::marker::PhantomData;
 
-    use embedded_io::{
-        asynch::{Read, Write},
-        Io,
-    };
+    use embedded_io::asynch::{Read, Write};
+    use embedded_io::Io;
+
     use embedded_svc::http::server::asynch::{
-        Completion, Handler, HandlerResult, Headers, Method, Query, Request, RequestBody,
-        RequestId, Response, ResponseHeaders, ResponseWrite, SendHeaders, SendStatus, Status,
+        Completion, Handler, HandlerResult, Headers, Method, Query, Request, RequestId, Response,
+        ResponseWrite, SendHeaders, SendStatus,
     };
 
-    use crate::asynch::http::completion::{BodyCompletionTracker, SendBodyCompletionTracker};
+    use crate::asynch::http::completion::{
+        BodyCompletionTracker, Complete, CompletionState, CompletionTracker,
+        SendBodyCompletionTracker,
+    };
     use crate::asynch::http::Error;
+    use crate::asynch::tcp::TcpAcceptor;
+    use crate::close::{Close, CloseFn};
 
-    use crate::close::Close;
-
-    pub trait HandlerMatcher {
-        fn matches(&self, path: &str, method: Method) -> bool;
-    }
-
-    pub trait HandlerRegistration<R> {
-        type HandleFuture<'a>: Future<Output = HandlerResult>
-        where
-            Self: 'a;
-
-        fn handle<'a>(
-            &'a self,
-            path: &'a str,
-            method: Method,
-            request: R,
-        ) -> Self::HandleFuture<'a>;
-    }
-
-    pub struct SimpleHandlerMatcher {
-        path: &'static str,
-        method: Method,
-    }
-
-    impl HandlerMatcher for SimpleHandlerMatcher {
-        fn matches(&self, path: &str, method: Method) -> bool {
-            self.method == method && self.path == path
-        }
-    }
-
-    pub struct CompositeHandlerRegistration<M, H1, H2> {
-        handler1_matcher: M,
-        handler1: H1,
-        handler2: H2,
-    }
-
-    pub struct PrefixedHandlerMatcher<M> {
-        prefix: &'static str,
-        matcher: M,
-    }
-
-    impl<M> HandlerMatcher for PrefixedHandlerMatcher<M>
-    where
-        M: HandlerMatcher,
-    {
-        fn matches(&self, path: &str, method: Method) -> bool {
-            self.prefix.len() < path.len()
-                && self.prefix == &path[..self.prefix.len()]
-                && self.matcher.matches(&path[self.prefix.len()..], method)
-        }
-    }
-
-    impl<M, H, N, R> HandlerRegistration<R> for CompositeHandlerRegistration<M, H, N>
-    where
-        R: Request,
-        M: HandlerMatcher,
-        H: Handler<R>,
-        N: HandlerRegistration<R>,
-    {
-        type HandleFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = HandlerResult>;
-
-        fn handle<'a>(
-            &'a self,
-            path: &'a str,
-            method: Method,
-            request: R,
-        ) -> Self::HandleFuture<'a> {
-            async move {
-                if self.handler1_matcher.matches(path, method) {
-                    self.handler1.handle(request).await
-                } else {
-                    self.handler2.handle(path, method, request).await
-                }
-            }
-        }
-    }
-
-    pub struct ServerRequest<'b, const N: usize, R>
-    where
-        R: Close,
-    {
-        request: super::Request<'b, N>,
+    pub struct ServerRequest<'b, const N: usize, R> {
+        request: &'b super::Request<'b, N>,
         response_headers: crate::asynch::http::SendHeaders<'b>,
         io: BodyCompletionTracker<'b, R>,
     }
 
-    impl<'b, const N: usize, R> RequestId for ServerRequest<'b, N, R>
+    impl<'b, const N: usize, R> ServerRequest<'b, N, R>
     where
-        R: Close,
+        R: Read + Write + Close + Complete,
     {
+        fn new(
+            request: &'b super::Request<'b, N>,
+            body_buf: &'b mut [u8],
+            read_len: usize,
+            response_buf: &'b mut [u8],
+            input: R,
+        ) -> ServerRequest<'b, N, R> {
+            let io = BodyCompletionTracker::new(&request.headers, body_buf, read_len, input);
+
+            Self {
+                request,
+                response_headers: crate::asynch::http::SendHeaders::new(
+                    response_buf,
+                    &["200", "OK"],
+                ),
+                io,
+            }
+        }
+    }
+
+    impl<'b, const N: usize, R> RequestId for ServerRequest<'b, N, R> {
         fn get_request_id(&self) -> &'_ str {
             todo!()
         }
     }
 
-    impl<'b, const N: usize, R> Headers for ServerRequest<'b, N, R>
-    where
-        R: Close,
-    {
+    impl<'b, const N: usize, R> Headers for ServerRequest<'b, N, R> {
         fn header(&self, name: &str) -> Option<&'_ str> {
             self.request.header(name)
         }
     }
 
-    impl<'b, const N: usize, R> Query for ServerRequest<'b, N, R>
-    where
-        R: Close,
-    {
+    impl<'b, const N: usize, R> Query for ServerRequest<'b, N, R> {
         fn query(&self) -> &'_ str {
             todo!()
         }
@@ -224,14 +174,14 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize, R> Io for ServerRequest<'b, N, R>
     where
-        R: Io + Close,
+        R: Io,
     {
         type Error = Error<R::Error>;
     }
 
     impl<'b, const N: usize, R> Read for ServerRequest<'b, N, R>
     where
-        R: Read + Close,
+        R: Read + Close + Complete,
     {
         type ReadFuture<'a>
         where
@@ -245,25 +195,29 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize, R> Request for ServerRequest<'b, N, R>
     where
-        R: Read + Write + Close,
+        R: Read + Write + Close + Complete,
     {
-        type Headers = super::Request<'b, N>;
-        type Body = ServerRequestRead<'b, N, R>;
+        type Headers<'a>
+        where
+            Self: 'a,
+        = &'a super::Request<'b, N>;
+        type Body<'a>
+        where
+            Self: 'a,
+        = &'a mut BodyCompletionTracker<'b, R>;
 
         type Response = ServerResponse<'b, R>;
-        type ResponseHeaders = ServerResponseHeaders<'b, N, R>;
+        type ResponseHeaders<'a>
+        where
+            Self: 'a,
+        = &'a mut crate::asynch::http::SendHeaders<'b>;
 
         type IntoResponseFuture = impl Future<Output = Result<Self::Response, Self::Error>>;
 
-        fn split(self) -> (Self::Headers, Self::Body, Self::ResponseHeaders)
-        where
-            Self: Sized,
-        {
-            (
-                self.request,
-                ServerRequestRead(self.io),
-                ServerResponseHeaders(self.response_headers, PhantomData),
-            )
+        fn split<'a>(
+            &'a mut self,
+        ) -> (Self::Headers<'a>, Self::Body<'a>, Self::ResponseHeaders<'a>) {
+            (&self.request, &mut self.io, &mut self.response_headers)
         }
 
         fn into_response(self) -> Self::IntoResponseFuture
@@ -271,7 +225,10 @@ mod embedded_svc_compat {
             Self: Sized,
         {
             async move {
-                let io = SendBodyCompletionTracker::new(&self.response_headers, self.io.release());
+                let io = SendBodyCompletionTracker::new(
+                    &self.response_headers,
+                    self.io.release().release().release(),
+                );
 
                 Ok(ServerResponse {
                     headers: self.response_headers,
@@ -287,16 +244,6 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize> Status for super::Request<'b, N> {
-        fn status(&self) -> u16 {
-            todo!()
-        }
-
-        fn status_message(&self) -> Option<&'_ str> {
-            todo!()
-        }
-    }
-
     impl<'b, const N: usize> Query for super::Request<'b, N> {
         fn query(&self) -> &'_ str {
             todo!()
@@ -305,102 +252,7 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize> Headers for super::Request<'b, N> {
         fn header(&self, name: &str) -> Option<&'_ str> {
-            super::Request::header(self, name)
-        }
-    }
-
-    pub struct ServerRequestRead<'b, const N: usize, R>(BodyCompletionTracker<'b, R>)
-    where
-        R: Close;
-
-    impl<'b, const N: usize, R> Io for ServerRequestRead<'b, N, R>
-    where
-        R: Io + Close,
-    {
-        type Error = Error<R::Error>;
-    }
-
-    impl<'b, const N: usize, R> Read for ServerRequestRead<'b, N, R>
-    where
-        R: Read + Close,
-    {
-        type ReadFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<usize, Self::Error>>;
-
-        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-            async move { self.0.read(buf).await }
-        }
-    }
-
-    impl<'b, const N: usize, R> RequestBody for ServerRequestRead<'b, N, R>
-    where
-        R: Read + Write + Close,
-    {
-        type Request = ServerRequest<'b, N, R>;
-
-        fn merge(
-            self,
-            request_headers: <<Self as RequestBody>::Request as Request>::Headers,
-            response_headers: <<Self as RequestBody>::Request as Request>::ResponseHeaders,
-        ) -> Self::Request
-        where
-            Self: Sized,
-        {
-            todo!()
-        }
-    }
-
-    pub struct ServerResponseHeaders<'b, const N: usize, R>(
-        crate::asynch::http::SendHeaders<'b>,
-        PhantomData<fn() -> R>,
-    );
-
-    impl<'b, const N: usize, R> SendStatus for ServerResponseHeaders<'b, N, R> {
-        fn set_status(&mut self, status: u16) -> &mut Self {
-            todo!()
-        }
-
-        fn set_status_message(&mut self, message: &str) -> &mut Self {
-            todo!()
-        }
-    }
-
-    impl<'b, const N: usize, R> SendHeaders for ServerResponseHeaders<'b, N, R> {
-        fn set_header(&mut self, name: &str, value: &str) -> &mut Self {
-            todo!()
-        }
-    }
-
-    impl<'b, const N: usize, R> ResponseHeaders for ServerResponseHeaders<'b, N, R>
-    where
-        R: Read + Write + Close,
-    {
-        type Request = ServerRequest<'b, N, R>;
-
-        type IntoResponseFuture = impl Future<
-            Output = Result<
-                <<Self as ResponseHeaders>::Request as Request>::Response,
-                <<Self as ResponseHeaders>::Request as Io>::Error,
-            >,
-        >;
-
-        fn into_response(
-            self,
-            request_body: <<Self as ResponseHeaders>::Request as Request>::Body,
-        ) -> Self::IntoResponseFuture
-        where
-            Self: Sized,
-        {
-            async move {
-                let io = SendBodyCompletionTracker::new(&self.0, request_body.0.release());
-
-                Ok(ServerResponse {
-                    headers: self.0,
-                    io,
-                })
-            }
+            self.headers.header(name)
         }
     }
 
@@ -424,11 +276,13 @@ mod embedded_svc_compat {
         W: Close,
     {
         fn set_status(&mut self, status: u16) -> &mut Self {
-            todo!()
+            self.headers.set_status(status);
+            self
         }
 
         fn set_status_message(&mut self, message: &str) -> &mut Self {
-            todo!()
+            self.headers.set_status_message(message);
+            self
         }
     }
 
@@ -444,7 +298,7 @@ mod embedded_svc_compat {
 
     impl<'b, W> Response for ServerResponse<'b, W>
     where
-        W: Write + Close,
+        W: Write + Close + Complete,
     {
         type Write = SendBodyCompletionTracker<W>;
 
@@ -486,7 +340,7 @@ mod embedded_svc_compat {
 
     impl<W> ResponseWrite for SendBodyCompletionTracker<W>
     where
-        W: Write + Close,
+        W: Write + Close + Complete,
     {
         type CompleteFuture = impl Future<Output = Result<Completion, Self::Error>>;
 
@@ -500,43 +354,24 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct Server<R, const N: usize, T>
+    pub trait HandlerRegistration<R>
     where
-        R: for<'b> HandlerRegistration<ServerRequest<'b, N, T>>,
+        R: Request,
     {
-        registration: R,
-        _t: T,
-    }
-
-    impl<R, const N: usize, T> Server<R, N, T>
-    where
-        R: for<'b> HandlerRegistration<ServerRequest<'b, N, T>>,
-        T: Read + Write + Close,
-    {
-        // pub fn new() -> Self {
-        //     Server::<PageNotFoundHandlerRegistration, _, _>
-        // }
-
-        pub fn handle<H>(
-            self,
-            uri: &str,
-            method: Method,
-            handler: H,
-        ) -> Result<
-            Server<CompositeHandlerRegistration<SimpleHandlerMatcher, H, R>, N, T>,
-            Error<T::Error>,
-        >
+        type HandleFuture<'a>: Future<Output = HandlerResult>
         where
-            H: for<'b> Handler<ServerRequest<'b, N, T>> + 'static,
-        {
-            //self.set_handler(uri, method, FnHandler::new(handler))
-            todo!()
-        }
+            Self: 'a;
+
+        fn handle<'a>(
+            &'a self,
+            path_registered: bool,
+            path: &'a str,
+            method: Method,
+            request: R,
+        ) -> Self::HandleFuture<'a>;
     }
 
-    pub struct PageNotFoundHandlerRegistration;
-
-    impl<R> HandlerRegistration<R> for PageNotFoundHandlerRegistration
+    impl<R> HandlerRegistration<R> for ()
     where
         R: Request,
     {
@@ -545,14 +380,208 @@ mod embedded_svc_compat {
             Self: 'a,
         = impl Future<Output = HandlerResult>;
 
-        fn handle(&self, uri: &str, method: Method, request: R) -> Self::HandleFuture<'_> {
+        fn handle<'a>(
+            &'a self,
+            path_registered: bool,
+            _path: &'a str,
+            _method: Method,
+            request: R,
+        ) -> Self::HandleFuture<'a> {
             async move {
                 Ok(request
                     .into_response()
                     .await?
-                    .status(404)
+                    .status(if path_registered { 405 } else { 404 })
                     .complete()
                     .await?)
+            }
+        }
+    }
+
+    pub struct SimpleHandlerRegistration<H, N> {
+        path: &'static str,
+        method: Method,
+        handler: H,
+        next: N,
+    }
+
+    impl<H, R, N> HandlerRegistration<R> for SimpleHandlerRegistration<H, N>
+    where
+        H: Handler<R>,
+        N: HandlerRegistration<R>,
+        R: Request,
+    {
+        type HandleFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = HandlerResult>;
+
+        fn handle<'a>(
+            &'a self,
+            path_registered: bool,
+            path: &'a str,
+            method: Method,
+            request: R,
+        ) -> Self::HandleFuture<'a> {
+            async move {
+                let path_registered2 = if self.path == path {
+                    if self.method == method {
+                        return self.handler.handle(request).await;
+                    }
+
+                    true
+                } else {
+                    false
+                };
+
+                self.next
+                    .handle(path_registered || path_registered2, path, method, request)
+                    .await
+            }
+        }
+    }
+
+    pub struct ServerAcceptor<const N: usize, A>(A);
+
+    impl<'t, const N: usize, A> ServerAcceptor<N, A>
+    where
+        A: TcpAcceptor<'t>,
+    {
+        pub fn new(acceptor: A) -> Self {
+            Self(acceptor)
+        }
+    }
+
+    impl<'t, const N: usize, A> ServerAcceptor<N, A>
+    where
+        A: TcpAcceptor<'t>,
+    {
+        pub async fn accept(
+            &mut self,
+        ) -> Result<<A as TcpAcceptor<'t>>::Connection<'t>, Error<A::Error>> {
+            self.0.accept().await.map_err(Error::Io)
+        }
+    }
+
+    pub struct ServerHandler<R, const N: usize, T>
+    where
+        R: for<'b> HandlerRegistration<
+            ServerRequest<'b, N, &'b mut CompletionTracker<CloseFn<T, ()>>>,
+        >,
+    {
+        registration: R,
+        connection: CompletionTracker<CloseFn<T, ()>>,
+    }
+
+    impl<const N: usize, T> ServerHandler<(), N, T>
+    where
+        T: Read + Write,
+    {
+        pub fn new(connection: T) -> Self {
+            Self {
+                registration: (),
+                connection: CompletionTracker::new(CloseFn::noop(connection)),
+            }
+        }
+    }
+
+    impl<R, const N: usize, T> ServerHandler<R, N, T>
+    where
+        R: for<'b> HandlerRegistration<
+            ServerRequest<'b, N, &'b mut CompletionTracker<CloseFn<T, ()>>>,
+        >,
+        T: Read + Write,
+    {
+        pub fn handle<H>(
+            self,
+            path: &'static str,
+            method: Method,
+            handler: H,
+        ) -> Result<ServerHandler<SimpleHandlerRegistration<H, R>, N, T>, Error<T::Error>>
+        where
+            H: for<'b> Handler<ServerRequest<'b, N, &'b mut CompletionTracker<CloseFn<T, ()>>>>
+                + 'static,
+        {
+            Ok(ServerHandler {
+                registration: SimpleHandlerRegistration {
+                    path,
+                    method,
+                    handler,
+                    next: self.registration,
+                },
+                connection: self.connection,
+            })
+        }
+
+        pub async fn process(&mut self, buf: &mut [u8]) -> Result<(), Error<T::Error>> {
+            loop {
+                self.process_request(buf).await?;
+            }
+        }
+
+        async fn process_request(&mut self, buf: &mut [u8]) -> Result<(), Error<T::Error>> {
+            let (request_buf, response_buf) = buf.split_at_mut(buf.len() / 2);
+
+            let (raw_request, body_buf, read_len) =
+                super::receive_headers(request_buf, &mut self.connection.as_raw()).await?;
+            let method = crate::asynch::http::Method::new(raw_request.method.unwrap_or("GET"));
+
+            self.connection.reset();
+
+            let request = ServerRequest::new(
+                &raw_request,
+                body_buf,
+                read_len,
+                response_buf,
+                &mut self.connection,
+            );
+            if let Some(method) = method {
+                let result = self
+                    .registration
+                    .handle(
+                        false,
+                        request.request.path.unwrap_or(""),
+                        method.into(),
+                        request,
+                    )
+                    .await;
+
+                match result {
+                    Result::Ok(_) => Ok(()),
+                    Result::Err(e) => {
+                        let (read_state, write_state) = self.connection.completion();
+
+                        if write_state == CompletionState::NotStarted
+                            && read_state == CompletionState::NotStarted
+                        {
+                            let request = ServerRequest::new(
+                                &raw_request,
+                                body_buf,
+                                read_len,
+                                response_buf,
+                                &mut self.connection,
+                            );
+
+                            request
+                                .into_response()
+                                .await?
+                                .status(500)
+                                .status_message(e.message())
+                                .complete()
+                                .await?;
+
+                            Ok(())
+                        } else {
+                            Err(Error::IncompleteBody)
+                        }
+                    }
+                }
+            } else {
+                ().handle(true, raw_request.path.unwrap_or(""), Method::Get, request)
+                    .await
+                    .map_err(|_| Error::InvalidBody)?;
+
+                Ok(())
             }
         }
     }
