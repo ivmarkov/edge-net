@@ -107,6 +107,7 @@ impl<'b, const N: usize> Display for Request<'b, N> {
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
     use core::future::Future;
+    use core::mem;
 
     use embedded_io::asynch::{Read, Write};
     use embedded_io::Io;
@@ -124,6 +125,311 @@ mod embedded_svc_compat {
     use crate::asynch::tcp::TcpAcceptor;
     use crate::close::{Close, CloseFn};
 
+    pub enum ServerRequestResponseState<'b, const N: usize, T> {
+        Request(Option<ServerRequestState<'b, N, T>>),
+        Response(Option<ServerResponseState<'b, T>>),
+        ResponseWrite(Option<ServerResponseWriteState<T>>),
+    }
+
+    pub struct ServerRequestState<'b, const N: usize, R> {
+        request: super::Request<'b, N>,
+        response_headers: crate::asynch::http::SendHeaders<'b>,
+        io: BodyCompletionTracker<'b, R>,
+    }
+
+    pub struct ServerResponseState<'b, W> {
+        headers: crate::asynch::http::SendHeaders<'b>,
+        io: SendBodyCompletionTracker<W>,
+    }
+
+    pub struct ServerResponseWriteState<W> {
+        io: SendBodyCompletionTracker<W>,
+    }
+
+    impl<'b, const N: usize, T> ServerRequestResponseState<'b, N, T> {
+        fn request(&self) -> &ServerRequestState<'b, N, T> {
+            match self {
+                Self::Request(request) => request.as_ref().unwrap(),
+                _ => panic!(),
+            }
+        }
+
+        fn request_mut(&mut self) -> &mut ServerRequestState<'b, N, T> {
+            match self {
+                Self::Request(request) => request.as_mut().unwrap(),
+                _ => panic!(),
+            }
+        }
+
+        fn response(&mut self) -> &mut ServerResponseState<'b, T> {
+            match self {
+                Self::Response(response) => response.as_mut().unwrap(),
+                _ => panic!(),
+            }
+        }
+
+        fn response_write(&mut self) -> &mut ServerResponseWriteState<T> {
+            match self {
+                Self::ResponseWrite(response_write) => response_write.as_mut().unwrap(),
+                _ => panic!(),
+            }
+        }
+
+        fn switch_response(&mut self)
+        where
+            T: Read + Write + Close + Complete,
+        {
+            match self {
+                Self::Request(request) => {
+                    let request = mem::replace(request, None).unwrap();
+
+                    let io = SendBodyCompletionTracker::new(
+                        &request.response_headers,
+                        request.io.release().release().release(),
+                    );
+                    *self = Self::Response(Some(ServerResponseState {
+                        headers: request.response_headers,
+                        io,
+                    }))
+                }
+                Self::Response(_) => {}
+                Self::ResponseWrite(_) => panic!(),
+            }
+        }
+
+        fn switch_response_write(&mut self)
+        where
+            T: Write + Close + Complete,
+        {
+            match self {
+                Self::Request(_) => panic!(),
+                Self::Response(_) => todo!(),
+                Self::ResponseWrite(_) => panic!(),
+            }
+        }
+    }
+
+    pub struct ServerHandlerRequest<'b, const N: usize, T>(
+        &'b mut ServerRequestResponseState<'b, N, T>,
+    );
+    pub struct ServerHandlerResponse<'b, const N: usize, T>(
+        &'b mut ServerRequestResponseState<'b, N, T>,
+    );
+
+    pub struct ServerHandlerResponseWrite<'b, const N: usize, T>(
+        &'b mut ServerRequestResponseState<'b, N, T>,
+    );
+
+    impl<'b, const N: usize, R> RequestId for ServerHandlerRequest<'b, N, R> {
+        fn get_request_id(&self) -> &'_ str {
+            todo!()
+        }
+    }
+
+    impl<'b, const N: usize, R> Headers for ServerHandlerRequest<'b, N, R> {
+        fn header(&self, name: &str) -> Option<&'_ str> {
+            self.0.request().request.header(name)
+        }
+    }
+
+    impl<'b, const N: usize, R> Query for ServerHandlerRequest<'b, N, R> {
+        fn query(&self) -> &'_ str {
+            todo!()
+        }
+    }
+
+    impl<'b, const N: usize, R> Io for ServerHandlerRequest<'b, N, R>
+    where
+        R: Io,
+    {
+        type Error = Error<R::Error>;
+    }
+
+    impl<'b, const N: usize, R> Read for ServerHandlerRequest<'b, N, R>
+    where
+        R: Read + Close + Complete + 'b,
+    {
+        type ReadFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<usize, Self::Error>>;
+
+        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+            async move { Ok(self.0.request_mut().io.read(buf).await?) }
+        }
+    }
+
+    impl<'b, const N: usize, R> Request for ServerHandlerRequest<'b, N, R>
+    where
+        R: Read + Write + Close + Complete + 'b,
+    {
+        type Headers<'a>
+        where
+            Self: 'a,
+        = &'a super::Request<'b, N>;
+        type Body<'a>
+        where
+            Self: 'a,
+        = &'a mut BodyCompletionTracker<'b, R>;
+
+        type Response = ServerHandlerResponse<'b, N, R>;
+        type ResponseHeaders<'a>
+        where
+            Self: 'a,
+        = &'a mut crate::asynch::http::SendHeaders<'b>;
+
+        type IntoResponseFuture = impl Future<Output = Result<Self::Response, Self::Error>>;
+
+        fn split<'a>(
+            &'a mut self,
+        ) -> (Self::Headers<'a>, Self::Body<'a>, Self::ResponseHeaders<'a>) {
+            let request = self.0.request_mut();
+
+            (
+                &request.request,
+                &mut request.io,
+                &mut request.response_headers,
+            )
+        }
+
+        fn into_response(self) -> Self::IntoResponseFuture
+        where
+            Self: Sized,
+        {
+            async move {
+                self.0.switch_response();
+
+                Ok(ServerHandlerResponse(self.0))
+            }
+        }
+    }
+
+    impl<'b, const N: usize, W> Io for ServerHandlerResponse<'b, N, W>
+    where
+        W: Io + Close,
+    {
+        type Error = Error<W::Error>;
+    }
+
+    impl<'b, const N: usize, W> SendStatus for ServerHandlerResponse<'b, N, W>
+    where
+        W: Close,
+    {
+        fn set_status(&mut self, status: u16) -> &mut Self {
+            self.0.response().headers.set_status(status);
+            self
+        }
+
+        fn set_status_message(&mut self, message: &str) -> &mut Self {
+            self.0.response().headers.set_status_message(message);
+            self
+        }
+    }
+
+    impl<'b, const N: usize, W> SendHeaders for ServerHandlerResponse<'b, N, W>
+    where
+        W: Close,
+    {
+        fn set_header(&mut self, name: &str, value: &str) -> &mut Self {
+            self.0.response().headers.set_header(name, value);
+            self
+        }
+    }
+
+    impl<'b, const N: usize, W> Response for ServerHandlerResponse<'b, N, W>
+    where
+        W: Write + Close + Complete + 'b,
+    {
+        type Write = ServerHandlerResponseWrite<'b, N, W>;
+
+        type IntoWriterFuture = impl Future<Output = Result<Self::Write, Self::Error>>;
+        type SubmitFuture<'a> = impl Future<Output = Result<Completion, Self::Error>>;
+        type CompleteFuture = impl Future<Output = Result<Completion, Self::Error>>;
+
+        fn into_writer(mut self) -> Self::IntoWriterFuture
+        where
+            Self: Sized,
+        {
+            async move {
+                let resp = self.0.response();
+
+                resp.io.write_all(resp.headers.payload()).await?;
+
+                self.0.switch_response_write();
+
+                Ok(ServerHandlerResponseWrite(self.0))
+            }
+        }
+
+        fn submit<'a>(self, data: &'a [u8]) -> Self::SubmitFuture<'a>
+        where
+            Self: Sized,
+        {
+            async move {
+                let mut writer = self.into_writer().await?;
+
+                writer.write_all(data).await?;
+
+                writer.complete().await
+            }
+        }
+
+        fn complete(self) -> Self::CompleteFuture
+        where
+            Self: Sized,
+        {
+            async move { self.into_writer().await?.complete().await }
+        }
+    }
+
+    impl<'b, const N: usize, W> Io for ServerHandlerResponseWrite<'b, N, W>
+    where
+        W: Write + Close + Complete,
+    {
+        type Error = Error<W::Error>;
+    }
+
+    impl<'b, const N: usize, W> Write for ServerHandlerResponseWrite<'b, N, W>
+    where
+        W: Write + Close + Complete + 'b,
+    {
+        type WriteFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<usize, Self::Error>>;
+
+        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+            async move { Ok(self.0.response_write().io.write(buf).await?) }
+        }
+
+        type FlushFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<(), Self::Error>>;
+
+        fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+            async move { Ok(self.0.response_write().io.flush().await?) }
+        }
+    }
+
+    impl<'b, const N: usize, W> ResponseWrite for ServerHandlerResponseWrite<'b, N, W>
+    where
+        W: Write + Close + Complete,
+    {
+        type CompleteFuture = impl Future<Output = Result<Completion, Self::Error>>;
+
+        fn complete(self) -> Self::CompleteFuture
+        where
+            Self: Sized,
+        {
+            async move {
+                Ok(unsafe { Completion::internal_new() }) // TODO
+            }
+        }
+    }
+
+    /////////////////////
+
     pub struct ServerRequest<'b, const N: usize, R> {
         request: &'b super::Request<'b, N>,
         response_headers: crate::asynch::http::SendHeaders<'b>,
@@ -134,7 +440,26 @@ mod embedded_svc_compat {
     where
         R: Read + Write + Close + Complete,
     {
-        fn new(
+        pub async fn new(
+            request: &'b super::Request<'b, N>,
+            body_buf: &'b mut [u8],
+            read_len: usize,
+            response_buf: &'b mut [u8],
+            input: R,
+        ) -> ServerRequest<'b, N, R> {
+            let io = BodyCompletionTracker::new(&request.headers, body_buf, read_len, input);
+
+            Self {
+                request,
+                response_headers: crate::asynch::http::SendHeaders::new(
+                    response_buf,
+                    &["200", "OK"],
+                ),
+                io,
+            }
+        }
+
+        fn wrap(
             request: &'b super::Request<'b, N>,
             body_buf: &'b mut [u8],
             read_len: usize,
@@ -528,7 +853,7 @@ mod embedded_svc_compat {
 
             self.connection.reset();
 
-            let request = ServerRequest::new(
+            let request = ServerRequest::wrap(
                 &raw_request,
                 body_buf,
                 read_len,
@@ -554,7 +879,7 @@ mod embedded_svc_compat {
                         if write_state == CompletionState::NotStarted
                             && read_state == CompletionState::NotStarted
                         {
-                            let request = ServerRequest::new(
+                            let request = ServerRequest::wrap(
                                 &raw_request,
                                 body_buf,
                                 read_len,
