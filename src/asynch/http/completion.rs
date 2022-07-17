@@ -13,7 +13,7 @@ mod embedded_svc_compat {
     };
 
     use crate::{
-        asynch::http::{Body, Error, PartiallyRead, SendBody},
+        asynch::http::{Body, BodyType, Error, PartiallyRead, SendBody},
         close::Close,
     };
 
@@ -174,15 +174,15 @@ mod embedded_svc_compat {
         T: Read,
     {
         pub fn new<const N: usize>(
-            headers: &crate::asynch::http::Headers<'b, N>,
+            body_type: BodyType,
             buf: &'b mut [u8],
             read_len: usize,
             input: T,
         ) -> Self {
-            Self(Body::new(headers, buf, read_len, input))
+            Self(Body::new(body_type, buf, read_len, input))
         }
 
-        pub fn wrap(body: Body<'b, PartiallyRead<'b, T>>) -> Self {
+        pub const fn wrap(body: Body<'b, PartiallyRead<'b, T>>) -> Self {
             Self(body)
         }
 
@@ -231,12 +231,17 @@ mod embedded_svc_compat {
     where
         T: Write,
     {
-        pub fn new<'b>(headers: &crate::asynch::http::SendHeaders<'b>, output: T) -> Self {
-            Self(SendBody::new(headers, output))
+        pub fn new(body_type: BodyType, output: T) -> Self {
+            Self(SendBody::new(body_type, output))
         }
 
-        pub fn wrap(body: SendBody<T>) -> Self {
-            Self(body)
+        pub const fn wrap(body: SendBody<T>) -> Self {
+            let mut this = Self(body);
+
+            let complete = this.0.is_complete();
+            this.as_raw_reader().as_raw_reader().set_complete(complete);
+
+            this
         }
 
         pub fn release(self) -> SendBody<T> {
