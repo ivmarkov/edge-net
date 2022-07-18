@@ -327,7 +327,7 @@ mod embedded_svc_compat {
 
     pub async fn process<const N: usize, H, T>(
         mut io: T,
-        handler: &ServerHandler<H>,
+        handler: ServerHandler<H>,
     ) -> Result<(), Error<T::Error>>
     where
         H: for<'a, 'b> HandlerRegistration<ServerRequest<'a, 'b, N, &'b mut T>>,
