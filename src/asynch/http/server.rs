@@ -325,7 +325,7 @@ mod embedded_svc_compat {
     //     }
     // }
 
-    pub async fn process<const N: usize, H, T>(
+    pub async fn handle_connection<const N: usize, H, T>(
         mut io: T,
         handler: ServerHandler<H>,
     ) -> Result<(), Error<T::Error>>
@@ -335,11 +335,11 @@ mod embedded_svc_compat {
     {
         loop {
             let mut buf = [0_u8; 1024];
-            process_request(&mut buf, &mut io, &handler).await?;
+            handle_request(&mut buf, &mut io, &handler).await?;
         }
     }
 
-    pub async fn process_request<'b, const N: usize, H, T>(
+    pub async fn handle_request<'b, const N: usize, H, T>(
         buf: &'b mut [u8],
         io: T,
         handler: &ServerHandler<H>,
