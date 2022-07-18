@@ -327,7 +327,7 @@ mod embedded_svc_compat {
 
     pub async fn handle_connection<const N: usize, H, T>(
         mut io: T,
-        handler: ServerHandler<H>,
+        handler: &ServerHandler<H>,
     ) -> Result<(), Error<T::Error>>
     where
         H: for<'a, 'b> HandlerRegistration<ServerRequest<'a, 'b, N, &'b mut T>>,
@@ -335,7 +335,7 @@ mod embedded_svc_compat {
     {
         loop {
             let mut buf = [0_u8; 1024];
-            handle_request(&mut buf, &mut io, &handler).await?;
+            handle_request(&mut buf, &mut io, handler).await?;
         }
     }
 
