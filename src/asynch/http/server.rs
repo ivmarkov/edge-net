@@ -133,16 +133,19 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct ServerRequest<'b, const N: usize, T>(&'b mut ServerRequestResponseState<'b, N, T>);
+    pub struct ServerRequest<'a, 'b, const N: usize, T>(
+        &'a mut ServerRequestResponseState<'b, N, T>,
+    );
 
-    impl<'b, const N: usize, T> ServerRequest<'b, N, T> {
+    impl<'a, 'b, const N: usize, T> ServerRequest<'a, 'b, N, T> {
         pub async fn new(
             buf: &'b mut [u8],
             mut io: T,
-            state: &'b mut ServerRequestResponseState<'b, N, T>,
-        ) -> Result<ServerRequest<'b, N, T>, Error<T::Error>>
+            state: &'a mut ServerRequestResponseState<'b, N, T>,
+        ) -> Result<ServerRequest<'a, 'b, N, T>, Error<T::Error>>
         where
             T: Read + Write,
+            'b: 'a,
         {
             let mut raw_request = Request::new();
 
@@ -164,76 +167,79 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct ServerResponseWrite<'b, const N: usize, T>(
-        &'b mut ServerRequestResponseState<'b, N, T>,
+    pub struct ServerResponseWrite<'a, 'b, const N: usize, T>(
+        &'a mut ServerRequestResponseState<'b, N, T>,
     );
 
-    impl<'b, const N: usize, R> Headers for ServerRequest<'b, N, R> {
+    impl<'a, 'b, const N: usize, R> Headers for ServerRequest<'a, 'b, N, R> {
         fn header(&self, name: &str) -> Option<&'_ str> {
             self.0.request().request.header(name)
         }
     }
 
-    impl<'b, const N: usize, R> Query for ServerRequest<'b, N, R> {
+    impl<'a, 'b, const N: usize, R> Query for ServerRequest<'a, 'b, N, R> {
         fn query(&self) -> &'_ str {
             todo!()
         }
     }
 
-    impl<'b, const N: usize, R> Io for ServerRequest<'b, N, R>
+    impl<'a, 'b, const N: usize, R> Io for ServerRequest<'a, 'b, N, R>
     where
         R: Io,
     {
         type Error = Error<R::Error>;
     }
 
-    impl<'b, const N: usize, R> Read for ServerRequest<'b, N, R>
+    impl<'a, 'b, const N: usize, R> Read for ServerRequest<'a, 'b, N, R>
     where
-        R: Read + 'b,
+        R: Read + 'a,
+        'b: 'a,
     {
-        type ReadFuture<'a>
+        type ReadFuture<'f>
         where
-            Self: 'a,
+            Self: 'f,
         = impl Future<Output = Result<usize, Self::Error>>;
 
-        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+        fn read<'f>(&'f mut self, buf: &'f mut [u8]) -> Self::ReadFuture<'f> {
             async move { Ok(self.0.request_mut().io.read(buf).await?) }
         }
     }
 
-    impl<'b, const N: usize, R> embedded_svc::http::server::asynch::Request for ServerRequest<'b, N, R>
+    impl<'a, 'b, const N: usize, R> embedded_svc::http::server::asynch::Request
+        for ServerRequest<'a, 'b, N, R>
     where
-        R: Read + Write + 'b,
+        'b: 'a,
+        R: Read + Write + 'a,
     {
-        type Headers<'a>
+        type Headers<'f>
         where
-            Self: 'a,
-        = &'a Request<'b, N>;
-        type Read<'a>
+            Self: 'f,
+        = &'f Request<'b, N>;
+        type Read<'f>
         where
-            Self: 'a,
-        = &'a mut Body<'b, R>;
+            Self: 'f,
+        = &'f mut Body<'b, R>;
 
-        type ResponseWrite = ServerResponseWrite<'b, N, R>;
+        type ResponseWrite = ServerResponseWrite<'a, 'b, N, R>;
 
-        type IntoResponseFuture<'a, H> =
+        type IntoResponseFuture<'f, H> =
             impl Future<Output = Result<Self::ResponseWrite, Self::Error>>;
         type IntoOkResponseFuture = impl Future<Output = Result<Self::ResponseWrite, Self::Error>>;
 
-        fn split<'a>(&'a mut self) -> (Self::Headers<'a>, Self::Read<'a>) {
+        fn split<'f>(&'f mut self) -> (Self::Headers<'f>, Self::Read<'f>) {
             let request = self.0.request_mut();
 
             (&request.request, &mut request.io)
         }
 
-        fn into_response<'a, H>(
+        fn into_response<'f, H>(
             self,
             status: u16,
-            message: Option<&'a str>,
+            message: Option<&'f str>,
             headers: H,
-        ) -> Self::IntoResponseFuture<'a, H>
+        ) -> Self::IntoResponseFuture<'f, H>
         where
-            H: IntoIterator<Item = (&'a str, &'a str)>,
+            H: IntoIterator<Item = (&'f str, &'f str)>,
             Self: Sized,
         {
             async move {
@@ -264,32 +270,33 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize, W> Io for ServerResponseWrite<'b, N, W>
+    impl<'a, 'b, const N: usize, W> Io for ServerResponseWrite<'a, 'b, N, W>
     where
         W: Write,
     {
         type Error = Error<W::Error>;
     }
 
-    impl<'b, const N: usize, W> Write for ServerResponseWrite<'b, N, W>
+    impl<'a, 'b, const N: usize, W> Write for ServerResponseWrite<'a, 'b, N, W>
     where
-        W: Write + 'b,
+        'b: 'a,
+        W: Write + 'a,
     {
-        type WriteFuture<'a>
+        type WriteFuture<'f>
         where
-            Self: 'a,
+            Self: 'f,
         = impl Future<Output = Result<usize, Self::Error>>;
 
-        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+        fn write<'f>(&'f mut self, buf: &'f [u8]) -> Self::WriteFuture<'f> {
             async move { Ok(self.0.response_write().write(buf).await?) }
         }
 
-        type FlushFuture<'a>
+        type FlushFuture<'f>
         where
-            Self: 'a,
+            Self: 'f,
         = impl Future<Output = Result<(), Self::Error>>;
 
-        fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+        fn flush<'f>(&'f mut self) -> Self::FlushFuture<'f> {
             async move { Ok(self.0.response_write().flush().await?) }
         }
     }
@@ -404,30 +411,23 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct ServerHandler<R, const N: usize, T>
+    pub struct ServerHandler<R, const N: usize, T>(R, core::marker::PhantomData<fn() -> T>)
     where
-        R: for<'b> HandlerRegistration<ServerRequest<'b, N, &'b mut T>>,
-    {
-        registration: R,
-        connection: T,
-    }
+        R: for<'b> HandlerRegistration<ServerRequest<'b, 'b, N, &'b mut T>>;
 
     impl<const N: usize, T> ServerHandler<(), N, T>
     where
-        T: Read + Write,
-        T: 'static, // TODO
+        T: Read + Write + 'static,
+        //T: 'static, // TODO
     {
-        pub fn new(connection: T) -> Self {
-            Self {
-                registration: (),
-                connection,
-            }
+        pub fn new() -> Self {
+            Self((), core::marker::PhantomData)
         }
     }
 
     impl<R, const N: usize, T> ServerHandler<R, N, T>
     where
-        R: for<'b> HandlerRegistration<ServerRequest<'b, N, &'b mut T>>,
+        R: for<'a, 'b> HandlerRegistration<ServerRequest<'a, 'b, N, &'b mut T>>,
         T: Read + Write + 'static,
     {
         pub fn handle<H>(
@@ -437,62 +437,75 @@ mod embedded_svc_compat {
             handler: H,
         ) -> Result<ServerHandler<SimpleHandlerRegistration<H, R>, N, T>, Error<T::Error>>
         where
-            H: for<'b> Handler<ServerRequest<'b, N, &'b mut T>> + 'static,
+            H: for<'a, 'b> Handler<ServerRequest<'a, 'b, N, &'b mut T>> + 'static,
         {
-            Ok(ServerHandler {
-                registration: SimpleHandlerRegistration {
+            Ok(ServerHandler(
+                SimpleHandlerRegistration {
                     path,
                     method,
                     handler,
-                    next: self.registration,
+                    next: self.0,
                 },
-                connection: self.connection,
-            })
+                self.1,
+            ))
         }
 
-        //     pub async fn process(&mut self, buf: &mut [u8]) -> Result<(), Error<T::Error>> {
-        //         loop {
-        //             self.process_request(buf).await?;
+        pub async fn process(&mut self, buf: &mut [u8], io: &mut T) -> Result<(), Error<T::Error>> {
+            loop {
+                self.process_request(buf, io).await?;
+            }
+        }
+
+        // async fn process_request2<'b>(
+        //     &'b mut self,
+        //     buf: &'b mut [u8],
+        //     io: T,
+        // ) -> Result<(), Error<T::Error>> {
+        //     let mut state = ServerRequestResponseState::New;
+
+        //     let result = self.handle_request(buf, &mut state, io).await;
+
+        //     match result {
+        //         Result::Ok(_) => Ok(()),
+        //         Result::Err(e) => {
+        //             let mut buf = [0_u8; 64];
+
+        //             if !state.complete_err(&mut buf, e.message()).await? {
+        //                 Err(Error::IncompleteBody)
+        //             } else {
+        //                 Ok(())
+        //             }
         //         }
         //     }
+        // }
 
         async fn process_request<'b>(
-            &'b mut self,
+            &mut self,
             buf: &'b mut [u8],
+            io: &'b mut T,
         ) -> Result<(), Error<T::Error>> {
             let mut state = ServerRequestResponseState::New;
 
-            let result = self.handle_request(buf, &mut state).await;
+            let request = ServerRequest::new(buf, io, &mut state).await?;
+
+            let path = request.0.request().request.path.unwrap_or("");
+            let result = if let Some(method) = request.0.request().request.method {
+                self.0.handle(false, path, method, request).await
+            } else {
+                ().handle(true, path, Method::Get, request).await
+            };
 
             match result {
                 Result::Ok(_) => Ok(()),
                 Result::Err(e) => {
                     let mut buf = [0_u8; 64];
 
-                    // if !state.complete_err(&mut buf, e.message()).await? {
-                    Err(Error::IncompleteBody)
-                    // } else {
-                    //     Ok(())
-                    // }
+                    if !state.complete_err(&mut buf, e.message()).await? {
+                        Err(Error::IncompleteBody)
+                    } else {
+                        Ok(())
+                    }
                 }
-            }
-        }
-
-        async fn handle_request<'a, 'b>(
-            &'a mut self,
-            buf: &'b mut [u8],
-            state: &'a mut ServerRequestResponseState<'a, N, &'a mut T>,
-        ) -> HandlerResult
-        where
-            'b: 'a,
-        {
-            let request = ServerRequest::new(buf, &mut self.connection, state).await?;
-
-            let path = request.0.request().request.path.unwrap_or("");
-            if let Some(method) = request.0.request().request.method {
-                self.registration.handle(false, path, method, request).await
-            } else {
-                ().handle(true, path, Method::Get, request).await
             }
         }
     }
