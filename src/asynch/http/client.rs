@@ -12,10 +12,10 @@ mod embedded_svc_compat {
     use embedded_svc::io::asynch::{Io, Read, Write};
 
     use crate::asynch::http::completion::{
-        BodyCompletionTracker, Complete, CompletionTracker, SendBodyCompletionTracker,
+        BodyCompletionTracker, CompletionTracker, SendBodyCompletionTracker,
     };
     use crate::asynch::http::{
-        send_headers, send_headers_end, send_request, BodyType, Error, PartiallyRead, Response,
+        send_headers, send_headers_end, send_request, BodyType, Error, Response,
     };
     use crate::asynch::tcp::TcpClientSocket;
     use crate::close::Close;
@@ -52,9 +52,9 @@ mod embedded_svc_compat {
         type RequestWrite<'a>
         where
             Self: 'a,
-        = ClientRequestWrite<'a, N, CompletionTracker<&'a mut T>>;
+        = ClientRequestWrite<'a, N, &'a mut T>;
 
-        type RequestFuture<'a>
+        type RequestFuture<'a, H>
         where
             Self: 'a,
         = impl Future<Output = Result<Self::RequestWrite<'a>, Self::Error>>;
@@ -64,7 +64,7 @@ mod embedded_svc_compat {
             method: Method,
             uri: &'a str,
             headers: H,
-        ) -> Self::RequestFuture<'a>
+        ) -> Self::RequestFuture<'a, H>
         where
             H: IntoIterator<Item = (&'a str, &'a str)>,
         {
@@ -75,32 +75,38 @@ mod embedded_svc_compat {
                     self.socket.connect(self.addr).await.map_err(Error::Io)?;
                 }
 
-                Ok(Self::RequestWrite::new(
+                let write = Self::RequestWrite::new(
                     method,
                     uri,
                     headers,
                     self.buf,
                     CompletionTracker::new(&mut self.socket),
-                ))
+                )
+                .await?;
+
+                Ok(write)
             }
         }
     }
 
-    pub struct ClientRequestWrite<'b, const N: usize, T> {
+    pub struct ClientRequestWrite<'b, const N: usize, T>
+    where
+        T: Close,
+    {
         buf: &'b mut [u8],
         io: SendBodyCompletionTracker<T>,
     }
 
     impl<'b, const N: usize, T> ClientRequestWrite<'b, N, T>
     where
-        T: Write,
+        T: Write + Close,
     {
         async fn new<'a, H>(
             method: Method,
             uri: &'a str,
             headers: H,
             buf: &'b mut [u8],
-            mut io: T,
+            mut io: CompletionTracker<T>,
         ) -> Result<ClientRequestWrite<'b, N, T>, Error<T::Error>>
         where
             H: IntoIterator<Item = (&'a str, &'a str)>,
@@ -118,40 +124,40 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize, T> Io for ClientRequestWrite<'b, N, T>
     where
-        T: Io,
+        T: Io + Close,
     {
-        type Error = T::Error;
+        type Error = Error<T::Error>;
     }
 
     impl<'b, const N: usize, T> Write for ClientRequestWrite<'b, N, T>
     where
-        T: Write + Close + Complete,
+        T: Write + Close,
     {
         type WriteFuture<'a>
         where
             Self: 'a,
-        = T::WriteFuture<'a>;
+        = impl Future<Output = Result<usize, Self::Error>>;
 
         fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-            self.io.write(buf)
+            async move { self.io.write(buf).await }
         }
 
         type FlushFuture<'a>
         where
             Self: 'a,
-        = T::FlushFuture<'a>;
+        = impl Future<Output = Result<(), Self::Error>>;
 
         fn flush(&mut self) -> Self::FlushFuture<'_> {
-            self.io.flush()
+            async move { self.io.flush().await }
         }
     }
 
     impl<'b, const N: usize, T> embedded_svc::http::client::asynch::RequestWrite
         for ClientRequestWrite<'b, N, T>
     where
-        T: Read + Write + Close + Complete,
+        T: Read + Write + Close,
     {
-        type Response = ClientResponse<'b, N, BodyCompletionTracker<'b, T>>;
+        type Response = ClientResponse<'b, N, T>;
 
         type IntoResponseFuture = impl Future<Output = Result<Self::Response, Self::Error>>;
 
@@ -162,25 +168,24 @@ mod embedded_svc_compat {
             async move {
                 self.io.flush().await?;
 
-                if !self.io.is_complete() {
-                    self.io.close();
+                if !self.io.body().is_complete() {
+                    self.io.body().close();
 
                     Err(Error::IncompleteBody)
                 } else {
                     let mut response = crate::asynch::http::Response::new();
-                    let io = self.io.release().release();
+                    let mut io = self.io.release().release();
 
                     match response.receive(self.buf, &mut io).await {
-                        Ok((buf, read_len)) => Ok(Self::Response {
-                            response,
-                            io: BodyCompletionTracker::new(
-                                BodyType::from_headers(&response.headers),
-                                buf,
-                                read_len,
-                                io,
-                            ),
-                        }),
-                        Err((mut io, e)) => {
+                        Ok((buf, read_len)) => {
+                            let body_type = BodyType::from_headers(response.headers.iter());
+
+                            Ok(Self::Response {
+                                response,
+                                io: BodyCompletionTracker::new(body_type, buf, read_len, io),
+                            })
+                        }
+                        Err(e) => {
                             io.close();
 
                             Err(e)
@@ -191,13 +196,17 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct ClientResponse<'b, const N: usize, T> {
+    pub struct ClientResponse<'b, const N: usize, T>
+    where
+        T: Close,
+    {
         response: Response<'b, N>,
-        io: BodyCompletionTracker<'b, PartiallyRead<'b, T>>,
+        io: BodyCompletionTracker<'b, T>,
     }
 
-    impl<'b, const N: usize, T> embedded_svc::http::client::asynch::Status
-        for ClientResponse<'b, N, T>
+    impl<'b, const N: usize, T> embedded_svc::http::client::asynch::Status for ClientResponse<'b, N, T>
+    where
+        T: Close,
     {
         fn status(&self) -> u16 {
             self.response.code.unwrap_or(200)
@@ -208,45 +217,52 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize, T> embedded_svc::http::client::asynch::Headers
-        for ClientResponse<'b, N, T>
+    impl<'b, const N: usize, T> embedded_svc::http::client::asynch::Headers for ClientResponse<'b, N, T>
+    where
+        T: Close,
     {
         fn header(&self, name: &str) -> Option<&'_ str> {
             self.response.headers.header(name)
         }
     }
 
-    impl<'b, const N: usize, R> embedded_svc::io::Io for ClientResponse<'b, N, R>
+    impl<'b, const N: usize, T> embedded_svc::io::Io for ClientResponse<'b, N, T>
     where
-        R: Io,
+        T: Io + Close,
     {
-        type Error = R::Error;
+        type Error = Error<T::Error>;
     }
 
-    impl<'b, const N: usize, R> embedded_svc::io::asynch::Read for ClientResponse<'b, N, R>
+    impl<'b, const N: usize, T> embedded_svc::io::asynch::Read for ClientResponse<'b, N, T>
     where
-        R: Read + Close,
+        T: Read + Close,
     {
         type ReadFuture<'a>
         where
             Self: 'a,
-        = R::ReadFuture<'a>;
+        = impl Future<Output = Result<usize, Self::Error>>;
 
         fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-            self.io.read(buf)
+            async move { self.io.read(buf).await }
         }
     }
 
-    impl<'b, const N: usize, R> embedded_svc::http::client::asynch::Response
-        for ClientResponse<'b, N, R>
+    impl<'b, const N: usize, T> embedded_svc::http::client::asynch::Response
+        for ClientResponse<'b, N, T>
     where
-        R: Read + Close,
+        T: Read + Close,
     {
-        type Headers<'a> = &'a Response<'a, N>;
+        type Headers<'a>
+        where
+            Self: 'a,
+        = &'a Response<'b, N>;
 
-        type Read<'a> = &'a mut BodyCompletionTracker<R>;
+        type Read<'a>
+        where
+            Self: 'a,
+        = &'a mut BodyCompletionTracker<'b, T>;
 
-        fn split<'a>(&mut self) -> (Self::Headers<'a>, Self::Read<'a>)
+        fn split<'a>(&'a mut self) -> (Self::Headers<'a>, Self::Read<'a>)
         where
             Self: Sized,
         {

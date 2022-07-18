@@ -17,7 +17,7 @@ pub use embedded_svc_compat::*;
 
 pub mod client;
 pub mod completion;
-pub mod server;
+//pub mod server;
 
 /// An error in parsing the headers or the body.
 #[derive(Debug)]
@@ -260,7 +260,12 @@ where
 {
     let status_str = status.map(|status| heapless::String::<5>::from(status));
 
-    send_status_line(status_str.map(|status| status.as_str()), reason, output).await
+    send_status_line(
+        status_str.as_ref().map(|status| status.as_str()),
+        reason,
+        output,
+    )
+    .await
 }
 
 pub async fn send_headers<'a, H, W>(headers: H, output: W) -> Result<BodyType, Error<W::Error>>
@@ -295,7 +300,7 @@ where
         output.write_all(name.as_bytes()).await.map_err(Error::Io)?;
         output.write_all(b": ").await.map_err(Error::Io)?;
         output.write_all(value).await.map_err(Error::Io)?;
-        output.write_all(b"\r\n").await.map_err(Error::Io);
+        output.write_all(b"\r\n").await.map_err(Error::Io)?;
     }
 
     Ok(body)
@@ -312,7 +317,7 @@ where
 pub struct Headers<'b, const N: usize>([httparse::Header<'b>; N]);
 
 impl<'b, const N: usize> Headers<'b, N> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self([httparse::EMPTY_HEADER; N])
     }
 
@@ -381,9 +386,9 @@ impl<'b, const N: usize> Headers<'b, N> {
             .0
             .iter()
             .enumerate()
-            .find(|(index, header)| UncasedStr::new(header.name) == UncasedStr::new(name));
+            .find(|(_, header)| UncasedStr::new(header.name) == UncasedStr::new(name));
 
-        if let Some((index, _)) = index {
+        if let Some((mut index, _)) = index {
             while index < self.0.len() - 1 {
                 self.0[index] = self.0[index + 1];
 
@@ -418,7 +423,7 @@ impl<'b, const N: usize> Headers<'b, N> {
         self.set("Transfer-Encoding", transfer_encoding)
     }
 
-    pub fn set_connection(&self, connection: &'b str) -> &mut Self {
+    pub fn set_connection(&mut self, connection: &'b str) -> &mut Self {
         self.set("Connection", connection)
     }
 
@@ -478,21 +483,16 @@ impl BodyType {
 }
 
 pub enum Body<'b, R> {
-    Close(R),
-    ContentLen(ContentLenRead<R>),
-    Chunked(ChunkedRead<'b, R>),
+    Close(PartiallyRead<'b, R>),
+    ContentLen(ContentLenRead<PartiallyRead<'b, R>>),
+    Chunked(ChunkedRead<'b, PartiallyRead<'b, R>>),
 }
 
 impl<'b, R> Body<'b, R>
 where
     R: Read,
 {
-    pub fn new(
-        body_type: BodyType,
-        buf: &'b mut [u8],
-        read_len: usize,
-        input: R,
-    ) -> Body<'b, PartiallyRead<'b, R>> {
+    pub fn new(body_type: BodyType, buf: &'b mut [u8], read_len: usize, input: R) -> Self {
         match body_type {
             BodyType::Chunked => Body::Chunked(ChunkedRead::new(
                 PartiallyRead::new(&[], input),
@@ -521,17 +521,17 @@ where
 
     pub fn as_raw_reader(&mut self) -> &mut R {
         match self {
-            Self::Close(r) => r,
-            Self::ContentLen(r) => &mut r.input,
-            Self::Chunked(r) => &mut r.input,
+            Self::Close(r) => &mut r.input,
+            Self::ContentLen(r) => &mut r.input.input,
+            Self::Chunked(r) => &mut r.input.input,
         }
     }
 
     pub fn release(self) -> R {
         match self {
-            Self::Close(r) => r,
-            Self::ContentLen(r) => r.release(),
-            Self::Chunked(r) => r.release(),
+            Self::Close(r) => r.release(),
+            Self::ContentLen(r) => r.release().release(),
+            Self::Chunked(r) => r.release().release(),
         }
     }
 }
@@ -1228,7 +1228,11 @@ pub struct Request<'b, const N: usize> {
 
 impl<'b, const N: usize> Request<'b, N> {
     pub const fn new() -> Self {
-        Default::default()
+        Self {
+            method: None,
+            path: None,
+            headers: Headers::<N>::new(),
+        }
     }
 
     pub async fn receive<R>(
@@ -1312,7 +1316,11 @@ pub struct Response<'b, const N: usize> {
 
 impl<'b, const N: usize> Response<'b, N> {
     pub const fn new() -> Self {
-        Default::default()
+        Self {
+            code: None,
+            reason: None,
+            headers: Headers::<N>::new(),
+        }
     }
 
     pub async fn receive<R>(

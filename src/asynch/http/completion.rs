@@ -13,27 +13,9 @@ mod embedded_svc_compat {
     };
 
     use crate::{
-        asynch::http::{Body, BodyType, Error, PartiallyRead, SendBody},
+        asynch::http::{Body, BodyType, Error, SendBody},
         close::Close,
     };
-
-    pub trait Complete {
-        fn complete_read(&mut self, complete: bool);
-        fn complete_write(&mut self, complete: bool);
-    }
-
-    impl<C> Complete for &mut C
-    where
-        C: Complete,
-    {
-        fn complete_read(&mut self, complete: bool) {
-            (*self).complete_read(complete);
-        }
-
-        fn complete_write(&mut self, complete: bool) {
-            (*self).complete_write(complete);
-        }
-    }
 
     #[derive(Copy, Clone, Eq, PartialEq, Debug)]
     pub enum CompletionState {
@@ -75,13 +57,8 @@ mod embedded_svc_compat {
         pub fn completion(&self) -> (CompletionState, CompletionState) {
             (self.read, self.write)
         }
-    }
 
-    impl<T> Complete for CompletionTracker<T>
-    where
-        T: Close,
-    {
-        fn complete_read(&mut self, complete: bool) {
+        pub fn complete_read(&mut self, complete: bool) {
             self.read = if complete {
                 CompletionState::Complete
             } else {
@@ -89,7 +66,7 @@ mod embedded_svc_compat {
             };
         }
 
-        fn complete_write(&mut self, complete: bool) {
+        pub fn complete_write(&mut self, complete: bool) {
             self.write = if complete {
                 CompletionState::Complete
             } else {
@@ -167,40 +144,54 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct BodyCompletionTracker<'b, T>(Body<'b, PartiallyRead<'b, T>>);
+    pub struct BodyCompletionTracker<'b, T>(Body<'b, CompletionTracker<T>>)
+    where
+        T: Close;
 
     impl<'b, T> BodyCompletionTracker<'b, T>
     where
-        T: Read,
+        T: Read + Close,
     {
-        pub fn new<const N: usize>(
+        pub fn new(
             body_type: BodyType,
             buf: &'b mut [u8],
             read_len: usize,
-            input: T,
+            input: CompletionTracker<T>,
         ) -> Self {
-            Self(Body::new(body_type, buf, read_len, input))
+            Self::wrap(Body::new(body_type, buf, read_len, input))
         }
 
-        pub const fn wrap(body: Body<'b, PartiallyRead<'b, T>>) -> Self {
-            Self(body)
+        pub fn wrap(body: Body<'b, CompletionTracker<T>>) -> Self {
+            let mut this = Self(body);
+
+            this.update_completion();
+            this
         }
 
-        pub fn release(self) -> Body<'b, PartiallyRead<'b, T>> {
+        pub fn release(self) -> Body<'b, CompletionTracker<T>> {
             self.0
+        }
+
+        pub fn body(&mut self) -> &mut Body<'b, CompletionTracker<T>> {
+            &mut self.0
+        }
+
+        fn update_completion(&mut self) {
+            let complete = self.body().is_complete();
+            self.body().as_raw_reader().complete_read(complete);
         }
     }
 
     impl<'b, T> Io for BodyCompletionTracker<'b, T>
     where
-        T: Io,
+        T: Io + Close,
     {
         type Error = Error<T::Error>;
     }
 
     impl<'b, T> Read for BodyCompletionTracker<'b, T>
     where
-        T: Read + Close + Complete,
+        T: Read + Close,
     {
         type ReadFuture<'a>
         where
@@ -214,51 +205,55 @@ mod embedded_svc_compat {
                     e
                 })?;
 
-                let complete = self.0.is_complete();
-                self.0
-                    .as_raw_reader()
-                    .as_raw_reader()
-                    .complete_read(complete);
-
+                self.update_completion();
                 Ok(size)
             }
         }
     }
 
-    pub struct SendBodyCompletionTracker<T>(SendBody<T>);
+    pub struct SendBodyCompletionTracker<T>(SendBody<CompletionTracker<T>>)
+    where
+        T: Close;
 
     impl<T> SendBodyCompletionTracker<T>
     where
-        T: Write,
+        T: Write + Close,
     {
-        pub fn new(body_type: BodyType, output: T) -> Self {
-            Self(SendBody::new(body_type, output))
+        pub fn new(body_type: BodyType, output: CompletionTracker<T>) -> Self {
+            Self::wrap(SendBody::new(body_type, output))
         }
 
-        pub const fn wrap(body: SendBody<T>) -> Self {
+        pub fn wrap(body: SendBody<CompletionTracker<T>>) -> Self {
             let mut this = Self(body);
 
-            let complete = this.0.is_complete();
-            this.as_raw_reader().as_raw_reader().set_complete(complete);
-
+            this.update_completion();
             this
         }
 
-        pub fn release(self) -> SendBody<T> {
+        pub fn release(self) -> SendBody<CompletionTracker<T>> {
             self.0
+        }
+
+        pub fn body(&mut self) -> &mut SendBody<CompletionTracker<T>> {
+            &mut self.0
+        }
+
+        fn update_completion(&mut self) {
+            let complete = self.body().is_complete();
+            self.body().as_raw_writer().complete_write(complete);
         }
     }
 
     impl<T> Io for SendBodyCompletionTracker<T>
     where
-        T: Io,
+        T: Io + Close,
     {
         type Error = Error<T::Error>;
     }
 
     impl<T> Write for SendBodyCompletionTracker<T>
     where
-        T: Write + Close + Complete,
+        T: Write + Close,
     {
         type WriteFuture<'a>
         where
@@ -272,9 +267,7 @@ mod embedded_svc_compat {
                     e
                 })?;
 
-                let complete = self.0.is_complete();
-                self.0.as_raw_writer().complete_write(complete);
-
+                self.update_completion();
                 Ok(size)
             }
         }
@@ -289,7 +282,11 @@ mod embedded_svc_compat {
                 self.0.flush().await.map_err(|e| {
                     self.0.close();
                     e
-                })
+                })?;
+
+                self.update_completion();
+
+                Ok(())
             }
         }
     }
