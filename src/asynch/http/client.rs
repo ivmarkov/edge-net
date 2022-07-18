@@ -101,7 +101,7 @@ mod embedded_svc_compat {
     where
         T: Write + Close,
     {
-        async fn new<'a, H>(
+        pub async fn new<'a, H>(
             method: Method,
             uri: &'a str,
             headers: H,

@@ -17,7 +17,7 @@ pub use embedded_svc_compat::*;
 
 pub mod client;
 pub mod completion;
-//pub mod server;
+pub mod server;
 
 /// An error in parsing the headers or the body.
 #[derive(Debug)]
@@ -1537,6 +1537,12 @@ mod embedded_svc_compat {
                 super::Method::Link => Method::Link,
                 super::Method::Unlink => Method::Unlink,
             }
+        }
+    }
+
+    impl<'b, const N: usize> embedded_svc::http::Query for super::Request<'b, N> {
+        fn query(&self) -> &'_ str {
+            todo!()
         }
     }
 
