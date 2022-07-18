@@ -1,6 +1,7 @@
 use embedded_io::asynch::Read;
 
-use embedded_svc::http::client::asynch::{Client as _, Request, Response, SendHeaders};
+use embedded_svc::http::client::asynch::{Client as _, RequestWrite};
+use embedded_svc::http::Method;
 
 use embedded_svc_impl::asynch::http::client::Client;
 use embedded_svc_impl::asynch::stdnal::StdTcpClientSocket;
@@ -39,20 +40,18 @@ where
     T: TcpClientSocket,
     T::Error: std::error::Error + Send + Sync + 'static,
 {
-    let request = client.get(uri).await?;
-
-    let (header, mut body) = request
-        .header("Host", "34.227.213.82")
-        .submit()
+    let mut response = client
+        .request(Method::Get, uri, &[("Host", "34.227.213.82")])
         .await?
-        .split();
+        .submit()
+        .await?;
 
     let mut result = Vec::new();
 
     let mut buf = [0_u8; 1024];
 
     loop {
-        let len = body.read(&mut buf).await?;
+        let len = response.read(&mut buf).await?;
 
         if len > 0 {
             result.extend_from_slice(&buf[0..len]);
@@ -64,7 +63,7 @@ where
     println!(
         "Request to httpbin.org, URI \"{}\" returned:\nHeader:\n{}\n\nBody:\n=================\n{}\n=================\n\n\n\n",
         uri,
-        header,
+        response,
         std::str::from_utf8(&result)?);
 
     Ok(())

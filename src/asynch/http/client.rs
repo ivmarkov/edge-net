@@ -3,6 +3,7 @@ pub use embedded_svc_compat::*;
 
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
+    use core::fmt::Display;
     use core::future::Future;
     use core::str;
 
@@ -54,20 +55,17 @@ mod embedded_svc_compat {
             Self: 'a,
         = ClientRequestWrite<'a, N, &'a mut T>;
 
-        type RequestFuture<'a, H>
+        type RequestFuture<'a>
         where
             Self: 'a,
         = impl Future<Output = Result<Self::RequestWrite<'a>, Self::Error>>;
 
-        fn request<'a, H>(
+        fn request<'a>(
             &'a mut self,
             method: Method,
             uri: &'a str,
-            headers: H,
-        ) -> Self::RequestFuture<'a, H>
-        where
-            H: IntoIterator<Item = (&'a str, &'a str)>,
-        {
+            headers: &'a [(&'a str, &'a str)],
+        ) -> Self::RequestFuture<'a> {
             async move {
                 if !self.socket.is_connected().await.map_err(Error::Io)? {
                     // TODO: Need to validate that the socket is still alive
@@ -101,16 +99,13 @@ mod embedded_svc_compat {
     where
         T: Write + Close,
     {
-        pub async fn new<'a, H>(
+        pub async fn new<'a>(
             method: Method,
             uri: &'a str,
-            headers: H,
+            headers: &'a [(&'a str, &'a str)],
             buf: &'b mut [u8],
             mut io: CompletionTracker<T>,
-        ) -> Result<ClientRequestWrite<'b, N, T>, Error<T::Error>>
-        where
-            H: IntoIterator<Item = (&'a str, &'a str)>,
-        {
+        ) -> Result<ClientRequestWrite<'b, N, T>, Error<T::Error>> {
             send_request(Some(method.into()), Some(uri), &mut io).await?;
             let body_type = send_headers(headers, &mut io).await?;
             send_headers_end(&mut io).await?;
@@ -202,6 +197,15 @@ mod embedded_svc_compat {
     {
         response: Response<'b, N>,
         io: BodyCompletionTracker<'b, T>,
+    }
+
+    impl<'b, const N: usize, T> Display for ClientResponse<'b, N, T>
+    where
+        T: Close,
+    {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            self.response.fmt(f)
+        }
     }
 
     impl<'b, const N: usize, T> embedded_svc::http::client::asynch::Status for ClientResponse<'b, N, T>

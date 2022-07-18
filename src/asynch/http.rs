@@ -271,12 +271,12 @@ where
 pub async fn send_headers<'a, H, W>(headers: H, output: W) -> Result<BodyType, Error<W::Error>>
 where
     W: Write,
-    H: IntoIterator<Item = (&'a str, &'a str)>,
+    H: IntoIterator<Item = &'a (&'a str, &'a str)>,
 {
     send_raw_headers(
         headers
             .into_iter()
-            .map(|(name, value)| (name, value.as_bytes())),
+            .map(|(name, value)| (*name, value.as_bytes())),
         output,
     )
     .await
@@ -802,7 +802,7 @@ where
 
     // Extract the hex digits for the current chunk size.
     async fn parse_digits<'a>(
-        &mut self,
+        &'a mut self,
         digits: &'a mut [u8],
     ) -> Result<Option<&'a [u8]>, Error<R::Error>> {
         // Number of hex digits that have been extracted.
