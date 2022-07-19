@@ -9,6 +9,7 @@ mod embedded_svc_compat {
     use embedded_io::asynch::{Read, Write};
     use embedded_io::Io;
 
+    use embedded_svc::executor::asynch::LocalSpawner;
     use embedded_svc::http::headers::{content_len, content_type, ContentLenParseBuf};
     use embedded_svc::http::server::asynch::Connection;
     use embedded_svc::utils::http::server::registration::asynch::{
@@ -222,48 +223,12 @@ mod embedded_svc_compat {
         }
     }
 
-    ///////////////////////////////
-
     pub type HandleConnectionFuture<
         const N: usize,
         const B: usize,
         T: Read + Write,
         H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>>,
     > = impl Future<Output = Result<(), Error<T::Error>>>;
-
-    pub trait Spawner<const N: usize, const B: usize, T, H>
-    where
-        T: Read + Write,
-        H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>>,
-    {
-        fn spawn(&mut self, future: HandleConnectionFuture<N, B, T, H>);
-    }
-
-    pub struct Server<const N: usize, const B: usize, A, F>(A, F);
-
-    impl<'t, const N: usize, const B: usize, A, F, H> Server<N, B, A, F>
-    where
-        A: TcpAcceptor<'t>,
-        F: Fn() -> ServerHandler<H>,
-        H: for<'b> HandlerRegistration<
-            ServerConnection<'b, N, &'b mut <A as TcpAcceptor<'t>>::Connection<'t>>,
-        >,
-    {
-        pub fn new(acceptor: A, handler_factory: F) -> Self {
-            Self(acceptor, handler_factory)
-        }
-
-        pub async fn handle<S>(&mut self, spawner: &mut S) -> Result<(), Error<A::Error>>
-        where
-            S: Spawner<N, B, <A as TcpAcceptor<'t>>::Connection<'t>, H>,
-        {
-            loop {
-                let io = self.0.accept().await.map_err(Error::Io)?;
-
-                spawner.spawn(handle_connection::<N, B, _, _>(io, (self.1)()));
-            }
-        }
-    }
 
     pub fn handle_connection<const N: usize, const B: usize, T, H>(
         mut io: T,
@@ -329,6 +294,79 @@ mod embedded_svc_compat {
             Ok(())
         } else {
             Err(Error::IncompleteBody)
+        }
+    }
+
+    pub trait Spawner<const N: usize, const B: usize, T, H>
+    where
+        T: Read + Write,
+        H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>>,
+    {
+        fn spawn(&mut self, future: HandleConnectionFuture<N, B, T, H>);
+    }
+
+    impl<const N: usize, const B: usize, T, H, S> Spawner<N, B, T, H> for &mut S
+    where
+        S: Spawner<N, B, T, H>,
+        T: Read + Write,
+        H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>>,
+    {
+        fn spawn(&mut self, future: HandleConnectionFuture<N, B, T, H>) {
+            (*self).spawn(future)
+        }
+    }
+
+    pub struct GenericSpawner<L>(L);
+
+    impl<L> GenericSpawner<L> {
+        pub const fn new(local_spawner: L) -> Self {
+            Self(local_spawner)
+        }
+    }
+
+    impl<'a, const N: usize, const B: usize, T, H, L> Spawner<N, B, T, H> for GenericSpawner<L>
+    where
+        T: Read + Write + 'a,
+        H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>> + 'a,
+        L: LocalSpawner<'a>,
+    {
+        fn spawn(&mut self, future: HandleConnectionFuture<N, B, T, H>) {
+            self.0.spawn_local(future).unwrap();
+        }
+    }
+
+    pub struct Server<const N: usize, const B: usize, A, F, S> {
+        acceptor: A,
+        handler_factory: F,
+        spawner: S,
+    }
+
+    impl<'t, const N: usize, const B: usize, A, F, S, H> Server<N, B, A, F, S>
+    where
+        A: TcpAcceptor<'t>,
+        F: Fn() -> ServerHandler<H>,
+        S: Spawner<N, B, <A as TcpAcceptor<'t>>::Connection<'t>, H>,
+        H: for<'b> HandlerRegistration<
+            ServerConnection<'b, N, &'b mut <A as TcpAcceptor<'t>>::Connection<'t>>,
+        >,
+    {
+        pub fn new(acceptor: A, handler_factory: F, spawner: S) -> Self {
+            Self {
+                acceptor,
+                handler_factory,
+                spawner,
+            }
+        }
+
+        pub async fn handle(&mut self) -> Result<(), Error<A::Error>> {
+            loop {
+                let io = self.acceptor.accept().await.map_err(Error::Io)?;
+
+                self.spawner.spawn(handle_connection::<N, B, _, _>(
+                    io,
+                    (self.handler_factory)(),
+                ));
+            }
         }
     }
 }
