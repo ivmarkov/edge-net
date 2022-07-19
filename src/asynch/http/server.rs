@@ -10,7 +10,7 @@ mod embedded_svc_compat {
     use embedded_io::Io;
 
     use embedded_svc::http::headers::{content_len, content_type, ContentLenParseBuf};
-    use embedded_svc::http::server::asynch::{Headers, Query};
+    use embedded_svc::http::server::asynch::Connection;
     use embedded_svc::utils::http::server::registration::asynch::{
         HandlerRegistration, ServerHandler,
     };
@@ -22,10 +22,15 @@ mod embedded_svc_compat {
     use crate::asynch::tcp::TcpAcceptor;
     use crate::close::{Close, CloseFn};
 
-    pub enum ServerRequestResponseState<'b, const N: usize, T> {
-        New,
-        Request(Option<ServerRequestState<'b, N, T>>),
-        ResponseWrite(Option<SendBody<T>>),
+    struct PrivateData;
+
+    pub struct ServerRequest(PrivateData);
+
+    pub struct ServerResponse(PrivateData);
+
+    pub enum ServerConnection<'b, const N: usize, T> {
+        RequestState(Option<ServerRequestState<'b, N, T>>),
+        ResponseState(Option<SendBody<T>>),
     }
 
     pub struct ServerRequestState<'b, const N: usize, T> {
@@ -33,24 +38,48 @@ mod embedded_svc_compat {
         io: Body<'b, T>,
     }
 
-    impl<'b, const N: usize, T> ServerRequestResponseState<'b, N, T> {
+    impl<'b, const N: usize, T> ServerConnection<'b, N, T> {
+        pub async fn new(
+            buf: &'b mut [u8],
+            mut io: T,
+        ) -> Result<ServerConnection<'b, N, T>, Error<T::Error>>
+        where
+            T: Read + Write,
+        {
+            let mut raw_request = Request::new();
+
+            let (buf, read_len) = raw_request.receive(buf, &mut io).await?;
+
+            let body = Body::new(
+                BodyType::from_headers(raw_request.headers.iter()),
+                buf,
+                read_len,
+                io,
+            );
+
+            Ok(Self::RequestState(Some(ServerRequestState {
+                request: raw_request,
+                io: body,
+            })))
+        }
+
         fn request(&self) -> &ServerRequestState<'b, N, T> {
             match self {
-                Self::Request(request) => request.as_ref().unwrap(),
+                Self::RequestState(request) => request.as_ref().unwrap(),
                 _ => panic!(),
             }
         }
 
         fn request_mut(&mut self) -> &mut ServerRequestState<'b, N, T> {
             match self {
-                Self::Request(request) => request.as_mut().unwrap(),
+                Self::RequestState(request) => request.as_mut().unwrap(),
                 _ => panic!(),
             }
         }
 
         fn response_write(&mut self) -> &mut SendBody<T> {
             match self {
-                Self::ResponseWrite(response_write) => response_write.as_mut().unwrap(),
+                Self::ResponseState(response_write) => response_write.as_mut().unwrap(),
                 _ => panic!(),
             }
         }
@@ -66,8 +95,7 @@ mod embedded_svc_compat {
             T: Read + Write,
         {
             match self {
-                Self::New => panic!(),
-                Self::Request(request) => {
+                Self::RequestState(request) => {
                     let io = &mut request.as_mut().unwrap().io;
 
                     while io.read(buf).await? > 0 {}
@@ -81,11 +109,11 @@ mod embedded_svc_compat {
 
                     let io = SendBody::new(body_type, io);
 
-                    *self = Self::ResponseWrite(Some(io));
+                    *self = Self::ResponseState(Some(io));
 
                     Ok(Some(self.response_write()))
                 }
-                Self::ResponseWrite(_) => Ok(None),
+                Self::ResponseState(_) => Ok(None),
             }
         }
 
@@ -135,169 +163,63 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct ServerRequest<'a, 'b, const N: usize, T>(
-        &'a mut ServerRequestResponseState<'b, N, T>,
-    );
-
-    impl<'a, 'b, const N: usize, T> ServerRequest<'a, 'b, N, T> {
-        pub async fn new(
-            buf: &'b mut [u8],
-            mut io: T,
-            state: &'a mut ServerRequestResponseState<'b, N, T>,
-        ) -> Result<ServerRequest<'a, 'b, N, T>, Error<T::Error>>
-        where
-            T: Read + Write,
-            'b: 'a,
-        {
-            let mut raw_request = Request::new();
-
-            let (buf, read_len) = raw_request.receive(buf, &mut io).await?;
-
-            let body = Body::new(
-                BodyType::from_headers(raw_request.headers.iter()),
-                buf,
-                read_len,
-                io,
-            );
-
-            *state = ServerRequestResponseState::Request(Some(ServerRequestState {
-                request: raw_request,
-                io: body,
-            }));
-
-            Ok(Self(state))
-        }
-    }
-
-    pub struct ServerResponseWrite<'a, 'b, const N: usize, T>(
-        &'a mut ServerRequestResponseState<'b, N, T>,
-    );
-
-    impl<'a, 'b, const N: usize, R> Headers for ServerRequest<'a, 'b, N, R> {
-        fn header(&self, name: &str) -> Option<&'_ str> {
-            self.0.request().request.header(name)
-        }
-    }
-
-    impl<'a, 'b, const N: usize, R> Query for ServerRequest<'a, 'b, N, R> {
-        fn query(&self) -> &'_ str {
-            todo!()
-        }
-    }
-
-    impl<'a, 'b, const N: usize, R> Io for ServerRequest<'a, 'b, N, R>
+    impl<'b, const N: usize, T> Io for ServerConnection<'b, N, T>
     where
-        R: Io,
+        T: Io,
     {
-        type Error = Error<R::Error>;
+        type Error = Error<T::Error>;
     }
 
-    impl<'a, 'b, const N: usize, R> Read for ServerRequest<'a, 'b, N, R>
+    impl<'b, const N: usize, T> Connection for ServerConnection<'b, N, T>
     where
-        R: Read + 'a,
-        'b: 'a,
+        T: Read + Write,
     {
-        type ReadFuture<'f>
+        type Request = ServerRequest;
+
+        type Response = ServerResponse;
+
+        type Headers = Request<'b, N>;
+
+        type Read = Body<'b, T>;
+
+        type Write = SendBody<T>;
+
+        type IntoResponseFuture<'a>
         where
-            Self: 'f,
-        = impl Future<Output = Result<usize, Self::Error>>;
+            Self: 'a,
+        = impl Future<Output = Result<Self::Response, Self::Error>>;
 
-        fn read<'f>(&'f mut self, buf: &'f mut [u8]) -> Self::ReadFuture<'f> {
-            async move { Ok(self.0.request_mut().io.read(buf).await?) }
-        }
-    }
+        fn split<'a>(
+            &'a mut self,
+            _request: &'a mut Self::Request,
+        ) -> (&'a Self::Headers, &'a mut Self::Read) {
+            let req = self.request_mut();
 
-    impl<'a, 'b, const N: usize, R> embedded_svc::http::server::asynch::Request
-        for ServerRequest<'a, 'b, N, R>
-    where
-        'b: 'a,
-        R: Read + Write + 'a,
-    {
-        type Headers<'f>
-        where
-            Self: 'f,
-        = &'f Request<'b, N>;
-        type Read<'f>
-        where
-            Self: 'f,
-        = &'f mut Body<'b, R>;
-
-        type ResponseWrite = ServerResponseWrite<'a, 'b, N, R>;
-
-        type IntoResponseFuture<'f> =
-            impl Future<Output = Result<Self::ResponseWrite, Self::Error>>;
-        type IntoOkResponseFuture = impl Future<Output = Result<Self::ResponseWrite, Self::Error>>;
-
-        fn split<'f>(&'f mut self) -> (Self::Headers<'f>, Self::Read<'f>) {
-            let request = self.0.request_mut();
-
-            (&request.request, &mut request.io)
+            (&req.request, &mut req.io)
         }
 
-        fn into_response<'f>(
-            self,
+        fn headers<'a>(&'a self, _request: &'a Self::Request) -> &'a Self::Headers {
+            &self.request().request
+        }
+
+        fn into_response<'a>(
+            &'a mut self,
+            _request: Self::Request,
             status: u16,
-            message: Option<&'f str>,
-            headers: &'f [(&'f str, &'f str)],
-        ) -> Self::IntoResponseFuture<'f>
-        where
-            Self: Sized,
-        {
+            message: Option<&'a str>,
+            headers: &'a [(&'a str, &'a str)],
+        ) -> Self::IntoResponseFuture<'a> {
             async move {
-                let mut buf = [0_u8; 32];
-
-                self.0
-                    .complete_request(&mut buf, Some(status), message, headers)
+                let mut buf = [0_u8; 1024]; // TODO
+                self.complete_request(&mut buf, Some(status), message, headers)
                     .await?;
 
-                Ok(ServerResponseWrite(self.0))
+                Ok(ServerResponse(PrivateData))
             }
         }
 
-        fn into_ok_response(self) -> Self::IntoOkResponseFuture
-        where
-            Self: Sized,
-        {
-            async move {
-                let mut buf = [0_u8; 32];
-
-                self.0
-                    .complete_request(&mut buf, Some(200), Some("OK"), &[])
-                    .await?;
-
-                Ok(ServerResponseWrite(self.0))
-            }
-        }
-    }
-
-    impl<'a, 'b, const N: usize, W> Io for ServerResponseWrite<'a, 'b, N, W>
-    where
-        W: Write,
-    {
-        type Error = Error<W::Error>;
-    }
-
-    impl<'a, 'b, const N: usize, W> Write for ServerResponseWrite<'a, 'b, N, W>
-    where
-        'b: 'a,
-        W: Write + 'a,
-    {
-        type WriteFuture<'f>
-        where
-            Self: 'f,
-        = impl Future<Output = Result<usize, Self::Error>>;
-
-        fn write<'f>(&'f mut self, buf: &'f [u8]) -> Self::WriteFuture<'f> {
-            async move { Ok(self.0.response_write().write(buf).await?) }
-        }
-
-        type FlushFuture<'f>
-        where
-            Self: 'f,
-        = impl Future<Output = Result<(), Self::Error>>;
-
-        fn flush<'f>(&'f mut self) -> Self::FlushFuture<'f> {
-            async move { Ok(self.0.response_write().flush().await?) }
+        fn writer<'a>(&'a mut self, _response: &'a mut Self::Response) -> &'a mut Self::Write {
+            self.response_write()
         }
     }
 
@@ -325,17 +247,27 @@ mod embedded_svc_compat {
     //     }
     // }
 
-    pub async fn handle_connection<const N: usize, H, T>(
+    pub async fn test<T>(io: T)
+    where
+        T: Read + Write,
+    {
+        handle_connection::<64, 2048, _, _>(io, &ServerHandler::new())
+            .await
+            .unwrap();
+    }
+
+    pub async fn handle_connection<const N: usize, const B: usize, T, H>(
         mut io: T,
         handler: &ServerHandler<H>,
     ) -> Result<(), Error<T::Error>>
     where
-        H: for<'a, 'b> HandlerRegistration<ServerRequest<'a, 'b, N, &'b mut T>>,
+        H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>>,
         T: Read + Write,
     {
+        let mut buf = [0_u8; B];
+
         loop {
-            let mut buf = [0_u8; 1024];
-            handle_request(&mut buf, &mut io, handler).await?;
+            handle_request::<N, _, _>(&mut buf, &mut io, &handler).await?;
         }
     }
 
@@ -345,29 +277,41 @@ mod embedded_svc_compat {
         handler: &ServerHandler<H>,
     ) -> Result<(), Error<T::Error>>
     where
-        H: for<'a> HandlerRegistration<ServerRequest<'a, 'b, N, T>>,
+        H: HandlerRegistration<ServerConnection<'b, N, T>>,
         T: Read + Write,
     {
-        let mut state = ServerRequestResponseState::New;
+        let mut connection = ServerConnection::new(buf, io).await?;
 
-        let request = ServerRequest::new(buf, io, &mut state).await?;
-
-        let path = request.0.request().request.path.unwrap_or("");
-        let result = if let Some(method) = request.0.request().request.method {
-            handler.handle(path, method.into(), request).await
+        let path = ""; // TODO connection.request().request().request.path.unwrap_or("");
+        let result = if let Some(method) = connection.request().request.method {
+            handler
+                .handle(
+                    path,
+                    method.into(),
+                    &mut connection,
+                    ServerRequest(PrivateData),
+                )
+                .await
         } else {
-            ().handle(true, path, Method::Get.into(), request).await
+            ().handle(
+                true,
+                path,
+                Method::Get.into(),
+                &mut connection,
+                ServerRequest(PrivateData),
+            )
+            .await
         };
 
         let mut buf = [0_u8; 64];
 
         let completed = match result {
             Result::Ok(_) => {
-                state
+                connection
                     .complete_response(&mut buf, Some(200), Some("OK"), &[])
                     .await?
             }
-            Result::Err(e) => state.complete_err(&mut buf, e.message()).await?,
+            Result::Err(e) => connection.complete_err(&mut buf, e.message()).await?,
         };
 
         if completed {
