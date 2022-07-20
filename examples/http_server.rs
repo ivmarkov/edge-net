@@ -2,9 +2,6 @@ use embedded_io::asynch::Read;
 
 use embedded_svc::http::client::asynch::{Client as _, RequestWrite};
 use embedded_svc::http::Method;
-use embedded_svc::mutex::StdRawCondvar;
-use embedded_svc::unblocker::asynch::Blocker;
-use embedded_svc::utils::asynch::executor::embedded::{CondvarWait, EmbeddedBlocker};
 
 use embedded_svc_impl::asynch::http::client::Client;
 use embedded_svc_impl::asynch::stdnal::StdTcpClientSocket;
@@ -13,11 +10,7 @@ use embedded_svc_impl::asynch::tcp::TcpClientSocket;
 fn main() {
     simple_logger::SimpleLogger::new().env().init().unwrap();
 
-    let wait = CondvarWait::<StdRawCondvar>::new();
-
-    EmbeddedBlocker::new(wait.notify_factory(), wait)
-        .block_on(read())
-        .unwrap();
+    smol::block_on(read()).unwrap();
 }
 
 async fn read() -> anyhow::Result<()> {

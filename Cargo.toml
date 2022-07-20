@@ -41,5 +41,4 @@ async-io = { version = "1", default-features = false, optional = true }
 
 [dev-dependencies]
 anyhow = "1"
-smol = "1"
 simple_logger="2.2"
