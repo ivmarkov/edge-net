@@ -341,13 +341,13 @@ mod embedded_svc_compat {
         spawner: S,
     }
 
-    impl<'t, const N: usize, const B: usize, A, F, S, H> Server<N, B, A, F, S>
+    impl<const N: usize, const B: usize, A, F, S, H> Server<N, B, A, F, S>
     where
-        A: TcpAcceptor<'t>,
+        A: TcpAcceptor,
         F: Fn() -> ServerHandler<H>,
-        S: Spawner<N, B, <A as TcpAcceptor<'t>>::Connection<'t>, H>,
-        H: for<'b> HandlerRegistration<
-            ServerConnection<'b, N, &'b mut <A as TcpAcceptor<'t>>::Connection<'t>>,
+        S: for<'t, 'b> Spawner<N, B, <A as TcpAcceptor>::Connection<'t>, H>,
+        H: for<'t, 'b> HandlerRegistration<
+            ServerConnection<'b, N, &'b mut <A as TcpAcceptor>::Connection<'t>>,
         >,
     {
         pub fn new(acceptor: A, handler_factory: F, spawner: S) -> Self {

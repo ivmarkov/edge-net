@@ -63,7 +63,7 @@ where
 }
 
 pub trait TcpServerSocket: embedded_io::Io {
-    type Acceptor<'m>: TcpAcceptor<'m, Error = Self::Error>
+    type Acceptor<'m>: TcpAcceptor<Error = Self::Error>
     where
         Self: 'm;
 
@@ -74,15 +74,17 @@ pub trait TcpServerSocket: embedded_io::Io {
     fn bind(&mut self, remote: SocketAddr) -> Self::BindFuture<'_>;
 }
 
-pub trait TcpAcceptor<'t>: embedded_io::Io {
+pub trait TcpAcceptor: embedded_io::Io {
     type Connection<'m>: embedded_io::asynch::Read<Error = Self::Error>
-        + embedded_io::asynch::Write<Error = Self::Error>;
-
-    type AcceptFuture<'m>: Future<Output = Result<Self::Connection<'t>, Self::Error>> + 'm
+        + embedded_io::asynch::Write<Error = Self::Error>
     where
         Self: 'm;
 
-    fn accept(&mut self) -> Self::AcceptFuture<'_>;
+    type AcceptFuture<'m>: Future<Output = Result<Self::Connection<'m>, Self::Error>> + 'm
+    where
+        Self: 'm;
+
+    fn accept(&self) -> Self::AcceptFuture<'_>;
 }
 
 impl<T> TcpServerSocket for &mut T
@@ -104,18 +106,21 @@ where
     }
 }
 
-impl<'t, T> TcpAcceptor<'t> for &mut T
+impl<T> TcpAcceptor for &mut T
 where
-    T: TcpAcceptor<'t>,
+    T: TcpAcceptor,
 {
-    type Connection<'m> = T::Connection<'t>;
+    type Connection<'m>
+    where
+        Self: 'm,
+    = T::Connection<'m>;
 
     type AcceptFuture<'m>
     where
         Self: 'm,
     = T::AcceptFuture<'m>;
 
-    fn accept(&mut self) -> Self::AcceptFuture<'_> {
-        (*self).accept()
+    fn accept(&self) -> Self::AcceptFuture<'_> {
+        (**self).accept()
     }
 }
