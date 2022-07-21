@@ -256,17 +256,11 @@ mod embedded_svc_compat {
     where
         T: Read + Close,
     {
-        type Headers<'a>
-        where
-            Self: 'a,
-        = &'a Response<'b, N>;
+        type Headers = Response<'b, N>;
 
-        type Read<'a>
-        where
-            Self: 'a,
-        = &'a mut BodyCompletionTracker<'b, T>;
+        type Read = BodyCompletionTracker<'b, T>;
 
-        fn split<'a>(&'a mut self) -> (Self::Headers<'a>, Self::Read<'a>)
+        fn split<'a>(&'a mut self) -> (&'a Self::Headers, &'a mut Self::Read)
         where
             Self: Sized,
         {
