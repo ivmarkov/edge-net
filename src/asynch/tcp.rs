@@ -128,3 +128,24 @@ where
         (**self).accept()
     }
 }
+
+impl<T> TcpAcceptor for &mut T
+where
+    T: TcpAcceptor,
+{
+    type Error = T::Error;
+
+    type Connection<'m>
+    where
+        Self: 'm,
+    = T::Connection<'m>;
+
+    type AcceptFuture<'m>
+    where
+        Self: 'm,
+    = T::AcceptFuture<'m>;
+
+    fn accept(&self) -> Self::AcceptFuture<'_> {
+        (**self).accept()
+    }
+}
