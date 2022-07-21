@@ -1,9 +1,16 @@
 use embedded_io::asynch::{Read, Write};
+use embedded_svc::executor::asynch::Blocker;
+use embedded_svc::mutex::StdRawCondvar;
+use embedded_svc::utils::asynch::executor::embedded::{CondvarWait, EmbeddedBlocker};
 
 use embedded_svc_impl::asynch::{stdnal::StdTcpClientSocket, tcp::TcpClientSocket};
 
 fn main() {
-    smol::block_on(read()).unwrap();
+    let wait = CondvarWait::<StdRawCondvar>::new();
+
+    EmbeddedBlocker::new(wait.notify_factory(), wait)
+        .block_on(read())
+        .unwrap();
 }
 
 async fn read() -> anyhow::Result<()> {
