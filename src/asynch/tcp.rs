@@ -74,7 +74,9 @@ pub trait TcpServerSocket: embedded_io::Io {
     fn bind(&mut self, remote: SocketAddr) -> Self::BindFuture<'_>;
 }
 
-pub trait TcpAcceptor: embedded_io::Io {
+pub trait TcpAcceptor {
+    type Error: embedded_io::Error;
+
     type Connection<'m>: embedded_io::asynch::Read<Error = Self::Error>
         + embedded_io::asynch::Write<Error = Self::Error>
     where
@@ -106,10 +108,12 @@ where
     }
 }
 
-impl<T> TcpAcceptor for &mut T
+impl<T> TcpAcceptor for &T
 where
     T: TcpAcceptor,
 {
+    type Error = T::Error;
+
     type Connection<'m>
     where
         Self: 'm,

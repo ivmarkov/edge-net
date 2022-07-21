@@ -138,11 +138,9 @@ impl TcpServerSocket for StdTcpServerSocket {
 
 pub struct StdTcpAcceptor(Async<TcpListener>);
 
-impl Io for StdTcpAcceptor {
-    type Error = io::Error;
-}
-
 impl TcpAcceptor for StdTcpAcceptor {
+    type Error = io::Error;
+
     type Connection<'m> = StdTcpConnection;
 
     type AcceptFuture<'m>
