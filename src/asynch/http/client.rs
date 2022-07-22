@@ -55,6 +55,10 @@ mod embedded_svc_compat {
             Self: 'a,
         = ClientRequestWrite<'a, N, &'a mut T>;
 
+        type RawConnectionError = T::Error;
+
+        type RawConnection = T;
+
         type RequestFuture<'a>
         where
             Self: 'a,
@@ -84,6 +88,10 @@ mod embedded_svc_compat {
 
                 Ok(write)
             }
+        }
+
+        fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {
+            Ok(&mut self.socket)
         }
     }
 

@@ -84,6 +84,18 @@ mod embedded_svc_compat {
             }
         }
 
+        fn raw_io(&mut self) -> &mut T
+        where
+            T: Read + Write,
+        {
+            match self {
+                Self::RequestState(request) => request.as_mut().unwrap().io.as_raw_reader(),
+                Self::ResponseState(response_write) => {
+                    response_write.as_mut().unwrap().as_raw_writer()
+                }
+            }
+        }
+
         async fn complete_request<'a>(
             &'a mut self,
             buf: &'a mut [u8],
@@ -184,6 +196,10 @@ mod embedded_svc_compat {
 
         type Write = SendBody<T>;
 
+        type RawConnectionError = T::Error;
+
+        type RawConnection = T;
+
         type IntoResponseFuture<'a>
         where
             Self: 'a,
@@ -220,6 +236,10 @@ mod embedded_svc_compat {
 
         fn writer<'a>(&'a mut self, _response: &'a mut Self::Response) -> &'a mut Self::Write {
             self.response_write()
+        }
+
+        fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {
+            Ok(self.raw_io())
         }
     }
 

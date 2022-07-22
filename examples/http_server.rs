@@ -1,4 +1,5 @@
-use embedded_svc::executor::asynch::{Blocker, Blocking};
+use embedded_svc::executor::asynch::Blocker;
+use embedded_svc::http::client::asynch::BlockingClient;
 use embedded_svc::http::client::{Client as _, RequestWrite};
 use embedded_svc::http::Method;
 use embedded_svc::io::Read;
@@ -25,7 +26,7 @@ fn read() -> anyhow::Result<()> {
     let socket = StdTcpClientSocket::new();
     let mut buf = [0_u8; 8192];
 
-    let mut client = Blocking::new(
+    let mut client = BlockingClient::new(
         blocker,
         Client::<1024, _>::new(
             &mut buf,
@@ -42,7 +43,7 @@ fn read() -> anyhow::Result<()> {
 }
 
 fn request<'a, const N: usize, T, B>(
-    client: &mut Blocking<B, Client<'a, N, T>>,
+    client: &mut BlockingClient<B, Client<'a, N, T>>,
     uri: &str,
 ) -> anyhow::Result<()>
 where
