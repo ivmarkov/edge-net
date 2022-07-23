@@ -428,6 +428,12 @@ mod embedded_svc_compat {
 
     pub struct WsConnection<T, M>(T, M);
 
+    impl<T, M> WsConnection<T, M> {
+        pub const fn new(connection: T, mask_gen: M) -> Self {
+            Self(connection, mask_gen)
+        }
+    }
+
     impl<T, M> ErrorType for WsConnection<T, M>
     where
         T: Io,
