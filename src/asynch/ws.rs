@@ -109,7 +109,7 @@ impl FrameHeader {
                 if buf.len() < expected_len {
                     return Err(DeserializeError::Incomplete(expected_len - buf.len()));
                 } else {
-                    payload_len = ((buf[2] as usize) << 8) | buf[3] as usize;
+                    payload_len = u16::from_be_bytes([buf[2], buf[3]]) as _;
                     payload_offset += 2;
                 }
             } else if payload_len == 127 {
@@ -118,8 +118,7 @@ impl FrameHeader {
                 if buf.len() < expected_len {
                     return Err(DeserializeError::Incomplete(5 - buf.len()));
                 } else {
-                    payload_len =
-                        ((buf[2] as usize) << 16) | ((buf[3] as usize) << 8) | buf[4] as usize;
+                    payload_len = u32::from_be_bytes([0, buf[2], buf[3], buf[4]]) as usize;
                     payload_offset += 3;
                 }
             }
