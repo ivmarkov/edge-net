@@ -34,29 +34,31 @@ impl FrameType {
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
-pub enum DeserializeError {
+pub enum Error<E> {
     Incomplete(usize),
     Invalid,
-}
-
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub enum SerializeError {
     TooShort,
     TooLong,
+    Other(E),
 }
 
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub enum Error<E> {
-    Deserialize(DeserializeError),
-    Serialize(SerializeError),
-    Io(E),
+impl Error<()> {
+    pub fn recast<E>(self) -> Error<E> {
+        match self {
+            Self::Incomplete(v) => Error::Incomplete(v),
+            Self::Invalid => Error::Invalid,
+            Self::TooShort => Error::TooShort,
+            Self::TooLong => Error::TooLong,
+            Self::Other(_) => panic!(),
+        }
+    }
 }
 
 impl<E> From<ReadExactError<E>> for Error<E> {
     fn from(e: ReadExactError<E>) -> Self {
         match e {
-            ReadExactError::UnexpectedEof => Error::Deserialize(DeserializeError::Invalid),
-            ReadExactError::Other(e) => Error::Io(e),
+            ReadExactError::UnexpectedEof => Error::Invalid,
+            ReadExactError::Other(e) => Error::Other(e),
         }
     }
 }
@@ -77,22 +79,22 @@ impl FrameHeader {
     }
     .serialized_len();
 
-    pub fn deserialize(buf: &[u8]) -> Result<(Self, usize), DeserializeError> {
+    pub fn deserialize(buf: &[u8]) -> Result<(Self, usize), Error<()>> {
         let mut expected_len = 2_usize;
 
         if buf.len() < expected_len {
-            Err(DeserializeError::Incomplete(expected_len - buf.len()))
+            Err(Error::Incomplete(expected_len - buf.len()))
         } else {
             let final_frame = buf[0] & 0x80 != 0;
 
             let rsv = buf[0] & 0x70;
             if rsv != 0 {
-                return Err(DeserializeError::Invalid);
+                return Err(Error::Invalid);
             }
 
             let opcode = buf[0] & 0x0f;
             if (3..=7).contains(&opcode) || opcode >= 11 {
-                return Err(DeserializeError::Invalid);
+                return Err(Error::Invalid);
             }
 
             let masked = buf[1] & 0x80 != 0;
@@ -107,7 +109,7 @@ impl FrameHeader {
                 expected_len += 2;
 
                 if buf.len() < expected_len {
-                    return Err(DeserializeError::Incomplete(expected_len - buf.len()));
+                    return Err(Error::Incomplete(expected_len - buf.len()));
                 } else {
                     payload_len = u16::from_be_bytes([buf[2], buf[3]]) as _;
                     payload_offset += 2;
@@ -116,7 +118,7 @@ impl FrameHeader {
                 expected_len += 8;
 
                 if buf.len() < expected_len {
-                    return Err(DeserializeError::Incomplete(5 - buf.len()));
+                    return Err(Error::Incomplete(5 - buf.len()));
                 } else {
                     payload_len = u64::from_be_bytes([
                         buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9],
@@ -170,9 +172,9 @@ impl FrameHeader {
         2 + if self.mask_key.is_some() { 4 } else { 0 } + payload_len_len
     }
 
-    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, SerializeError> {
+    pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, Error<()>> {
         if buf.len() < self.serialized_len() {
-            return Err(SerializeError::TooShort);
+            return Err(Error::TooShort);
         }
 
         buf[0] = 0;
@@ -258,7 +260,7 @@ impl FrameHeader {
 
         match FrameHeader::deserialize(&header_buf[..FrameHeader::MIN_LEN]) {
             Ok((header, _)) => Ok(header),
-            Err(DeserializeError::Incomplete(more)) => {
+            Err(Error::Incomplete(more)) => {
                 let header_len = FrameHeader::MIN_LEN + more;
                 read.read_exact(&mut header_buf[FrameHeader::MIN_LEN..header_len])
                     .await
@@ -272,11 +274,11 @@ impl FrameHeader {
 
                         Ok(header)
                     }
-                    Err(DeserializeError::Incomplete(_)) => unreachable!(),
-                    Err(err) => Err(Error::Deserialize(err)),
+                    Err(Error::Incomplete(_)) => unreachable!(),
+                    Err(e) => Err(e.recast()),
                 }
             }
-            Err(DeserializeError::Invalid) => Err(Error::Deserialize(DeserializeError::Invalid)),
+            Err(e) => Err(e.recast()),
         }
     }
 
@@ -290,7 +292,7 @@ impl FrameHeader {
         write
             .write_all(&header_buf[..header_len])
             .await
-            .map_err(Error::Io)
+            .map_err(Error::Other)
     }
 
     pub async fn recv_payload<'a, R>(
@@ -301,10 +303,12 @@ impl FrameHeader {
     where
         R: Read,
     {
-        if payload.len() < self.payload_len {
-            Err(Error::Serialize(SerializeError::TooShort))
-        } else if payload.len() > self.payload_len {
-            Err(Error::Serialize(SerializeError::TooLong))
+        let payload_buf_len = payload.len() as u64;
+
+        if payload_buf_len < self.payload_len {
+            Err(Error::TooShort)
+        } else if payload_buf_len > self.payload_len {
+            Err(Error::TooLong)
         } else if payload.is_empty() {
             Ok(())
         } else {
@@ -324,14 +328,16 @@ impl FrameHeader {
     where
         W: Write,
     {
-        if payload.len() < self.payload_len {
-            Err(Error::Serialize(SerializeError::TooShort))
-        } else if payload.len() > self.payload_len {
-            Err(Error::Serialize(SerializeError::TooLong))
+        let payload_buf_len = payload.len() as u64;
+
+        if payload_buf_len < self.payload_len {
+            Err(Error::TooShort)
+        } else if payload_buf_len > self.payload_len {
+            Err(Error::TooLong)
         } else if payload.is_empty() {
             Ok(())
         } else if self.mask_key.is_none() {
-            write.write_all(payload).await.map_err(Error::Io)
+            write.write_all(payload).await.map_err(Error::Other)
         } else {
             let mut buf = [0_u8; 64];
 
@@ -344,7 +350,7 @@ impl FrameHeader {
 
                 self.mask(&mut buf, offset);
 
-                write.write_all(&buf).await.map_err(Error::Io)?;
+                write.write_all(&buf).await.map_err(Error::Other)?;
 
                 offset += len;
             }
@@ -364,7 +370,7 @@ where
     let header = FrameHeader::recv(&mut read).await?;
     header.recv_payload(read, frame_data_buf).await?;
 
-    Ok((header.frame_type, header.payload_len))
+    Ok((header.frame_type, header.payload_len as _))
 }
 
 pub async fn send<W>(
@@ -378,7 +384,7 @@ where
 {
     let header = FrameHeader {
         frame_type,
-        payload_len: frame_data_buf.len(),
+        payload_len: frame_data_buf.len() as _,
         mask_key,
     };
 
