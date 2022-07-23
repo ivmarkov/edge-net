@@ -65,21 +65,21 @@ mod embedded_svc_compat {
         fn request(&self) -> &ServerRequestState<'b, N, T> {
             match self {
                 Self::RequestState(request) => request.as_ref().unwrap(),
-                _ => panic!(),
+                _ => unreachable!(),
             }
         }
 
         fn request_mut(&mut self) -> &mut ServerRequestState<'b, N, T> {
             match self {
                 Self::RequestState(request) => request.as_mut().unwrap(),
-                _ => panic!(),
+                _ => unreachable!(),
             }
         }
 
         fn response_write(&mut self) -> &mut SendBody<T> {
             match self {
                 Self::ResponseState(response_write) => response_write.as_mut().unwrap(),
-                _ => panic!(),
+                _ => unreachable!(),
             }
         }
 

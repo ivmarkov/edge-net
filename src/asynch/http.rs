@@ -1259,7 +1259,7 @@ impl<'b, const N: usize> Request<'b, N> {
 
         if let Status::Complete(headers_len2) = status {
             if headers_len != headers_len2 {
-                panic!("Should not happen. HTTP header parsing is indeterminate.")
+                unreachable!("Should not happen. HTTP header parsing is indeterminate.")
             }
 
             self.method = parser.method.and_then(Method::new);
@@ -1269,7 +1269,7 @@ impl<'b, const N: usize> Request<'b, N> {
 
             Ok((body_buf, read_len - headers_len))
         } else {
-            panic!("Secondary parse of already loaded buffer failed.")
+            unreachable!("Secondary parse of already loaded buffer failed.")
         }
     }
 
@@ -1341,7 +1341,7 @@ impl<'b, const N: usize> Response<'b, N> {
 
         if let Status::Complete(headers_len2) = status {
             if headers_len != headers_len2 {
-                panic!("Should not happen. HTTP header parsing is indeterminate.")
+                unreachable!("Should not happen. HTTP header parsing is indeterminate.")
             }
 
             self.code = parser.code;
@@ -1351,7 +1351,7 @@ impl<'b, const N: usize> Response<'b, N> {
 
             Ok((body_buf, read_len - headers_len))
         } else {
-            panic!("Secondary parse of already loaded buffer failed.")
+            unreachable!("Secondary parse of already loaded buffer failed.")
         }
     }
 

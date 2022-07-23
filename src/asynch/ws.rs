@@ -203,12 +203,14 @@ impl FrameHeader {
                 buf[3] = payload_len_bytes[3];
 
                 payload_offset += 2;
-            } else {
+            } else if self.payload_len < 0xffffff {
                 buf[2] = payload_len_bytes[1];
                 buf[3] = payload_len_bytes[2];
                 buf[4] = payload_len_bytes[3];
 
                 payload_offset += 3;
+            } else {
+                return Err(SerializeError::TooLong);
             }
         }
 
