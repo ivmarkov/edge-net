@@ -342,6 +342,14 @@ impl<'b, const N: usize> Headers<'b, N> {
         self.get("Connection")
     }
 
+    pub fn cache_control(&self) -> Option<&'_ str> {
+        self.get("Cache-Control")
+    }
+
+    pub fn upgrade(&self) -> Option<&'_ str> {
+        self.get("Upgrade")
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.iter_raw()
             .map(|(name, value)| (name, unsafe { str::from_utf8_unchecked(value) }))
@@ -423,8 +431,40 @@ impl<'b, const N: usize> Headers<'b, N> {
         self.set("Transfer-Encoding", transfer_encoding)
     }
 
+    pub fn set_transfer_encoding_chunked(&mut self) -> &mut Self {
+        self.set_transfer_encoding("Chunked")
+    }
+
     pub fn set_connection(&mut self, connection: &'b str) -> &mut Self {
         self.set("Connection", connection)
+    }
+
+    pub fn set_connection_close(&mut self) -> &mut Self {
+        self.set_connection("Close")
+    }
+
+    pub fn set_connection_keep_alive(&mut self) -> &mut Self {
+        self.set_connection("Keep-Alive")
+    }
+
+    pub fn set_connection_upgrade(&mut self) -> &mut Self {
+        self.set_connection("Upgrade")
+    }
+
+    pub fn set_cache_control(&mut self, cache: &'b str) -> &mut Self {
+        self.set("Cache-Control", cache)
+    }
+
+    pub fn set_cache_control_no_cache(&mut self) -> &mut Self {
+        self.set_cache_control("No-Cache")
+    }
+
+    pub fn set_upgrade(&mut self, upgrade: &'b str) -> &mut Self {
+        self.set("Upgrade", upgrade)
+    }
+
+    pub fn set_upgrade_websocket(&mut self) -> &mut Self {
+        self.set_upgrade("websocket")
     }
 
     pub async fn send<W>(&self, output: W) -> Result<BodyType, Error<W::Error>>
