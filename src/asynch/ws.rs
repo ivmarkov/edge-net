@@ -91,7 +91,7 @@ impl FrameHeader {
             }
 
             let opcode = buf[0] & 0x0f;
-            if opcode >= 3 && opcode <= 7 || opcode >= 11 {
+            if (3..=7).contains(&opcode) || opcode >= 11 {
                 return Err(DeserializeError::Invalid);
             }
 
@@ -233,7 +233,7 @@ impl FrameHeader {
             let mask_bytes = mask_key.to_be_bytes();
 
             for (offset, byte) in buf.iter_mut().enumerate() {
-                *byte = *byte ^ mask_bytes[(payload_offset + offset) % 4];
+                *byte ^= mask_bytes[(payload_offset + offset) % 4];
             }
         }
     }
@@ -297,7 +297,7 @@ impl FrameHeader {
             Err(Error::Serialize(SerializeError::TooShort))
         } else if payload.len() > self.payload_len {
             Err(Error::Serialize(SerializeError::TooLong))
-        } else if payload.len() == 0 {
+        } else if payload.is_empty() {
             Ok(())
         } else {
             read.read_exact(payload).await.map_err(Error::from)?;
@@ -320,30 +320,28 @@ impl FrameHeader {
             Err(Error::Serialize(SerializeError::TooShort))
         } else if payload.len() > self.payload_len {
             Err(Error::Serialize(SerializeError::TooLong))
-        } else if payload.len() == 0 {
+        } else if payload.is_empty() {
             Ok(())
+        } else if self.mask_key.is_none() {
+            write.write_all(payload).await.map_err(Error::Io)
         } else {
-            if self.mask_key.is_none() {
-                write.write_all(payload).await.map_err(Error::Io)
-            } else {
-                let mut buf = [0_u8; 64];
+            let mut buf = [0_u8; 64];
 
-                let mut offset = 0;
+            let mut offset = 0;
 
-                while offset < payload.len() {
-                    let len = min(buf.len(), payload.len() - offset);
+            while offset < payload.len() {
+                let len = min(buf.len(), payload.len() - offset);
 
-                    buf[..len].copy_from_slice(&payload[offset..offset + len]);
+                buf[..len].copy_from_slice(&payload[offset..offset + len]);
 
-                    self.mask(&mut buf, offset);
+                self.mask(&mut buf, offset);
 
-                    write.write_all(&buf).await.map_err(Error::Io)?;
+                write.write_all(&buf).await.map_err(Error::Io)?;
 
-                    offset += len;
-                }
-
-                Ok(())
+                offset += len;
             }
+
+            Ok(())
         }
     }
 }

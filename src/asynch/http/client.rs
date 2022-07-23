@@ -268,7 +268,7 @@ mod embedded_svc_compat {
 
         type Read = BodyCompletionTracker<'b, T>;
 
-        fn split<'a>(&'a mut self) -> (&'a Self::Headers, &'a mut Self::Read)
+        fn split(&mut self) -> (&Self::Headers, &mut Self::Read)
         where
             Self: Sized,
         {

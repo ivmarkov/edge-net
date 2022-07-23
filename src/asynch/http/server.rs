@@ -4,7 +4,6 @@ pub use embedded_svc_compat::*;
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
     use core::future::Future;
-    use core::mem;
 
     use embedded_io::asynch::{Read, Write};
     use embedded_io::Io;
@@ -111,7 +110,7 @@ mod embedded_svc_compat {
                     let io = &mut request.as_mut().unwrap().io;
 
                     while io.read(buf).await? > 0 {}
-                    let request = mem::replace(request, None).unwrap();
+                    let request = request.take().unwrap();
 
                     let mut io = request.io.release();
 

@@ -148,7 +148,7 @@ impl TcpAcceptor for StdTcpAcceptor {
         Self: 'm,
     = impl Future<Output = Result<Self::Connection<'m>, Self::Error>> + 'm;
 
-    fn accept<'m>(&'m self) -> Self::AcceptFuture<'m> {
+    fn accept(&self) -> Self::AcceptFuture<'_> {
         async move {
             Ok(StdTcpConnection(
                 self.0.accept().await.map(|(socket, _)| socket)?,
@@ -189,7 +189,7 @@ impl Write for StdTcpConnection {
         Self: 'a,
     = impl Future<Output = Result<(), Self::Error>>;
 
-    fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+    fn flush(&mut self) -> Self::FlushFuture<'_> {
         async move { self.0.flush().await }
     }
 }

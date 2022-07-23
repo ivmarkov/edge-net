@@ -258,7 +258,7 @@ pub async fn send_status<W>(
 where
     W: Write,
 {
-    let status_str = status.map(|status| heapless::String::<5>::from(status));
+    let status_str = status.map(heapless::String::<5>::from);
 
     send_status_line(
         status_str.as_ref().map(|status| status.as_str()),
@@ -457,10 +457,10 @@ impl BodyType {
             }
         } else if UncasedStr::new("Content-Length") == UncasedStr::new(name) {
             return Self::ContentLen(value.parse::<u64>().unwrap()); // TODO
-        } else if UncasedStr::new("Connection") == UncasedStr::new(name) {
-            if UncasedStr::new(value) == UncasedStr::new("Close") {
-                return Self::Close;
-            }
+        } else if UncasedStr::new("Connection") == UncasedStr::new(name)
+            && UncasedStr::new(value) == UncasedStr::new("Close")
+        {
+            return Self::Close;
         }
 
         Self::Unknown
@@ -1337,7 +1337,7 @@ impl<'b, const N: usize> Response<'b, N> {
 
         let (headers_buf, body_buf) = buf.split_at_mut(headers_len);
 
-        let status = parser.parse(headers_buf).map_err(|e| Error::from(e))?;
+        let status = parser.parse(headers_buf).map_err(Error::from)?;
 
         if let Status::Complete(headers_len2) = status {
             if headers_len != headers_len2 {
