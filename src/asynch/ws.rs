@@ -187,9 +187,9 @@ impl FrameHeader {
         let opcode = match self.frame_type {
             FrameType::Text(_) => 1,
             FrameType::Binary(_) => 2,
-            FrameType::Close => 3,
-            FrameType::Ping => 4,
-            FrameType::Pong => 5,
+            FrameType::Close => 8,
+            FrameType::Ping => 9,
+            FrameType::Pong => 10,
             _ => 0,
         };
 
