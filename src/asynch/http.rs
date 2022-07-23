@@ -467,6 +467,10 @@ impl<'b, const N: usize> Headers<'b, N> {
         self.set_upgrade("websocket")
     }
 
+    pub fn set_upgrade_websocket_headers(&mut self) -> &mut Self {
+        self.set_connection_upgrade().set_upgrade_websocket()
+    }
+
     pub async fn send<W>(&self, output: W) -> Result<BodyType, Error<W::Error>>
     where
         W: Write,

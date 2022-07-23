@@ -64,7 +64,7 @@ impl<E> From<ReadExactError<E>> for Error<E> {
 #[derive(Clone, Debug)]
 pub struct FrameHeader {
     pub frame_type: FrameType,
-    pub payload_len: usize,
+    pub payload_len: u64,
     pub mask_key: Option<u32>,
 }
 
@@ -100,7 +100,7 @@ impl FrameHeader {
                 expected_len += 4;
             }
 
-            let mut payload_len = buf[1] as usize & 0x7f;
+            let mut payload_len = (buf[1] & 0x7f) as u64;
             let mut payload_offset = 2;
 
             if payload_len == 126 {
@@ -113,13 +113,15 @@ impl FrameHeader {
                     payload_offset += 2;
                 }
             } else if payload_len == 127 {
-                expected_len += 3;
+                expected_len += 8;
 
                 if buf.len() < expected_len {
                     return Err(DeserializeError::Incomplete(5 - buf.len()));
                 } else {
-                    payload_len = u32::from_be_bytes([0, buf[2], buf[3], buf[4]]) as usize;
-                    payload_offset += 3;
+                    payload_len = u64::from_be_bytes([
+                        buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9],
+                    ]);
+                    payload_offset += 8;
                 }
             }
 
@@ -157,15 +159,15 @@ impl FrameHeader {
     }
 
     pub const fn serialized_len(&self) -> usize {
-        let len = if self.payload_len >= 65536 {
-            3
-        } else if self.payload_len > 126 {
+        let payload_len_len = if self.payload_len >= 65536 {
+            8
+        } else if self.payload_len >= 126 {
             2
         } else {
-            1
+            0
         };
 
-        2 + if self.mask_key.is_some() { 4 } else { 0 } + len
+        2 + if self.mask_key.is_some() { 4 } else { 0 } + payload_len_len
     }
 
     pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, SerializeError> {
@@ -197,19 +199,24 @@ impl FrameHeader {
             buf[1] |= self.payload_len as u8;
         } else {
             let payload_len_bytes = self.payload_len.to_be_bytes();
-            if self.payload_len > 126 && self.payload_len < 65536 {
-                buf[2] = payload_len_bytes[2];
-                buf[3] = payload_len_bytes[3];
+            if self.payload_len >= 126 && self.payload_len < 65536 {
+                buf[1] |= 126;
+                buf[2] = payload_len_bytes[6];
+                buf[3] = payload_len_bytes[7];
 
                 payload_offset += 2;
-            } else if self.payload_len < 0xffffff {
-                buf[2] = payload_len_bytes[1];
-                buf[3] = payload_len_bytes[2];
-                buf[4] = payload_len_bytes[3];
-
-                payload_offset += 3;
             } else {
-                return Err(SerializeError::TooLong);
+                buf[1] |= 127;
+                buf[2] = payload_len_bytes[0];
+                buf[3] = payload_len_bytes[1];
+                buf[4] = payload_len_bytes[2];
+                buf[5] = payload_len_bytes[3];
+                buf[6] = payload_len_bytes[4];
+                buf[7] = payload_len_bytes[5];
+                buf[8] = payload_len_bytes[6];
+                buf[9] = payload_len_bytes[7];
+
+                payload_offset += 8;
             }
         }
 
