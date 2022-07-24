@@ -392,6 +392,122 @@ where
     header.send_payload(write, frame_data_buf).await
 }
 
+pub mod http {
+    use uncased::UncasedStr;
+
+    pub const NONCE_LEN: usize = 16;
+    pub const MAX_BASE64_KEY_LEN: usize = 28;
+    pub const MAX_BASE64_KEY_RESPONSE_LEN: usize = 33;
+
+    pub fn upgrade_request_headers<'a>(
+        version: Option<&'a str>,
+        nonce: &[u8; NONCE_LEN],
+        nonce_base64_buf: &'a mut [u8; MAX_BASE64_KEY_LEN],
+    ) -> impl IntoIterator<Item = (&'a str, &'a str)> {
+        let nonce_base64_len =
+            base64::encode_config_slice(nonce, base64::STANDARD_NO_PAD, nonce_base64_buf);
+
+        [
+            ("Connection", "Upgrade"),
+            ("Upgrade", "websocket"),
+            ("Sec-WebSocket-Version", version.unwrap_or("13")),
+            ("Sec-WebSocket-Key", unsafe {
+                core::str::from_utf8_unchecked(&nonce_base64_buf[..nonce_base64_len])
+            }),
+        ]
+    }
+
+    pub fn is_upgrade_request<'a, H>(request_headers: H) -> bool
+    where
+        H: IntoIterator<Item = (&'a str, &'a str)>,
+    {
+        let mut connection = false;
+        let mut upgrade = false;
+
+        for (name, value) in request_headers {
+            if UncasedStr::new(name) == UncasedStr::new("Connection") {
+                connection = UncasedStr::new(value) == UncasedStr::new("Upgrade");
+            } else if UncasedStr::new(name) == UncasedStr::new("Upgrade") {
+                upgrade = UncasedStr::new(value) == UncasedStr::new("websocket");
+            }
+        }
+
+        connection && upgrade
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    pub enum UpgradeError {
+        NoVersion,
+        NoSecKey,
+        UnsupportedVersion,
+        SecKeyTooLong,
+    }
+
+    pub fn upgrade_response_headers<'a, 'b, H>(
+        request_headers: H,
+        version: Option<&'a str>,
+        sec_key_response_base64_buf: &'b mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
+    ) -> Result<Option<impl IntoIterator<Item = (&'b str, &'b str)>>, UpgradeError>
+    where
+        H: IntoIterator<Item = (&'a str, &'a str)>,
+    {
+        let mut version_ok = false;
+        let mut sec_key = None;
+
+        for (name, value) in request_headers {
+            if UncasedStr::new(name) == UncasedStr::new("Sec-WebSocket-Version") {
+                if UncasedStr::new(value) != UncasedStr::new(version.unwrap_or("13")) {
+                    return Err(UpgradeError::NoVersion);
+                }
+
+                version_ok = true;
+            } else if UncasedStr::new(name) == UncasedStr::new("Sec-WebSocket-Key") {
+                const WS_MAGIC_GUUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+                let mut buf = [0_u8; MAX_BASE64_KEY_LEN + WS_MAGIC_GUUID.len()];
+
+                let value_len = value.as_bytes().len();
+
+                if value_len > MAX_BASE64_KEY_LEN {
+                    return Err(UpgradeError::SecKeyTooLong);
+                }
+
+                buf[..value_len].copy_from_slice(value.as_bytes());
+                buf[value_len..value_len + WS_MAGIC_GUUID.as_bytes().len()]
+                    .copy_from_slice(WS_MAGIC_GUUID.as_bytes());
+
+                let mut sha1 = sha1_smol::Sha1::new();
+
+                sha1.update(&buf[..value_len + WS_MAGIC_GUUID.as_bytes().len()]);
+
+                let sec_key_len = base64::encode_config_slice(
+                    sha1.digest().bytes(),
+                    base64::STANDARD_NO_PAD,
+                    sec_key_response_base64_buf,
+                );
+
+                sec_key = Some(sec_key_len);
+            }
+        }
+
+        if version_ok {
+            if let Some(sec_key_len) = sec_key {
+                Ok(Some([
+                    ("Connection", "Upgrade"),
+                    ("Upgrade", "websocket"),
+                    ("Sec-WebSocket-Accept", unsafe {
+                        core::str::from_utf8_unchecked(&sec_key_response_base64_buf[..sec_key_len])
+                    }),
+                ]))
+            } else {
+                Err(UpgradeError::NoSecKey)
+            }
+        } else {
+            Err(UpgradeError::NoVersion)
+        }
+    }
+}
+
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
 

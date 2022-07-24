@@ -467,8 +467,21 @@ impl<'b, const N: usize> Headers<'b, N> {
         self.set_upgrade("websocket")
     }
 
-    pub fn set_upgrade_websocket_headers(&mut self) -> &mut Self {
-        self.set_connection_upgrade().set_upgrade_websocket()
+    pub fn set_upgrade_websocket_headers(
+        &mut self,
+        version: Option<&'b str>,
+        nonce: &[u8; 16],
+        nonce_base64_buf: &'b mut [u8; 28],
+    ) -> &mut Self {
+        let nonce_base64_len =
+            base64::encode_config_slice(nonce, base64::STANDARD_NO_PAD, nonce_base64_buf);
+
+        self.set_connection_upgrade()
+            .set_upgrade_websocket()
+            .set("Sec-WebSocket-Version", version.unwrap_or("13"))
+            .set("Sec-WebSocket-Key", unsafe {
+                core::str::from_utf8_unchecked(&nonce_base64_buf[..nonce_base64_len])
+            })
     }
 
     pub async fn send<W>(&self, output: W) -> Result<BodyType, Error<W::Error>>
