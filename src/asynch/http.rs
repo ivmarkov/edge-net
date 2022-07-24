@@ -15,6 +15,8 @@ use crate::close::Close;
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
 
+use super::ws::http::UpgradeError;
+
 pub mod client;
 pub mod completion;
 pub mod server;
@@ -350,6 +352,10 @@ impl<'b, const N: usize> Headers<'b, N> {
         self.get("Upgrade")
     }
 
+    pub fn is_ws_upgrade_request(&self) -> bool {
+        crate::asynch::ws::http::is_upgrade_request(self.iter())
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.iter_raw()
             .map(|(name, value)| (name, unsafe { str::from_utf8_unchecked(value) }))
@@ -467,21 +473,39 @@ impl<'b, const N: usize> Headers<'b, N> {
         self.set_upgrade("websocket")
     }
 
-    pub fn set_upgrade_websocket_headers(
+    pub fn set_ws_upgrade_request_headers(
         &mut self,
         version: Option<&'b str>,
-        nonce: &[u8; 16],
-        nonce_base64_buf: &'b mut [u8; 28],
+        nonce: &[u8; crate::asynch::ws::http::NONCE_LEN],
+        nonce_base64_buf: &'b mut [u8; crate::asynch::ws::http::MAX_BASE64_KEY_LEN],
     ) -> &mut Self {
-        let nonce_base64_len =
-            base64::encode_config_slice(nonce, base64::STANDARD_NO_PAD, nonce_base64_buf);
+        for (name, value) in
+            crate::asynch::ws::http::upgrade_request_headers(version, nonce, nonce_base64_buf)
+        {
+            self.set(name, value);
+        }
 
-        self.set_connection_upgrade()
-            .set_upgrade_websocket()
-            .set("Sec-WebSocket-Version", version.unwrap_or("13"))
-            .set("Sec-WebSocket-Key", unsafe {
-                core::str::from_utf8_unchecked(&nonce_base64_buf[..nonce_base64_len])
-            })
+        self
+    }
+
+    pub fn set_ws_upgrade_response_headers<'a, H>(
+        &mut self,
+        request_headers: H,
+        version: Option<&'a str>,
+        sec_key_response_base64_buf: &'b mut [u8; crate::asynch::ws::http::MAX_BASE64_KEY_RESPONSE_LEN],
+    ) -> Result<&mut Self, UpgradeError>
+    where
+        H: IntoIterator<Item = (&'a str, &'a str)>,
+    {
+        for (name, value) in crate::asynch::ws::http::upgrade_response_headers(
+            request_headers,
+            version,
+            sec_key_response_base64_buf,
+        )? {
+            self.set(name, value);
+        }
+
+        Ok(self)
     }
 
     pub async fn send<W>(&self, output: W) -> Result<BodyType, Error<W::Error>>

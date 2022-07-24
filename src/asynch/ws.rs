@@ -447,7 +447,7 @@ pub mod http {
         request_headers: H,
         version: Option<&'a str>,
         sec_key_response_base64_buf: &'b mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
-    ) -> Result<Option<impl IntoIterator<Item = (&'b str, &'b str)>>, UpgradeError>
+    ) -> Result<impl IntoIterator<Item = (&'b str, &'b str)>, UpgradeError>
     where
         H: IntoIterator<Item = (&'a str, &'a str)>,
     {
@@ -492,13 +492,13 @@ pub mod http {
 
         if version_ok {
             if let Some(sec_key_len) = sec_key {
-                Ok(Some([
+                Ok([
                     ("Connection", "Upgrade"),
                     ("Upgrade", "websocket"),
                     ("Sec-WebSocket-Accept", unsafe {
                         core::str::from_utf8_unchecked(&sec_key_response_base64_buf[..sec_key_len])
                     }),
-                ]))
+                ])
             } else {
                 Err(UpgradeError::NoSecKey)
             }
