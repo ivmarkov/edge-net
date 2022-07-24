@@ -8,9 +8,11 @@ mod embedded_svc_compat {
     use embedded_io::asynch::{Read, Write};
     use embedded_io::Io;
 
-    use embedded_svc::executor::asynch::LocalSpawner;
     use embedded_svc::http::headers::{content_len, content_type, ContentLenParseBuf};
     use embedded_svc::http::server::asynch::Connection;
+    use embedded_svc::mutex::RawMutex;
+    use embedded_svc::utils::asynch::mpmc::Channel;
+    use embedded_svc::utils::asynch::select::{select3, select_all_hvec};
     use embedded_svc::utils::http::server::registration::asynch::{
         HandlerRegistration, ServerHandler,
     };
@@ -316,76 +318,67 @@ mod embedded_svc_compat {
         }
     }
 
-    pub trait Spawner<const N: usize, const B: usize, T, H>
-    where
-        T: Read + Write,
-        H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>>,
-    {
-        fn spawn(&mut self, future: HandleConnectionFuture<N, B, T, H>);
-    }
-
-    impl<const N: usize, const B: usize, T, H, S> Spawner<N, B, T, H> for &mut S
-    where
-        S: Spawner<N, B, T, H>,
-        T: Read + Write,
-        H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>>,
-    {
-        fn spawn(&mut self, future: HandleConnectionFuture<N, B, T, H>) {
-            (*self).spawn(future)
-        }
-    }
-
-    pub struct GenericSpawner<L>(L);
-
-    impl<L> GenericSpawner<L> {
-        pub const fn new(local_spawner: L) -> Self {
-            Self(local_spawner)
-        }
-    }
-
-    impl<'a, const N: usize, const B: usize, T, H, L> Spawner<N, B, T, H> for GenericSpawner<L>
-    where
-        T: Read + Write + 'a,
-        H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>> + 'a,
-        L: LocalSpawner<'a>,
-    {
-        fn spawn(&mut self, future: HandleConnectionFuture<N, B, T, H>) {
-            self.0.spawn_local(future).unwrap();
-        }
-    }
-
-    pub struct Server<const N: usize, const B: usize, A, F, S> {
+    pub struct Server<const N: usize, const B: usize, A, F> {
         acceptor: A,
         handler_factory: F,
-        spawner: S,
     }
 
-    impl<const N: usize, const B: usize, A, F, S, H> Server<N, B, A, F, S>
+    impl<const N: usize, const B: usize, A, F, H> Server<N, B, A, F>
     where
         A: TcpAcceptor,
         F: Fn() -> ServerHandler<H>,
-        S: for<'t, 'b> Spawner<N, B, <A as TcpAcceptor>::Connection<'t>, H>,
         H: for<'t, 'b> HandlerRegistration<
             ServerConnection<'b, N, &'b mut <A as TcpAcceptor>::Connection<'t>>,
         >,
     {
-        pub fn new(acceptor: A, handler_factory: F, spawner: S) -> Self {
+        pub const fn new(acceptor: A, handler_factory: F) -> Self {
             Self {
                 acceptor,
                 handler_factory,
-                spawner,
             }
         }
 
-        pub async fn handle(&mut self) -> Result<(), Error<A::Error>> {
-            loop {
-                let io = self.acceptor.accept().await.map_err(Error::Io)?;
+        pub async fn process<
+            const P: usize,
+            const W: usize,
+            R: RawMutex,
+            Q: Future<Output = ()>,
+        >(
+            &mut self,
+            quit: Q,
+        ) -> Result<(), Error<A::Error>> {
+            let channel = Channel::<R, _, W>::new();
+            let mut handlers = heapless::Vec::<_, P>::new();
 
-                self.spawner.spawn(handle_connection::<N, B, _, _>(
-                    io,
-                    (self.handler_factory)(),
-                ));
+            for _ in 0..P {
+                handlers
+                    .push(async {
+                        loop {
+                            let io = channel.recv().await;
+
+                            handle_connection::<N, B, _, _>(io, (self.handler_factory)())
+                                .await
+                                .unwrap();
+                        }
+                    })
+                    .map_err(|_| ())
+                    .unwrap();
             }
+
+            select3(
+                quit,
+                async {
+                    loop {
+                        let io = self.acceptor.accept().await.map_err(Error::Io).unwrap();
+
+                        channel.send(io).await;
+                    }
+                },
+                select_all_hvec(handlers),
+            )
+            .await;
+
+            Ok(())
         }
     }
 }
