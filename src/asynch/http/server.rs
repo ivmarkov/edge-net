@@ -23,6 +23,53 @@ mod embedded_svc_compat {
     };
     use crate::asynch::tcp::TcpAcceptor;
 
+    //////
+
+    // pub struct Request1<T>(T);
+
+    // pub trait Handler<T>
+    // where
+    //     T: Read,
+    // {
+    //     type HandleFuture<'a>: Future<Output = ()> where Self: 'a;
+
+    //     fn handle(&self, request: Request1<T>) -> Self::HandleFuture<'_>;
+    // }
+
+    // impl<T> Handler<T> for ()
+    // where T: Read,
+    // {
+    //     type HandleFuture<'a> where Self: 'a = impl Future<Output = ()>;
+
+    //     fn handle(&self, request: Request1<T>) -> Self::HandleFuture<'_> {
+    //         async move {
+
+    //         }
+    //     }
+    // }
+    // pub async fn test0() {
+    //     let conn = conn().await;
+
+    //     test(conn, ()).await;
+    // }
+
+    // pub async fn test<T, H>(mut connection: T, handler: H)
+    // where
+    //     H: for <'a> Handler<&'a mut T>,
+    //     T: Read + 'static,
+    // {
+    //     loop {
+    //         handler.handle(Request1(&mut connection)).await;
+
+    //         handler.handle(Request1(&mut connection)).await;
+    //     }
+    // }
+
+    // pub async fn conn() -> impl Read {
+    // }
+
+    ///////
+
     struct PrivateData;
 
     pub struct ServerRequest(PrivateData);
@@ -244,27 +291,18 @@ mod embedded_svc_compat {
         }
     }
 
-    pub type HandleConnectionFuture<
-        const N: usize,
-        const B: usize,
-        T: Read + Write,
-        H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>>,
-    > = impl Future<Output = Result<(), Error<T::Error>>>;
-
-    pub fn handle_connection<const N: usize, const B: usize, T, H>(
+    pub async fn handle_connection<const N: usize, const B: usize, T, H>(
         mut io: T,
         handler: ServerHandler<H>,
-    ) -> HandleConnectionFuture<N, B, T, H>
+    ) -> Result<(), Error<T::Error>>
     where
         H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>>,
         T: Read + Write,
     {
-        async move {
-            let mut buf = [0_u8; B];
+        let mut buf = [0_u8; B];
 
-            loop {
-                handle_request::<N, _, _>(&mut buf, &mut io, &handler).await?;
-            }
+        loop {
+            handle_request::<N, _, _>(&mut buf, &mut io, &handler).await?;
         }
     }
 
