@@ -3,23 +3,25 @@ pub use embedded_svc_compat::*;
 
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
-    use core::future::Future;
+    use core::future::{pending, Future};
 
     use embedded_io::asynch::{Read, Write};
     use embedded_io::Io;
 
     use embedded_svc::http::headers::{content_len, content_type, ContentLenParseBuf};
-    use embedded_svc::http::server::asynch::Connection;
+    use embedded_svc::http::server::asynch::{Handler, Request};
+    use embedded_svc::http::server::{FnHandler, HandlerResult};
+    use embedded_svc::http::Headers;
     use embedded_svc::mutex::RawMutex;
     use embedded_svc::utils::asynch::mpmc::Channel;
     use embedded_svc::utils::asynch::select::{select3, select_all_hvec};
     use embedded_svc::utils::http::server::registration::asynch::{
-        HandlerRegistration, ServerHandler,
+        HandlerChain, RootHandlerChainBuilder,
     };
 
     use crate::asynch::http::{
-        send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, Request,
-        SendBody,
+        send_headers, send_headers_end, send_status, Body, BodyType, Error, Method,
+        Request as RawRequest, SendBody,
     };
     use crate::asynch::tcp::TcpAcceptor;
 
@@ -70,11 +72,32 @@ mod embedded_svc_compat {
 
     ///////
 
-    struct PrivateData;
+    pub async fn test(request: impl Request) -> HandlerResult {
+        let content_type = request.headers().content_type().unwrap();
 
-    pub struct ServerRequest(PrivateData);
+        request
+            .into_response(200, None, &[("Content-Type", "zzz")])
+            .await?;
 
-    pub struct ServerResponse(PrivateData);
+        Ok(())
+    }
+
+    pub struct Q;
+
+    impl<R> Handler<R> for Q
+    where
+        R: Request,
+    {
+        type HandleFuture<'a>
+        where
+            Self: 'a,
+            R: 'a,
+        = impl Future<Output = HandlerResult>;
+
+        fn handle<'a>(&'a self, request: R) -> Self::HandleFuture<'a> {
+            test(request)
+        }
+    }
 
     pub enum ServerConnection<'b, const N: usize, T> {
         RequestState(Option<ServerRequestState<'b, N, T>>),
@@ -82,7 +105,7 @@ mod embedded_svc_compat {
     }
 
     pub struct ServerRequestState<'b, const N: usize, T> {
-        request: Request<'b, N>,
+        request: RawRequest<'b, N>,
         io: Body<'b, T>,
     }
 
@@ -94,7 +117,7 @@ mod embedded_svc_compat {
         where
             T: Read + Write,
         {
-            let mut raw_request = Request::new();
+            let mut raw_request = RawRequest::new();
 
             let (buf, read_len) = raw_request.receive(buf, &mut io).await?;
 
@@ -230,15 +253,53 @@ mod embedded_svc_compat {
         type Error = Error<T::Error>;
     }
 
-    impl<'b, const N: usize, T> Connection for ServerConnection<'b, N, T>
+    impl<'b, const N: usize, T> Read for ServerConnection<'b, N, T>
     where
-        T: Read + Write,
+        T: Read,
     {
-        type Request = ServerRequest;
+        type ReadFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<usize, Self::Error>>;
 
-        type Response = ServerResponse;
+        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+            async move { self.request_mut().io.read(buf).await }
+        }
+    }
 
-        type Headers = Request<'b, N>;
+    impl<'b, const N: usize, T> Write for ServerConnection<'b, N, T>
+    where
+        T: Write,
+    {
+        type WriteFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<usize, Self::Error>>;
+
+        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+            async move { self.response_write().write(buf).await }
+        }
+
+        type FlushFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<(), Self::Error>>;
+
+        fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+            async move { self.response_write().flush().await }
+        }
+    }
+
+    pub type ServerRequest<'m, 'b, const N: usize, T> = &'m mut ServerConnection<'b, N, T>;
+
+    impl<'m, 'b, const N: usize, T> Request for ServerRequest<'m, 'b, N, T>
+    where
+        T: Read + Write + 'm,
+        'b: 'm,
+    {
+        type Response = ServerRequest<'m, 'b, N, T>;
+
+        type Headers = RawRequest<'b, N>;
 
         type Read = Body<'b, T>;
 
@@ -253,37 +314,32 @@ mod embedded_svc_compat {
             Self: 'a,
         = impl Future<Output = Result<Self::Response, Self::Error>>;
 
-        fn split<'a>(
-            &'a mut self,
-            _request: &'a mut Self::Request,
-        ) -> (&'a Self::Headers, &'a mut Self::Read) {
+        fn split<'a>(&'a mut self) -> (&'a Self::Headers, &'a mut Self::Read) {
             let req = self.request_mut();
 
             (&req.request, &mut req.io)
         }
 
-        fn headers<'a>(&'a self, _request: &'a Self::Request) -> &'a Self::Headers {
+        fn headers<'a>(&'a self) -> &'a Self::Headers {
             &self.request().request
         }
 
         fn into_response<'a>(
-            &'a mut self,
-            _request: Self::Request,
+            mut self,
             status: u16,
             message: Option<&'a str>,
             headers: &'a [(&'a str, &'a str)],
-        ) -> Self::IntoResponseFuture<'a> {
+        ) -> Self::IntoResponseFuture<'a>
+        where
+            Self: Sized + 'a,
+        {
             async move {
                 let mut buf = [0_u8; 1024]; // TODO
                 self.complete_request(&mut buf, Some(status), message, headers)
                     .await?;
 
-                Ok(ServerResponse(PrivateData))
+                Ok(self)
             }
-        }
-
-        fn writer<'a>(&'a mut self, _response: &'a mut Self::Response) -> &'a mut Self::Write {
-            self.response_write()
         }
 
         fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {
@@ -291,51 +347,66 @@ mod embedded_svc_compat {
         }
     }
 
-    pub async fn handle_connection<const N: usize, const B: usize, T, H>(
+    pub trait GlobalHandler<R>
+    where
+        R: Request,
+    {
+        type HandleFuture<'a>: Future<Output = HandlerResult>
+        where
+            Self: 'a,
+            R: 'a;
+
+        fn handle<'a>(
+            &'a self,
+            path: &'a str,
+            method: embedded_svc::http::Method,
+            request: R,
+        ) -> Self::HandleFuture<'a> {
+            self.handle_chain(false, path, method, request)
+        }
+
+        fn handle_chain<'a>(
+            &'a self,
+            path_registered: bool,
+            path: &'a str,
+            method: embedded_svc::http::Method,
+            request: R,
+        ) -> Self::HandleFuture<'a>;
+    }
+
+    pub async fn handle_connection<const N: usize, const B: usize, T>(
         mut io: T,
-        handler: ServerHandler<H>,
+        //handler: &H,
     ) -> Result<(), Error<T::Error>>
     where
-        H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>>,
+        //H: for<'m, 'b> GlobalHandler<ServerRequest<'m, 'b, N, &'b mut T>>,
         T: Read + Write,
     {
         let mut buf = [0_u8; B];
+
+        let handler = ();
 
         loop {
             handle_request::<N, _, _>(&mut buf, &mut io, &handler).await?;
         }
     }
 
-    pub async fn handle_request<'b, const N: usize, H, T>(
+    pub async fn handle_request<'b, const N: usize, T, H>(
         buf: &'b mut [u8],
         io: T,
-        handler: &ServerHandler<H>,
+        handler: &H,
     ) -> Result<(), Error<T::Error>>
     where
-        H: HandlerRegistration<ServerConnection<'b, N, T>>,
+        H: for<'m> GlobalHandler<ServerRequest<'m, 'b, N, T>>,
         T: Read + Write,
     {
-        let mut connection = ServerConnection::new(buf, io).await?;
+        let mut connection = ServerConnection::<N, _>::new(buf, io).await?;
 
-        let path = ""; // TODO connection.request().request().request.path.unwrap_or("");
+        let path = connection.request().request.path.unwrap_or("");
         let result = if let Some(method) = connection.request().request.method {
-            handler
-                .handle(
-                    path,
-                    method.into(),
-                    &mut connection,
-                    ServerRequest(PrivateData),
-                )
-                .await
+            handler.handle(path, method.into(), &mut connection).await
         } else {
-            ().handle(
-                true,
-                path,
-                Method::Get.into(),
-                &mut connection,
-                ServerRequest(PrivateData),
-            )
-            .await
+            ().handle(path, Method::Get.into(), &mut connection).await
         };
 
         let mut buf = [0_u8; 64];
@@ -356,35 +427,28 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct Server<const N: usize, const B: usize, A, F> {
-        acceptor: A,
-        handler_factory: F,
-    }
+    pub struct Server<const N: usize, const B: usize, A>(A);
 
-    impl<const N: usize, const B: usize, A, F, H> Server<N, B, A, F>
+    pub type ServerAcceptorRequest<'m, 't, 'b, const N: usize, A> =
+        ServerRequest<'m, 'b, N, &'b mut <A as TcpAcceptor>::Connection<'t>>;
+
+    impl<const N: usize, const B: usize, A> Server<N, B, A>
     where
         A: TcpAcceptor,
-        F: Fn() -> ServerHandler<H>,
-        H: for<'t, 'b> HandlerRegistration<
-            ServerConnection<'b, N, &'b mut <A as TcpAcceptor>::Connection<'t>>,
-        >,
     {
-        pub const fn new(acceptor: A, handler_factory: F) -> Self {
-            Self {
-                acceptor,
-                handler_factory,
-            }
+        pub const fn new(acceptor: A) -> Self {
+            Self(acceptor)
         }
 
-        pub async fn process<
-            const P: usize,
-            const W: usize,
-            R: RawMutex,
-            Q: Future<Output = ()>,
-        >(
+        pub async fn process<const P: usize, const W: usize, R, Q>(
             &mut self,
             quit: Q,
-        ) -> Result<(), Error<A::Error>> {
+        ) -> Result<(), Error<A::Error>>
+        where
+            R: RawMutex,
+            //H: for<'m, 't, 'b> GlobalHandler<ServerAcceptorRequest<'m, 't, 'b, N, A>>,
+            Q: Future<Output = ()>,
+        {
             let channel = Channel::<R, _, W>::new();
             let mut handlers = heapless::Vec::<_, P>::new();
 
@@ -394,9 +458,7 @@ mod embedded_svc_compat {
                         loop {
                             let io = channel.recv().await;
 
-                            handle_connection::<N, B, _, _>(io, (self.handler_factory)())
-                                .await
-                                .unwrap();
+                            handle_connection::<N, B, _>(io).await.unwrap();
                         }
                     })
                     .map_err(|_| ())
@@ -407,7 +469,7 @@ mod embedded_svc_compat {
                 quit,
                 async {
                     loop {
-                        let io = self.acceptor.accept().await.map_err(Error::Io).unwrap();
+                        let io = self.0.accept().await.map_err(Error::Io).unwrap();
 
                         channel.send(io).await;
                     }
@@ -418,5 +480,75 @@ mod embedded_svc_compat {
 
             Ok(())
         }
+    }
+
+    impl<R> GlobalHandler<R> for ()
+    where
+        R: Request,
+    {
+        type HandleFuture<'a>
+        where
+            Self: 'a,
+            R: 'a,
+        = impl Future<Output = HandlerResult>;
+
+        fn handle_chain<'a>(
+            &'a self,
+            path_registered: bool,
+            _path: &'a str,
+            _method: embedded_svc::http::Method,
+            request: R,
+        ) -> Self::HandleFuture<'a> {
+            async move {
+                request
+                    .into_status_response(if path_registered { 405 } else { 404 })
+                    .await?;
+
+                Ok(())
+            }
+        }
+    }
+
+    impl<H, R, N> GlobalHandler<R> for HandlerChain<H, N>
+    where
+        H: Handler<R>,
+        N: GlobalHandler<R>,
+        R: Request,
+    {
+        type HandleFuture<'a>
+        where
+            Self: 'a,
+            R: 'a,
+        = impl Future<Output = HandlerResult>;
+
+        fn handle_chain<'a>(
+            &'a self,
+            path_registered: bool,
+            path: &'a str,
+            method: embedded_svc::http::Method,
+            request: R,
+        ) -> Self::HandleFuture<'a> {
+            async move {
+                let path_found = self.path == path;
+
+                if self.method == method {
+                    self.handler.handle(request).await
+                } else {
+                    self.next
+                        .handle_chain(path_registered || path_found, path, method, request)
+                        .await
+                }
+            }
+        }
+    }
+
+    pub async fn h<A, R>(acceptor: A)
+    where
+        A: TcpAcceptor,
+        R: RawMutex,
+    {
+        let mut server = Server::<1, 1, _>::new(acceptor);
+
+        server.process::<1, 1, R, _>(pending()).await.unwrap();
     }
 }
