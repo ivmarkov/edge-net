@@ -48,9 +48,9 @@ where
         .post("/", Simple2)
         .get("/foo", Simple2);
 
-    let mut server = Server::<1, 1, _, _>::new(acceptor, handler);
+    let mut server = Server::<128, 2048, _, _>::new(acceptor, handler);
 
-    server.process::<1, 1, R, _>(pending()).await.unwrap();
+    server.process::<4, 4, R, _>(pending()).await.unwrap();
 }
 
 pub struct Simple;
