@@ -1299,7 +1299,7 @@ where
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Request<'b, const N: usize> {
     pub method: Option<Method>,
     pub path: Option<&'b str>,
@@ -1387,7 +1387,7 @@ impl<'b, const N: usize> Display for Request<'b, N> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Response<'b, const N: usize> {
     pub code: Option<u16>,
     pub reason: Option<&'b str>,

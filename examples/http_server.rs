@@ -1,79 +1,102 @@
-use embedded_svc::executor::asynch::Blocker;
-use embedded_svc::http::client::asynch::BlockingClient;
-use embedded_svc::http::client::{Client as _, RequestWrite};
-use embedded_svc::http::Method;
-use embedded_svc::io::Read;
-use embedded_svc::mutex::StdRawCondvar;
-use embedded_svc::utils::asynch::executor::embedded::{CondvarWait, EmbeddedBlocker};
+#![feature(generic_associated_types)]
+#![feature(type_alias_impl_trait)]
 
-use embedded_svc_impl::asynch::http::client::Client;
-use embedded_svc_impl::asynch::stdnal::StdTcpClientSocket;
-use embedded_svc_impl::asynch::tcp::TcpClientSocket;
+use core::future::{pending, Future};
+
+use embedded_svc::io::asynch::Write;
+use embedded_svc::{
+    executor::asynch::Blocker,
+    http::server::{
+        asynch::{Connection, Handler, Request},
+        HandlerResult,
+    },
+    mutex::{RawMutex, StdRawCondvar, StdRawMutex},
+    utils::{
+        asynch::executor::embedded::{CondvarWait, EmbeddedBlocker},
+        http::server::registration::ChainRoot,
+    },
+};
+use embedded_svc_impl::asynch::{
+    http::server::Server,
+    stdnal::StdTcpServerSocket,
+    tcp::{TcpAcceptor, TcpServerSocket},
+};
 
 fn main() {
     simple_logger::SimpleLogger::new().env().init().unwrap();
-
-    read().unwrap();
-}
-
-fn read() -> anyhow::Result<()> {
-    println!("About to open an HTTP connection to httpbin.org port 80");
 
     let wait = CondvarWait::<StdRawCondvar>::new();
 
     let blocker = EmbeddedBlocker::new(wait.notify_factory(), wait);
 
-    let socket = StdTcpClientSocket::new();
-    let mut buf = [0_u8; 8192];
+    let mut socket = StdTcpServerSocket::new();
 
-    let mut client = BlockingClient::new(
-        blocker,
-        Client::<1024, _>::new(
-            &mut buf,
-            socket,
-            "34.227.213.82:80".parse().unwrap(), /*httpbin.org*/
-        ),
-    );
+    blocker.block_on(async move {
+        let acceptor = socket.bind("0.0.0.0:8080".parse().unwrap()).await.unwrap();
 
-    for uri in ["/ip", "/headers"] {
-        request(&mut client, uri)?;
-    }
-
-    Ok(())
+        run::<StdRawMutex, _>(acceptor).await;
+    });
 }
 
-fn request<'a, const N: usize, T, B>(
-    client: &mut BlockingClient<B, Client<'a, N, T>>,
-    uri: &str,
-) -> anyhow::Result<()>
+pub async fn run<R, A>(acceptor: A)
 where
-    T: TcpClientSocket,
-    T::Error: std::error::Error + Send + Sync + 'static,
-    B: Blocker,
+    R: RawMutex,
+    A: TcpAcceptor,
 {
-    let mut response = client
-        .request(Method::Get, uri, &[("Host", "34.227.213.82")])?
-        .submit()?;
+    let handler = ChainRoot
+        .get("/", Simple)
+        .post("/", Simple2)
+        .get("/foo", Simple2);
 
-    let mut result = Vec::new();
+    let mut server = Server::<1, 1, _, _>::new(acceptor, handler);
 
-    let mut buf = [0_u8; 1024];
+    server.process::<1, 1, R, _>(pending()).await.unwrap();
+}
 
-    loop {
-        let len = response.read(&mut buf)?;
+pub struct Simple;
 
-        if len > 0 {
-            result.extend_from_slice(&buf[0..len]);
-        } else {
-            break;
+impl<C> Handler<C> for Simple
+where
+    C: Connection,
+{
+    type HandleFuture<'a>
+    = impl Future<Output = HandlerResult>
+    where
+    Self: 'a,
+    C: 'a;
+
+    fn handle<'a>(&'a self, connection: &'a mut C) -> Self::HandleFuture<'a> {
+        async move {
+            let request = Request::wrap(connection)?;
+
+            request
+                .into_ok_response()
+                .await?
+                .write_all("Hello!".as_bytes())
+                .await?;
+
+            Ok(())
         }
     }
+}
 
-    println!(
-        "Request to httpbin.org, URI \"{}\" returned:\nHeader:\n{}\n\nBody:\n=================\n{}\n=================\n\n\n\n",
-        uri,
-        response.api(),
-        std::str::from_utf8(&result)?);
+pub struct Simple2;
 
-    Ok(())
+impl<C> Handler<C> for Simple2
+where
+    C: Connection,
+{
+    type HandleFuture<'a>
+    = impl Future<Output = HandlerResult>
+    where
+    Self: 'a,
+    C: 'a;
+
+    fn handle<'a>(&'a self, connection: &'a mut C) -> Self::HandleFuture<'a> {
+        async move {
+            connection.into_response(200, Some("OK"), &[]).await?;
+
+            Ok(())
+        }
+    }
 }

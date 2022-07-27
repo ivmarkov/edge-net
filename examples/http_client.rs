@@ -1,14 +1,14 @@
-use embedded_svc::executor::asynch::Blocker;
-use embedded_svc::http::client::asynch::BlockingClient;
-use embedded_svc::http::client::{Client as _, RequestWrite};
+use std::error::Error;
+
+use embedded_svc::http::client::asynch::BlockingConnection;
+use embedded_svc::http::client::{Client, Connection};
 use embedded_svc::http::Method;
 use embedded_svc::io::Read;
 use embedded_svc::mutex::StdRawCondvar;
 use embedded_svc::utils::asynch::executor::embedded::{CondvarWait, EmbeddedBlocker};
 
-use embedded_svc_impl::asynch::http::client::Client;
+use embedded_svc_impl::asynch::http::client::ClientConnection;
 use embedded_svc_impl::asynch::stdnal::StdTcpClientSocket;
-use embedded_svc_impl::asynch::tcp::TcpClientSocket;
 
 fn main() {
     simple_logger::SimpleLogger::new().env().init().unwrap();
@@ -26,14 +26,16 @@ fn read() -> anyhow::Result<()> {
     let socket = StdTcpClientSocket::new();
     let mut buf = [0_u8; 8192];
 
-    let mut client = BlockingClient::new(
+    let connection = BlockingConnection::new(
         blocker,
-        Client::<1024, _>::new(
+        ClientConnection::<1024, _>::new(
             &mut buf,
             socket,
             "34.227.213.82:80".parse().unwrap(), /*httpbin.org*/
         ),
     );
+
+    let mut client = Client::wrap(connection);
 
     for uri in ["/ip", "/headers"] {
         request(&mut client, uri)?;
@@ -42,14 +44,10 @@ fn read() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn request<'a, const N: usize, T, B>(
-    client: &mut BlockingClient<B, Client<'a, N, T>>,
-    uri: &str,
-) -> anyhow::Result<()>
+fn request<C>(client: &mut Client<C>, uri: &str) -> anyhow::Result<()>
 where
-    T: TcpClientSocket,
-    T::Error: std::error::Error + Send + Sync + 'static,
-    B: Blocker,
+    C: Connection,
+    C::Error: Error + Send + Sync + 'static,
 {
     let mut response = client
         .request(Method::Get, uri, &[("Host", "34.227.213.82")])?
@@ -70,9 +68,9 @@ where
     }
 
     println!(
-        "Request to httpbin.org, URI \"{}\" returned:\nHeader:\n{}\n\nBody:\n=================\n{}\n=================\n\n\n\n",
+        "Request to httpbin.org, URI \"{}\" returned:\nBody:\n=================\n{}\n=================\n\n\n\n",
         uri,
-        response.api(),
+        //response.headers(),
         std::str::from_utf8(&result)?);
 
     Ok(())

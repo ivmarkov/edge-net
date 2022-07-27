@@ -3,7 +3,7 @@ pub use embedded_svc_compat::*;
 
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
-    use core::future::{pending, Future};
+    use core::future::Future;
 
     use embedded_io::asynch::{Read, Write};
     use embedded_io::Io;
@@ -11,7 +11,7 @@ mod embedded_svc_compat {
     use embedded_svc::http::headers::{content_len, content_type, ContentLenParseBuf};
     use embedded_svc::http::server::asynch::{Connection, Handler};
     use embedded_svc::http::server::HandlerResult;
-    use embedded_svc::mutex::{RawMutex, StdRawMutex};
+    use embedded_svc::mutex::RawMutex;
     use embedded_svc::utils::asynch::mpmc::Channel;
     use embedded_svc::utils::asynch::select::{select3, select_all_hvec};
     use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
@@ -20,10 +20,7 @@ mod embedded_svc_compat {
         send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, Request,
         SendBody,
     };
-    use crate::asynch::stdnal::StdTcpAcceptor;
     use crate::asynch::tcp::TcpAcceptor;
-
-    struct PrivateData;
 
     pub enum ServerConnection<'b, const N: usize, T> {
         RequestState(Option<ServerRequestState<'b, N, T>>),
@@ -324,63 +321,6 @@ mod embedded_svc_compat {
     pub struct Server<const N: usize, const B: usize, A, H> {
         acceptor: A,
         handler: H,
-    }
-
-    pub struct Simple;
-
-    impl<C> Handler<C> for Simple
-    where
-        C: Connection,
-    {
-        type HandleFuture<'a>
-        where
-            Self: 'a,
-            C: 'a,
-        = impl Future<Output = HandlerResult>;
-
-        fn handle<'a>(&'a self, connection: &'a mut C) -> Self::HandleFuture<'a> {
-            async move { Ok(()) }
-        }
-    }
-
-    pub struct Simple2;
-
-    impl<C> Handler<C> for Simple2
-    where
-        C: Connection,
-    {
-        type HandleFuture<'a>
-        where
-            Self: 'a,
-            C: 'a,
-        = impl Future<Output = HandlerResult>;
-
-        fn handle<'a>(&'a self, connection: &'a mut C) -> Self::HandleFuture<'a> {
-            async move {
-                connection.into_response(200, Some("OK"), &[]).await?;
-
-                Ok(())
-            }
-        }
-    }
-
-    pub async fn test_std(acceptor: StdTcpAcceptor) {
-        test::<StdTcpAcceptor, StdRawMutex>(acceptor).await;
-    }
-
-    pub async fn test<A, R>(acceptor: A)
-    where
-        A: TcpAcceptor,
-        R: RawMutex,
-    {
-        let handler = ChainRoot
-            .get("/", Simple)
-            .post("/", Simple2)
-            .get("/foo", Simple2);
-
-        let mut server = Server::<1, 1, _, _>::new(acceptor, handler);
-
-        server.process::<1, 1, R, _>(pending()).await.unwrap();
     }
 
     impl<const N: usize, const B: usize, A, H> Server<N, B, A, H>

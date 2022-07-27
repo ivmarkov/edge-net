@@ -116,6 +116,12 @@ impl Write for StdTcpClientSocket {
 
 pub struct StdTcpServerSocket;
 
+impl StdTcpServerSocket {
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
 impl Io for StdTcpServerSocket {
     type Error = io::Error;
 }
