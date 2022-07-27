@@ -65,7 +65,7 @@ where
     Self: 'a,
     C: 'a;
 
-    fn handle<'a>(&'a self, connection: &'a mut C) -> Self::HandleFuture<'a> {
+    fn handle<'a>(&'a self, connection: C) -> Self::HandleFuture<'a> {
         async move {
             let request = Request::wrap(connection)?;
 
@@ -92,7 +92,7 @@ where
     Self: 'a,
     C: 'a;
 
-    fn handle<'a>(&'a self, connection: &'a mut C) -> Self::HandleFuture<'a> {
+    fn handle<'a>(&'a self, mut connection: C) -> Self::HandleFuture<'a> {
         async move {
             connection.into_response(200, Some("OK"), &[]).await?;
 

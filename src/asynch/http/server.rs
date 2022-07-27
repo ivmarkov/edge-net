@@ -251,7 +251,7 @@ mod embedded_svc_compat {
             &'a self,
             path: &'a str,
             method: embedded_svc::http::Method,
-            connection: &'a mut C,
+            connection: C,
         ) -> Self::HandleFuture<'a> {
             self.handle_chain(false, path, method, connection)
         }
@@ -261,7 +261,7 @@ mod embedded_svc_compat {
             path_registered: bool,
             path: &'a str,
             method: embedded_svc::http::Method,
-            connection: &'a mut C,
+            connection: C,
         ) -> Self::HandleFuture<'a>;
     }
 
@@ -270,7 +270,7 @@ mod embedded_svc_compat {
         handler: &H,
     ) -> Result<(), Error<T::Error>>
     where
-        H: for<'b> GlobalHandler<ServerConnection<'b, N, &'b mut T>>,
+        H: for<'a, 'b> GlobalHandler<&'a mut ServerConnection<'b, N, &'b mut T>>,
         T: Read + Write,
     {
         let mut buf = [0_u8; B];
@@ -286,7 +286,7 @@ mod embedded_svc_compat {
         handler: &H,
     ) -> Result<(), Error<T::Error>>
     where
-        H: GlobalHandler<ServerConnection<'b, N, T>>,
+        H: for<'a> GlobalHandler<&'a mut ServerConnection<'b, N, T>>,
         T: Read + Write,
     {
         let mut connection = ServerConnection::new(buf, io).await?;
@@ -326,8 +326,8 @@ mod embedded_svc_compat {
     impl<const N: usize, const B: usize, A, H> Server<N, B, A, H>
     where
         A: TcpAcceptor,
-        H: for<'t, 'b> GlobalHandler<
-            ServerConnection<'b, N, &'b mut <A as TcpAcceptor>::Connection<'t>>,
+        H: for<'a, 't, 'b> GlobalHandler<
+            &'a mut ServerConnection<'b, N, &'b mut <A as TcpAcceptor>::Connection<'t>>,
         >,
     {
         pub const fn new(acceptor: A, handler: H) -> Self {
@@ -393,7 +393,7 @@ mod embedded_svc_compat {
             path_registered: bool,
             _path: &'a str,
             _method: embedded_svc::http::Method,
-            connection: &'a mut C,
+            mut connection: C,
         ) -> Self::HandleFuture<'a> {
             async move {
                 connection
@@ -422,7 +422,7 @@ mod embedded_svc_compat {
             path_registered: bool,
             path: &'a str,
             method: embedded_svc::http::Method,
-            connection: &'a mut C,
+            connection: C,
         ) -> Self::HandleFuture<'a> {
             async move {
                 if self.path == path && self.method == method {
