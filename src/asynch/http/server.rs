@@ -25,18 +25,9 @@ mod embedded_svc_compat {
 
     struct PrivateData;
 
-    pub struct ServerRequest(PrivateData);
-
-    pub struct ServerResponse(PrivateData);
-
     pub enum ServerConnection<'b, const N: usize, T> {
         RequestState(Option<ServerRequestState<'b, N, T>>),
         ResponseState(Option<SendBody<T>>),
-    }
-
-    pub struct ServerRequestState<'b, const N: usize, T> {
-        request: Request<'b, N>,
-        io: Body<'b, T>,
     }
 
     impl<'b, const N: usize, T> ServerConnection<'b, N, T> {
@@ -243,6 +234,11 @@ mod embedded_svc_compat {
         fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {
             Ok(self.raw_io())
         }
+    }
+
+    pub struct ServerRequestState<'b, const N: usize, T> {
+        request: Request<'b, N>,
+        io: Body<'b, T>,
     }
 
     pub trait GlobalHandler<C>

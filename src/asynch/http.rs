@@ -18,7 +18,6 @@ pub use embedded_svc_compat::*;
 use super::ws::http::UpgradeError;
 
 pub mod client;
-pub mod completion;
 pub mod server;
 
 /// An error in parsing the headers or the body.
