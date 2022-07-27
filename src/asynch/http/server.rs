@@ -14,9 +14,7 @@ mod embedded_svc_compat {
     use embedded_svc::mutex::{RawMutex, StdRawMutex};
     use embedded_svc::utils::asynch::mpmc::Channel;
     use embedded_svc::utils::asynch::select::{select3, select_all_hvec};
-    use embedded_svc::utils::http::server::registration::asynch::{
-        HandlerRegistration, ServerHandler,
-    };
+    use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
     use crate::asynch::http::{
         send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, Request,
@@ -24,53 +22,6 @@ mod embedded_svc_compat {
     };
     use crate::asynch::stdnal::StdTcpAcceptor;
     use crate::asynch::tcp::TcpAcceptor;
-
-    //////
-
-    // pub struct Request1<T>(T);
-
-    // pub trait Handler<T>
-    // where
-    //     T: Read,
-    // {
-    //     type HandleFuture<'a>: Future<Output = ()> where Self: 'a;
-
-    //     fn handle(&self, request: Request1<T>) -> Self::HandleFuture<'_>;
-    // }
-
-    // impl<T> Handler<T> for ()
-    // where T: Read,
-    // {
-    //     type HandleFuture<'a> where Self: 'a = impl Future<Output = ()>;
-
-    //     fn handle(&self, request: Request1<T>) -> Self::HandleFuture<'_> {
-    //         async move {
-
-    //         }
-    //     }
-    // }
-    // pub async fn test0() {
-    //     let conn = conn().await;
-
-    //     test(conn, ()).await;
-    // }
-
-    // pub async fn test<T, H>(mut connection: T, handler: H)
-    // where
-    //     H: for <'a> Handler<&'a mut T>,
-    //     T: Read + 'static,
-    // {
-    //     loop {
-    //         handler.handle(Request1(&mut connection)).await;
-
-    //         handler.handle(Request1(&mut connection)).await;
-    //     }
-    // }
-
-    // pub async fn conn() -> impl Read {
-    // }
-
-    ///////
 
     struct PrivateData;
 
@@ -293,12 +244,41 @@ mod embedded_svc_compat {
         }
     }
 
+    pub trait GlobalHandler<C>
+    where
+        C: Connection,
+    {
+        type HandleFuture<'a>: Future<Output = HandlerResult>
+        where
+            Self: 'a,
+            C: 'a;
+
+        fn handle<'a>(
+            &'a self,
+            path: &'a str,
+            method: embedded_svc::http::Method,
+            connection: &'a mut C,
+            request: C::Request,
+        ) -> Self::HandleFuture<'a> {
+            self.handle_chain(false, path, method, connection, request)
+        }
+
+        fn handle_chain<'a>(
+            &'a self,
+            path_registered: bool,
+            path: &'a str,
+            method: embedded_svc::http::Method,
+            connection: &'a mut C,
+            request: C::Request,
+        ) -> Self::HandleFuture<'a>;
+    }
+
     pub async fn handle_connection<const N: usize, const B: usize, T, H>(
         mut io: T,
         handler: &H,
     ) -> Result<(), Error<T::Error>>
     where
-        H: for<'b> HandlerRegistration<ServerConnection<'b, N, &'b mut T>>,
+        H: for<'b> GlobalHandler<ServerConnection<'b, N, &'b mut T>>,
         T: Read + Write,
     {
         let mut buf = [0_u8; B];
@@ -314,16 +294,15 @@ mod embedded_svc_compat {
         handler: &H,
     ) -> Result<(), Error<T::Error>>
     where
-        H: HandlerRegistration<ServerConnection<'b, N, T>>,
+        H: GlobalHandler<ServerConnection<'b, N, T>>,
         T: Read + Write,
     {
         let mut connection = ServerConnection::new(buf, io).await?;
 
-        let path = ""; // TODO connection.request().request().request.path.unwrap_or("");
+        let path = connection.request().request.path.unwrap_or("");
         let result = if let Some(method) = connection.request().request.method {
             handler
                 .handle(
-                    false,
                     path,
                     method.into(),
                     &mut connection,
@@ -331,14 +310,14 @@ mod embedded_svc_compat {
                 )
                 .await
         } else {
-            ().handle(
-                true,
-                path,
-                Method::Get.into(),
-                &mut connection,
-                ServerRequest(PrivateData),
-            )
-            .await
+            ChainRoot
+                .handle(
+                    path,
+                    Method::Get.into(),
+                    &mut connection,
+                    ServerRequest(PrivateData),
+                )
+                .await
         };
 
         let mut buf = [0_u8; 64];
@@ -419,13 +398,10 @@ mod embedded_svc_compat {
         A: TcpAcceptor,
         R: RawMutex,
     {
-        let handler = RootHandlerChainBuilder::new()
-            .at("/")
-            .get(Simple)
-            .post(Simple2)
-            .at("/foo")
-            .get(Simple2)
-            .create();
+        let handler = ChainRoot
+            .get("/", Simple)
+            .post("/", Simple2)
+            .get("/foo", Simple2);
 
         let mut server = Server::<1, 1, _, _>::new(acceptor, handler);
 
@@ -435,7 +411,7 @@ mod embedded_svc_compat {
     impl<const N: usize, const B: usize, A, H> Server<N, B, A, H>
     where
         A: TcpAcceptor,
-        H: for<'t, 'b> HandlerRegistration<
+        H: for<'t, 'b> GlobalHandler<
             ServerConnection<'b, N, &'b mut <A as TcpAcceptor>::Connection<'t>>,
         >,
     {
@@ -487,34 +463,9 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct HandlerChain<H, N> {
-        pub path: &'static str,
-        pub method: embedded_svc::http::Method,
-        pub handler: H,
-        pub next: N,
-    }
-
-    impl<H, N> HandlerChain<H, N> {
-        pub const fn new(
-            path: &'static str,
-            method: embedded_svc::http::Method,
-            handler: H,
-            next: N,
-        ) -> Self {
-            Self {
-                path,
-                method,
-                handler,
-                next,
-            }
-        }
-    }
-
-    impl<C, H, N> HandlerRegistration<C> for HandlerChain<H, N>
+    impl<C> GlobalHandler<C> for ChainRoot
     where
         C: Connection,
-        H: Handler<C>,
-        N: HandlerRegistration<C>,
     {
         type HandleFuture<'a>
         where
@@ -522,7 +473,37 @@ mod embedded_svc_compat {
             C: 'a,
         = impl Future<Output = HandlerResult>;
 
-        fn handle<'a>(
+        fn handle_chain<'a>(
+            &'a self,
+            path_registered: bool,
+            _path: &'a str,
+            _method: embedded_svc::http::Method,
+            connection: &'a mut C,
+            request: C::Request,
+        ) -> Self::HandleFuture<'a> {
+            async move {
+                connection
+                    .into_status_response(request, if path_registered { 405 } else { 404 })
+                    .await?;
+
+                Ok(())
+            }
+        }
+    }
+
+    impl<C, H, N> GlobalHandler<C> for ChainHandler<H, N>
+    where
+        C: Connection,
+        H: Handler<C>,
+        N: GlobalHandler<C>,
+    {
+        type HandleFuture<'a>
+        where
+            Self: 'a,
+            C: 'a,
+        = impl Future<Output = HandlerResult>;
+
+        fn handle_chain<'a>(
             &'a self,
             path_registered: bool,
             path: &'a str,
@@ -535,77 +516,10 @@ mod embedded_svc_compat {
                     self.handler.handle(connection, request).await
                 } else {
                     self.next
-                        .handle(path_registered, path, method, connection, request)
+                        .handle_chain(path_registered, path, method, connection, request)
                         .await
                 }
             }
-        }
-    }
-
-    pub struct HandlerChainBuilder<H> {
-        path: &'static str,
-        handler: H,
-    }
-
-    impl HandlerChainBuilder<()> {
-        fn empty(path: &'static str) -> Self {
-            Self { path, handler: () }
-        }
-    }
-
-    impl<H> HandlerChainBuilder<H> {
-        pub fn get<H2>(self, handler: H2) -> HandlerChainBuilder<HandlerChain<H2, H>> {
-            self.method(embedded_svc::http::Method::Get, handler)
-        }
-
-        pub fn post<H2>(self, handler: H2) -> HandlerChainBuilder<HandlerChain<H2, H>> {
-            self.method(embedded_svc::http::Method::Post, handler)
-        }
-
-        pub fn put<H2>(self, handler: H2) -> HandlerChainBuilder<HandlerChain<H2, H>> {
-            self.method(embedded_svc::http::Method::Put, handler)
-        }
-
-        pub fn delete<H2>(self, handler: H2) -> HandlerChainBuilder<HandlerChain<H2, H>> {
-            self.method(embedded_svc::http::Method::Delete, handler)
-        }
-
-        pub fn method<H2>(
-            self,
-            method: embedded_svc::http::Method,
-            handler: H2,
-        ) -> HandlerChainBuilder<HandlerChain<H2, H>> {
-            HandlerChainBuilder {
-                path: self.path,
-                handler: HandlerChain::new(self.path, method, handler, self.handler),
-            }
-        }
-
-        pub fn at(self, path: &'static str) -> HandlerChainBuilder<H> {
-            HandlerChainBuilder {
-                path,
-                handler: self.handler,
-            }
-        }
-
-        pub fn create(self) -> H {
-            self.handler
-        }
-    }
-
-    pub struct RootHandlerChainBuilder<H>(H);
-
-    impl RootHandlerChainBuilder<()> {
-        pub const fn new() -> Self {
-            Self(())
-        }
-
-        pub fn at(self, path: &'static str) -> HandlerChainBuilder<()> {
-            HandlerChainBuilder::empty(path)
-        }
-
-        pub fn create(self) -> () {
-            self.0
         }
     }
 }
