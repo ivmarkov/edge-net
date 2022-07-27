@@ -31,6 +31,7 @@ pub enum Error<E> {
     TooLongBody,
     IncompleteHeaders,
     IncompleteBody,
+    InvalidState,
     Io(E),
 }
 
@@ -69,12 +70,11 @@ where
             Self::InvalidHeaders => write!(f, "Invalid HTTP headers or status line"),
             Self::InvalidBody => write!(f, "Invalid HTTP body"),
             Self::TooManyHeaders => write!(f, "Too many HTTP headers"),
-            Self::TooLongHeaders => {
-                write!(f, "HTTP headers section is too long")
-            }
+            Self::TooLongHeaders => write!(f, "HTTP headers section is too long"),
             Self::TooLongBody => write!(f, "HTTP body is too long"),
             Self::IncompleteHeaders => write!(f, "HTTP headers section is incomplete"),
             Self::IncompleteBody => write!(f, "HTTP body is incomplete"),
+            Self::InvalidState => write!(f, "Connection is not in requested state"),
             Self::Io(e) => write!(f, "{}", e),
         }
     }

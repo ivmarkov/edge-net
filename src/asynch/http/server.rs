@@ -64,24 +64,33 @@ mod embedded_svc_compat {
             })))
         }
 
-        fn request(&self) -> &ServerRequestState<'b, N, T> {
+        fn request(&self) -> Result<&ServerRequestState<'b, N, T>, Error<T::Error>>
+        where
+            T: Io,
+        {
             match self {
-                Self::RequestState(request) => request.as_ref().unwrap(),
-                _ => unreachable!(),
+                Self::RequestState(request) => Ok(request.as_ref().unwrap()),
+                _ => Err(Error::InvalidState),
             }
         }
 
-        fn request_mut(&mut self) -> &mut ServerRequestState<'b, N, T> {
+        fn request_mut(&mut self) -> Result<&mut ServerRequestState<'b, N, T>, Error<T::Error>>
+        where
+            T: Io,
+        {
             match self {
-                Self::RequestState(request) => request.as_mut().unwrap(),
-                _ => unreachable!(),
+                Self::RequestState(request) => Ok(request.as_mut().unwrap()),
+                _ => Err(Error::InvalidState),
             }
         }
 
-        fn response_write(&mut self) -> &mut SendBody<T> {
+        fn response_write(&mut self) -> Result<&mut SendBody<T>, Error<T::Error>>
+        where
+            T: Io,
+        {
             match self {
-                Self::ResponseState(response_write) => response_write.as_mut().unwrap(),
-                _ => unreachable!(),
+                Self::ResponseState(response_write) => Ok(response_write.as_mut().unwrap()),
+                _ => Err(Error::InvalidState),
             }
         }
 
@@ -124,7 +133,7 @@ mod embedded_svc_compat {
 
                     *self = Self::ResponseState(Some(io));
 
-                    Ok(Some(self.response_write()))
+                    Ok(Some(self.response_write()?))
                 }
                 Self::ResponseState(_) => Ok(None),
             }
@@ -187,10 +196,6 @@ mod embedded_svc_compat {
     where
         T: Read + Write,
     {
-        type Request = ServerRequest;
-
-        type Response = ServerResponse;
-
         type Headers = Request<'b, N>;
 
         type Read = Body<'b, T>;
@@ -204,24 +209,20 @@ mod embedded_svc_compat {
         type IntoResponseFuture<'a>
         where
             Self: 'a,
-        = impl Future<Output = Result<Self::Response, Self::Error>>;
+        = impl Future<Output = Result<(), Self::Error>>;
 
-        fn split<'a>(
+        fn request<'a>(
             &'a mut self,
-            _request: &'a mut Self::Request,
-        ) -> (&'a Self::Headers, &'a mut Self::Read) {
-            let req = self.request_mut();
-
-            (&req.request, &mut req.io)
+        ) -> Result<(&'a Self::Headers, &'a mut Self::Read), Self::Error> {
+            self.request_mut().map(|req| (&req.request, &mut req.io))
         }
 
-        fn headers<'a>(&'a self, _request: &'a Self::Request) -> &'a Self::Headers {
-            &self.request().request
+        fn headers<'a>(&'a self) -> Result<&'a Self::Headers, Self::Error> {
+            Ok(&self.request()?.request)
         }
 
         fn into_response<'a>(
             &'a mut self,
-            _request: Self::Request,
             status: u16,
             message: Option<&'a str>,
             headers: &'a [(&'a str, &'a str)],
@@ -231,11 +232,11 @@ mod embedded_svc_compat {
                 self.complete_request(&mut buf, Some(status), message, headers)
                     .await?;
 
-                Ok(ServerResponse(PrivateData))
+                Ok(())
             }
         }
 
-        fn writer<'a>(&'a mut self, _response: &'a mut Self::Response) -> &'a mut Self::Write {
+        fn response<'a>(&'a mut self) -> Result<&'a mut Self::Write, Self::Error> {
             self.response_write()
         }
 
@@ -258,9 +259,8 @@ mod embedded_svc_compat {
             path: &'a str,
             method: embedded_svc::http::Method,
             connection: &'a mut C,
-            request: C::Request,
         ) -> Self::HandleFuture<'a> {
-            self.handle_chain(false, path, method, connection, request)
+            self.handle_chain(false, path, method, connection)
         }
 
         fn handle_chain<'a>(
@@ -269,7 +269,6 @@ mod embedded_svc_compat {
             path: &'a str,
             method: embedded_svc::http::Method,
             connection: &'a mut C,
-            request: C::Request,
         ) -> Self::HandleFuture<'a>;
     }
 
@@ -299,24 +298,12 @@ mod embedded_svc_compat {
     {
         let mut connection = ServerConnection::new(buf, io).await?;
 
-        let path = connection.request().request.path.unwrap_or("");
-        let result = if let Some(method) = connection.request().request.method {
-            handler
-                .handle(
-                    path,
-                    method.into(),
-                    &mut connection,
-                    ServerRequest(PrivateData),
-                )
-                .await
+        let path = connection.request()?.request.path.unwrap_or("");
+        let result = if let Some(method) = connection.request()?.request.method {
+            handler.handle(path, method.into(), &mut connection).await
         } else {
             ChainRoot
-                .handle(
-                    path,
-                    Method::Get.into(),
-                    &mut connection,
-                    ServerRequest(PrivateData),
-                )
+                .handle(path, Method::Get.into(), &mut connection)
                 .await
         };
 
@@ -355,11 +342,7 @@ mod embedded_svc_compat {
             C: 'a,
         = impl Future<Output = HandlerResult>;
 
-        fn handle<'a>(
-            &'a self,
-            connection: &'a mut C,
-            request: <C as Connection>::Request,
-        ) -> Self::HandleFuture<'a> {
+        fn handle<'a>(&'a self, connection: &'a mut C) -> Self::HandleFuture<'a> {
             async move { Ok(()) }
         }
     }
@@ -376,13 +359,9 @@ mod embedded_svc_compat {
             C: 'a,
         = impl Future<Output = HandlerResult>;
 
-        fn handle<'a>(
-            &'a self,
-            connection: &'a mut C,
-            request: <C as Connection>::Request,
-        ) -> Self::HandleFuture<'a> {
+        fn handle<'a>(&'a self, connection: &'a mut C) -> Self::HandleFuture<'a> {
             async move {
-                connection.into_ok_response(request).await?;
+                connection.into_response(200, Some("OK"), &[]).await?;
 
                 Ok(())
             }
@@ -479,11 +458,10 @@ mod embedded_svc_compat {
             _path: &'a str,
             _method: embedded_svc::http::Method,
             connection: &'a mut C,
-            request: C::Request,
         ) -> Self::HandleFuture<'a> {
             async move {
                 connection
-                    .into_status_response(request, if path_registered { 405 } else { 404 })
+                    .into_response(if path_registered { 405 } else { 404 }, None, &[])
                     .await?;
 
                 Ok(())
@@ -509,14 +487,13 @@ mod embedded_svc_compat {
             path: &'a str,
             method: embedded_svc::http::Method,
             connection: &'a mut C,
-            request: C::Request,
         ) -> Self::HandleFuture<'a> {
             async move {
                 if self.path == path && self.method == method {
-                    self.handler.handle(connection, request).await
+                    self.handler.handle(connection).await
                 } else {
                     self.next
-                        .handle_chain(path_registered, path, method, connection, request)
+                        .handle_chain(path_registered, path, method, connection)
                         .await
                 }
             }
