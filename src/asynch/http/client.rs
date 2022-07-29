@@ -115,7 +115,7 @@ mod embedded_svc_compat {
             Self: 'a,
         = impl Future<Output = Result<(), Self::Error>>;
 
-        fn into_request<'a>(
+        fn initiate_request<'a>(
             &'a mut self,
             method: Method,
             uri: &'a str,
@@ -153,7 +153,7 @@ mod embedded_svc_compat {
             self.request_write()
         }
 
-        fn into_response(&mut self) -> Self::IntoResponseFuture<'_> {
+        fn initiate_response(&mut self) -> Self::IntoResponseFuture<'_> {
             async move {
                 match self {
                     Self::RequestState(request) => {

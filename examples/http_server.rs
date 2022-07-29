@@ -94,7 +94,7 @@ where
 
     fn handle<'a>(&'a self, mut connection: C) -> Self::HandleFuture<'a> {
         async move {
-            connection.into_response(200, Some("OK"), &[]).await?;
+            connection.initiate_response(200, Some("OK"), &[]).await?;
 
             Ok(())
         }

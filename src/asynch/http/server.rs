@@ -199,17 +199,15 @@ mod embedded_svc_compat {
             Self: 'a,
         = impl Future<Output = Result<(), Self::Error>>;
 
-        fn request<'a>(
-            &'a mut self,
-        ) -> Result<(&'a Self::Headers, &'a mut Self::Read), Self::Error> {
+        fn request(&mut self) -> Result<(&Self::Headers, &mut Self::Read), Self::Error> {
             self.request_mut().map(|req| (&req.request, &mut req.io))
         }
 
-        fn headers<'a>(&'a self) -> Result<&'a Self::Headers, Self::Error> {
+        fn headers(&self) -> Result<&Self::Headers, Self::Error> {
             Ok(&self.request()?.request)
         }
 
-        fn into_response<'a>(
+        fn initiate_response<'a>(
             &'a mut self,
             status: u16,
             message: Option<&'a str>,
@@ -224,7 +222,7 @@ mod embedded_svc_compat {
             }
         }
 
-        fn response<'a>(&'a mut self) -> Result<&'a mut Self::Write, Self::Error> {
+        fn response(&mut self) -> Result<&mut Self::Write, Self::Error> {
             self.response_write()
         }
 
@@ -397,7 +395,7 @@ mod embedded_svc_compat {
         ) -> Self::HandleFuture<'a> {
             async move {
                 connection
-                    .into_response(if path_registered { 405 } else { 404 }, None, &[])
+                    .initiate_response(if path_registered { 405 } else { 404 }, None, &[])
                     .await?;
 
                 Ok(())
