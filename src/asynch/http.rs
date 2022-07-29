@@ -1621,8 +1621,12 @@ mod embedded_svc_compat {
     }
 
     impl<'b, const N: usize> embedded_svc::http::Query for super::Request<'b, N> {
-        fn query(&self) -> &'_ str {
-            todo!()
+        fn uri(&self) -> &'_ str {
+            self.path.unwrap_or("")
+        }
+
+        fn method(&self) -> Method {
+            self.method.unwrap_or(super::Method::Get).into()
         }
     }
 
