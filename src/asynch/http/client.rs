@@ -5,7 +5,7 @@ use embedded_io::asynch::Read;
 use no_std_net::SocketAddr;
 
 use crate::asynch::http::{
-    send_headers, send_headers_end, send_request, Body, BodyType, Error, Response, SendBody,
+    send_headers, send_headers_end, send_request, Body, BodyType, Error, ResponseHeaders, SendBody,
 };
 use crate::asynch::tcp::TcpClientSocket;
 
@@ -48,13 +48,15 @@ where
         self.complete_request().await
     }
 
-    pub fn response(&mut self) -> Result<(&Response<'b, N>, &mut Body<'b, T>), Error<T::Error>> {
+    pub fn response(
+        &mut self,
+    ) -> Result<(&ResponseHeaders<'b, N>, &mut Body<'b, T>), Error<T::Error>> {
         let response = self.response_mut()?;
 
         Ok((&response.response, &mut response.io))
     }
 
-    pub fn headers(&self) -> Result<&Response<'b, N>, Error<T::Error>> {
+    pub fn headers(&self) -> Result<&ResponseHeaders<'b, N>, Error<T::Error>> {
         let response = self.response_ref()?;
 
         Ok(&response.response)
@@ -142,7 +144,7 @@ where
         let mut state = self.unbind();
         let buf_ptr: *mut [u8] = state.buf;
 
-        let mut response = Response::new();
+        let mut response = ResponseHeaders::new();
 
         match response.receive(state.buf, &mut state.io).await {
             Ok((buf, read_len)) => {
@@ -276,7 +278,7 @@ pub struct RequestState<'b, const N: usize, T> {
 
 pub struct ResponseState<'b, const N: usize, T> {
     buf: *mut [u8],
-    response: Response<'b, N>,
+    response: ResponseHeaders<'b, N>,
     io: Body<'b, T>,
     addr: SocketAddr,
 }
@@ -303,7 +305,7 @@ mod embedded_svc_compat {
 
         type Write = SendBody<T>;
 
-        type Headers = Response<'b, N>;
+        type Headers = ResponseHeaders<'b, N>;
 
         type RawConnectionError = T::Error;
 

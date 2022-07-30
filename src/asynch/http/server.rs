@@ -10,12 +10,13 @@ use embedded_io::asynch::{Read, Write};
 use log::trace;
 
 use crate::asynch::http::{
-    send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, Request, SendBody,
+    send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, RequestHeaders,
+    SendBody,
 };
 use crate::asynch::tcp::TcpAcceptor;
 
-// #[cfg(feature = "embedded-svc")]
-// pub use embedded_svc_compat::*;
+#[cfg(feature = "embedded-svc")]
+pub use embedded_svc_compat::*;
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
@@ -71,7 +72,7 @@ where
         buf: &'b mut [u8],
         mut io: T,
     ) -> Result<ServerConnection<'b, N, T>, Error<T::Error>> {
-        let mut request = Request::new();
+        let mut request = RequestHeaders::new();
 
         let (buf, read_len) = request.receive(buf, &mut io).await?;
 
@@ -85,11 +86,13 @@ where
         Ok(Self::Request(RequestState { request, io }))
     }
 
-    pub fn request(&mut self) -> Result<(&Request<'b, N>, &mut Body<'b, T>), Error<T::Error>> {
+    pub fn request(
+        &mut self,
+    ) -> Result<(&RequestHeaders<'b, N>, &mut Body<'b, T>), Error<T::Error>> {
         self.request_mut().map(|req| (&req.request, &mut req.io))
     }
 
-    pub fn headers(&self) -> Result<&Request<'b, N>, Error<T::Error>> {
+    pub fn headers(&self) -> Result<&RequestHeaders<'b, N>, Error<T::Error>> {
         Ok(&self.request_ref()?.request)
     }
 
@@ -218,7 +221,7 @@ where
 pub struct TransitionState(());
 
 pub struct RequestState<'b, const N: usize, T> {
-    request: Request<'b, N>,
+    request: RequestHeaders<'b, N>,
     io: Body<'b, T>,
 }
 
@@ -355,7 +358,7 @@ mod embedded_svc_compat {
     use embedded_svc::http::server::asynch::Connection;
     use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
-    use crate::asynch::http::{Body, Error, Method, Request, SendBody};
+    use crate::asynch::http::{Body, Error, Method, RequestHeaders, SendBody};
 
     use super::*;
 
@@ -370,7 +373,7 @@ mod embedded_svc_compat {
     where
         T: Read + Write,
     {
-        type Headers = Request<'b, N>;
+        type Headers = RequestHeaders<'b, N>;
 
         type Read = Body<'b, T>;
 
