@@ -3,6 +3,7 @@
 
 use core::future::{pending, Future};
 
+use embassy_util::blocking_mutex::raw::RawMutex;
 use embedded_svc::io::asynch::Write;
 use embedded_svc::{
     executor::asynch::Blocker,
@@ -10,7 +11,7 @@ use embedded_svc::{
         asynch::{Connection, Handler, Request},
         HandlerResult,
     },
-    mutex::{RawMutex, StdRawCondvar, StdRawMutex},
+    mutex::StdRawCondvar,
     utils::{
         asynch::executor::embedded::{CondvarWait, EmbeddedBlocker},
         http::server::registration::ChainRoot,
@@ -21,6 +22,7 @@ use embedded_svc_impl::asynch::{
     stdnal::StdTcpServerSocket,
     tcp::{TcpAcceptor, TcpServerSocket},
 };
+use embedded_svc_impl::std_mutex::StdRawMutex;
 
 fn main() {
     simple_logger::SimpleLogger::new().env().init().unwrap();
