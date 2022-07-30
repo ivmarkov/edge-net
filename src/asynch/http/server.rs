@@ -4,6 +4,7 @@ pub use embedded_svc_compat::*;
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
     use core::future::Future;
+    use core::mem;
 
     use embedded_io::asynch::{Read, Write};
     use embedded_io::Io;
@@ -15,160 +16,145 @@ mod embedded_svc_compat {
     use embedded_svc::utils::asynch::mpmc::Channel;
     use embedded_svc::utils::asynch::select::{select3, select_all_hvec};
     use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
+    use log::trace;
 
     use crate::asynch::http::{
-        send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, Request,
-        SendBody,
+        send_headers, send_headers_end, send_status, Body, BodyType, Error, Method,
+        Request as RawRequest, SendBody,
     };
     use crate::asynch::tcp::TcpAcceptor;
 
+    const COMPLETION_BUF_SIZE: usize = 64;
+
     pub enum ServerConnection<'b, const N: usize, T> {
-        RequestState(Option<ServerRequestState<'b, N, T>>),
-        ResponseState(Option<SendBody<T>>),
+        Transition(Transition),
+        Unbound(T),
+        Request(Request<'b, N, T>),
+        Response(Response<T>),
     }
 
-    impl<'b, const N: usize, T> ServerConnection<'b, N, T> {
+    impl<'b, const N: usize, T> ServerConnection<'b, N, T>
+    where
+        T: Read + Write,
+    {
         pub async fn new(
             buf: &'b mut [u8],
             mut io: T,
-        ) -> Result<ServerConnection<'b, N, T>, Error<T::Error>>
-        where
-            T: Read + Write,
-        {
-            let mut raw_request = Request::new();
+        ) -> Result<ServerConnection<'b, N, T>, Error<T::Error>> {
+            let mut request = RawRequest::new();
 
-            let (buf, read_len) = raw_request.receive(buf, &mut io).await?;
+            let (buf, read_len) = request.receive(buf, &mut io).await?;
 
-            let body = Body::new(
-                BodyType::from_headers(raw_request.headers.iter()),
+            let io = Body::new(
+                BodyType::from_headers(request.headers.iter()),
                 buf,
                 read_len,
                 io,
             );
 
-            Ok(Self::RequestState(Some(ServerRequestState {
-                request: raw_request,
-                io: body,
-            })))
-        }
-
-        fn request(&self) -> Result<&ServerRequestState<'b, N, T>, Error<T::Error>>
-        where
-            T: Io,
-        {
-            match self {
-                Self::RequestState(request) => Ok(request.as_ref().unwrap()),
-                _ => Err(Error::InvalidState),
-            }
-        }
-
-        fn request_mut(&mut self) -> Result<&mut ServerRequestState<'b, N, T>, Error<T::Error>>
-        where
-            T: Io,
-        {
-            match self {
-                Self::RequestState(request) => Ok(request.as_mut().unwrap()),
-                _ => Err(Error::InvalidState),
-            }
-        }
-
-        fn response_write(&mut self) -> Result<&mut SendBody<T>, Error<T::Error>>
-        where
-            T: Io,
-        {
-            match self {
-                Self::ResponseState(response_write) => Ok(response_write.as_mut().unwrap()),
-                _ => Err(Error::InvalidState),
-            }
-        }
-
-        fn raw_io(&mut self) -> &mut T
-        where
-            T: Read + Write,
-        {
-            match self {
-                Self::RequestState(request) => request.as_mut().unwrap().io.as_raw_reader(),
-                Self::ResponseState(response_write) => {
-                    response_write.as_mut().unwrap().as_raw_writer()
-                }
-            }
+            Ok(Self::Request(Request { request, io }))
         }
 
         async fn complete_request<'a>(
             &'a mut self,
-            buf: &'a mut [u8],
             status: Option<u16>,
             reason: Option<&'a str>,
             headers: &'a [(&'a str, &'a str)],
-        ) -> Result<Option<&'a mut SendBody<T>>, Error<T::Error>>
-        where
-            T: Read + Write,
-        {
-            match self {
-                Self::RequestState(request) => {
-                    let io = &mut request.as_mut().unwrap().io;
+        ) -> Result<(), Error<T::Error>> {
+            let request = self.request()?;
 
-                    while io.read(buf).await? > 0 {}
-                    let request = request.take().unwrap();
+            let mut buf = [0; COMPLETION_BUF_SIZE];
+            while request.io.read(&mut buf).await? > 0 {}
 
-                    let mut io = request.io.release();
+            let mut io = self.unbind();
 
-                    send_status(status, reason, &mut io).await?;
-                    let body_type = send_headers(headers.iter(), &mut io).await?;
-                    send_headers_end(&mut io).await?;
+            let result = async {
+                send_status(status, reason, &mut io).await?;
+                let body_type = send_headers(headers.iter(), &mut io).await?;
+                send_headers_end(&mut io).await?;
 
-                    let io = SendBody::new(body_type, io);
+                Ok(body_type)
+            }
+            .await;
 
-                    *self = Self::ResponseState(Some(io));
+            match result {
+                Ok(body_type) => {
+                    *self = Self::Response(SendBody::new(body_type, io));
 
-                    Ok(Some(self.response_write()?))
+                    Ok(())
                 }
-                Self::ResponseState(_) => Ok(None),
+                Err(e) => {
+                    *self = Self::Unbound(io);
+
+                    Err(e)
+                }
             }
         }
 
-        async fn complete_response<'a>(
-            &'a mut self,
-            buf: &'a mut [u8],
-            status: Option<u16>,
-            reason: Option<&'a str>,
-            headers: &'a [(&'a str, &'a str)],
-        ) -> Result<bool, Error<T::Error>>
-        where
-            T: Read + Write,
-        {
-            if let Some(body) = self.complete_request(buf, status, reason, headers).await? {
-                body.finish().await?;
+        async fn complete_response(&mut self) -> Result<(), Error<T::Error>> {
+            self.response()?.finish().await?;
 
-                Ok(true)
+            Ok(())
+        }
+
+        async fn complete_err<'a>(&'a mut self, err_str: &'a str) -> Result<(), Error<T::Error>> {
+            if self.request().is_ok() {
+                let mut clbuf = ContentLenParseBuf::new();
+                let headers = [
+                    content_len(err_str.as_bytes().len() as u64, &mut clbuf),
+                    content_type("text/plain"),
+                ];
+
+                self.complete_request(Some(500), Some("Internal Error"), &headers)
+                    .await?;
+                self.response()?.write_all(err_str.as_bytes()).await?;
+
+                Ok(())
             } else {
-                Ok(false)
+                Err(Error::InvalidState)
             }
         }
 
-        async fn complete_err<'a>(
-            &'a mut self,
-            buf: &'a mut [u8],
-            err_str: &'a str,
-        ) -> Result<bool, Error<T::Error>>
-        where
-            T: Read + Write,
-        {
-            let mut clbuf = ContentLenParseBuf::new();
-            let headers = [
-                content_len(err_str.as_bytes().len() as u64, &mut clbuf),
-                content_type("text/plain"),
-            ];
+        fn unbind(&mut self) -> T {
+            let state = mem::replace(self, Self::Transition(Transition(())));
 
-            if let Some(body) = self
-                .complete_request(buf, Some(500), Some("Internal Error"), &headers)
-                .await?
-            {
-                body.write_all(err_str.as_bytes()).await?;
+            match state {
+                Self::Request(request) => request.io.release(),
+                Self::Response(response) => response.release(),
+                _ => unreachable!(),
+            }
+        }
 
-                Ok(true)
+        fn request(&mut self) -> Result<&mut Request<'b, N, T>, Error<T::Error>> {
+            if let Self::Request(request) = self {
+                Ok(request)
             } else {
-                Ok(false)
+                Err(Error::InvalidState)
+            }
+        }
+
+        fn request_ref(&self) -> Result<&Request<'b, N, T>, Error<T::Error>> {
+            if let Self::Request(request) = self {
+                Ok(request)
+            } else {
+                Err(Error::InvalidState)
+            }
+        }
+
+        fn response(&mut self) -> Result<&mut SendBody<T>, Error<T::Error>> {
+            if let Self::Response(response) = self {
+                Ok(response)
+            } else {
+                Err(Error::InvalidState)
+            }
+        }
+
+        fn raw_io(&mut self) -> &mut T {
+            match self {
+                Self::Request(request) => request.io.as_raw_reader(),
+                Self::Response(response) => response.as_raw_writer(),
+                Self::Unbound(io) => io,
+                _ => unreachable!(),
             }
         }
     }
@@ -184,7 +170,7 @@ mod embedded_svc_compat {
     where
         T: Read + Write,
     {
-        type Headers = Request<'b, N>;
+        type Headers = RawRequest<'b, N>;
 
         type Read = Body<'b, T>;
 
@@ -200,11 +186,11 @@ mod embedded_svc_compat {
         = impl Future<Output = Result<(), Self::Error>>;
 
         fn request(&mut self) -> Result<(&Self::Headers, &mut Self::Read), Self::Error> {
-            self.request_mut().map(|req| (&req.request, &mut req.io))
+            self.request().map(|req| (&req.request, &mut req.io))
         }
 
         fn headers(&self) -> Result<&Self::Headers, Self::Error> {
-            Ok(&self.request()?.request)
+            Ok(&self.request_ref()?.request)
         }
 
         fn initiate_response<'a>(
@@ -213,17 +199,11 @@ mod embedded_svc_compat {
             message: Option<&'a str>,
             headers: &'a [(&'a str, &'a str)],
         ) -> Self::IntoResponseFuture<'a> {
-            async move {
-                let mut buf = [0_u8; 1024]; // TODO
-                self.complete_request(&mut buf, Some(status), message, headers)
-                    .await?;
-
-                Ok(())
-            }
+            async move { self.complete_request(Some(status), message, headers).await }
         }
 
         fn response(&mut self) -> Result<&mut Self::Write, Self::Error> {
-            self.response_write()
+            self.response()
         }
 
         fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {
@@ -231,10 +211,14 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct ServerRequestState<'b, const N: usize, T> {
-        request: Request<'b, N>,
+    pub struct Transition(());
+
+    pub struct Request<'b, const N: usize, T> {
+        request: RawRequest<'b, N>,
         io: Body<'b, T>,
     }
+
+    pub type Response<T> = SendBody<T>;
 
     pub trait GlobalHandler<C>
     where
@@ -266,7 +250,7 @@ mod embedded_svc_compat {
     pub async fn handle_connection<const N: usize, const B: usize, T, H>(
         mut io: T,
         handler: &H,
-    ) -> Result<(), Error<T::Error>>
+    ) -> Error<T::Error>
     where
         H: for<'a, 'b> GlobalHandler<&'a mut ServerConnection<'b, N, &'b mut T>>,
         T: Read + Write,
@@ -274,7 +258,9 @@ mod embedded_svc_compat {
         let mut buf = [0_u8; B];
 
         loop {
-            handle_request::<N, _, _>(&mut buf, &mut io, handler).await?;
+            if let Err(e) = handle_request::<N, _, _>(&mut buf, &mut io, handler).await {
+                return e;
+            }
         }
     }
 
@@ -298,22 +284,22 @@ mod embedded_svc_compat {
                 .await
         };
 
-        let mut buf = [0_u8; 64];
-
-        let completed = match result {
+        match result {
             Result::Ok(_) => {
-                connection
-                    .complete_response(&mut buf, Some(200), Some("OK"), &[])
-                    .await?
-            }
-            Result::Err(e) => connection.complete_err(&mut buf, e.message()).await?,
-        };
+                if connection.request().is_ok() {
+                    connection
+                        .complete_request(Some(200), Some("OK"), &[])
+                        .await?;
+                }
 
-        if completed {
-            Ok(())
-        } else {
-            Err(Error::IncompleteBody)
+                if connection.response().is_ok() {
+                    connection.complete_response().await?;
+                }
+            }
+            Result::Err(e) => connection.complete_err(e.message()).await?,
         }
+
+        Ok(())
     }
 
     pub struct Server<const N: usize, const B: usize, A, H> {
@@ -350,9 +336,9 @@ mod embedded_svc_compat {
                         loop {
                             let io = channel.recv().await;
 
-                            handle_connection::<N, B, _, _>(io, &self.handler)
-                                .await
-                                .unwrap();
+                            let err = handle_connection::<N, B, _, _>(io, &self.handler).await;
+
+                            trace!("Connection closed because of error: {:?}", err);
                         }
                     })
                     .map_err(|_| ())

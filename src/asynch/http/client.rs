@@ -4,7 +4,7 @@ pub use embedded_svc_compat::*;
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
     use core::future::Future;
-    use core::str;
+    use core::{mem, str};
 
     use no_std_net::SocketAddr;
 
@@ -12,61 +12,229 @@ mod embedded_svc_compat {
     use embedded_svc::io::asynch::{Io, Read, Write};
 
     use crate::asynch::http::{
-        send_headers, send_headers_end, send_request, Body, BodyType, Error, Response, SendBody,
+        send_headers, send_headers_end, send_request, Body, BodyType, Error,
+        Response as RawResponse, SendBody,
     };
     use crate::asynch::tcp::TcpClientSocket;
 
+    const COMPLETION_BUF_SIZE: usize = 64;
+
     pub enum ClientConnection<'b, const N: usize, T> {
-        NewState(Option<ClientNewState<'b, N, T>>),
-        RequestState(Option<ClientRequestState<'b, N, T>>),
-        ResponseState(Option<ClientResponseState<'b, N, T>>),
+        Transition(Transition),
+        Unbound(Unbound<'b, N, T>),
+        Request(Request<'b, N, T>),
+        Response(Response<'b, N, T>),
     }
 
     impl<'b, const N: usize, T> ClientConnection<'b, N, T>
     where
         T: TcpClientSocket,
     {
-        pub fn new(buf: &'b mut [u8], socket: T, addr: SocketAddr) -> Self {
-            Self::NewState(Some(ClientNewState { buf, socket, addr }))
+        pub fn new(buf: &'b mut [u8], io: T, addr: SocketAddr) -> Self {
+            Self::Unbound(Unbound { buf, io, addr })
         }
 
-        fn new_state(&mut self) -> Result<&mut ClientNewState<'b, N, T>, Error<T::Error>>
-        where
-            T: Io,
-        {
-            match self {
-                Self::NewState(new) => Ok(new.as_mut().unwrap()),
-                _ => Err(Error::InvalidState),
+        async fn start_request<'a>(
+            &'a mut self,
+            method: Method,
+            uri: &'a str,
+            headers: &'a [(&'a str, &'a str)],
+        ) -> Result<(), Error<T::Error>> {
+            let _ = self.complete().await;
+
+            let state = self.unbound()?;
+
+            if !state.io.is_connected().await.map_err(Error::Io)? {
+                // TODO: Need to validate that the socket is still alive
+
+                state.io.connect(state.addr).await.map_err(Error::Io)?;
+            }
+
+            let mut state = self.unbind();
+
+            let result = async {
+                send_request(Some(method.into()), Some(uri), &mut state.io).await?;
+
+                let body_type = send_headers(headers, &mut state.io).await?;
+                send_headers_end(&mut state.io).await?;
+
+                Ok(body_type)
+            }
+            .await;
+
+            match result {
+                Ok(body_type) => {
+                    *self = Self::Request(Request {
+                        buf: state.buf,
+                        addr: state.addr,
+                        io: SendBody::new(body_type, state.io),
+                    });
+
+                    Ok(())
+                }
+                Err(e) => {
+                    state.io.close();
+                    *self = Self::Unbound(state);
+
+                    Err(e)
+                }
             }
         }
 
-        fn request_write(&mut self) -> Result<&mut SendBody<T>, Error<T::Error>>
+        async fn complete(&mut self) -> Result<(), Error<T::Error>> {
+            let result = async {
+                if self.request().is_ok() {
+                    self.complete_request().await?;
+                }
+
+                if self.response().is_ok() {
+                    self.complete_response().await?;
+                }
+
+                Result::<(), Error<T::Error>>::Ok(())
+            }
+            .await;
+
+            let mut state = self.unbind();
+
+            if result.is_err() {
+                state.io.close();
+            }
+
+            *self = Self::Unbound(state);
+
+            result
+        }
+
+        async fn complete_request(&mut self) -> Result<(), Error<T::Error>>
         where
-            T: Io,
+            T: Read + Write,
         {
-            match self {
-                Self::RequestState(request) => Ok(&mut request.as_mut().unwrap().io),
-                _ => Err(Error::InvalidState),
+            self.request()?.io.finish().await?;
+
+            let mut state = self.unbind();
+            let buf_ptr: *mut [u8] = state.buf;
+
+            let mut response = RawResponse::new();
+
+            match response.receive(state.buf, &mut state.io).await {
+                Ok((buf, read_len)) => {
+                    let io = Body::new(
+                        BodyType::from_headers(response.headers.iter()),
+                        buf,
+                        read_len,
+                        state.io,
+                    );
+
+                    *self = Self::Response(Response {
+                        buf: buf_ptr,
+                        addr: state.addr,
+                        response,
+                        io,
+                    });
+
+                    Ok(())
+                }
+                Err(e) => {
+                    state.io.close();
+
+                    state.buf = unsafe { buf_ptr.as_mut().unwrap() };
+
+                    *self = Self::Unbound(state);
+
+                    Err(e)
+                }
             }
         }
 
-        fn response_mut(&mut self) -> Result<&mut ClientResponseState<'b, N, T>, Error<T::Error>>
+        async fn complete_response<'a>(&mut self) -> Result<(), Error<T::Error>>
+        where
+            T: Read + Write,
+        {
+            if self.request().is_ok() {
+                self.complete_request().await?;
+            }
+
+            let response = self.response()?;
+
+            let mut buf = [0; COMPLETION_BUF_SIZE];
+            while response.io.read(&mut buf).await? > 0 {}
+
+            *self = Self::Unbound(self.unbind());
+
+            Ok(())
+        }
+
+        fn unbind(&mut self) -> Unbound<'b, N, T> {
+            let state = mem::replace(self, Self::Transition(Transition(())));
+
+            let unbound = match state {
+                Self::Unbound(unbound) => unbound,
+                Self::Request(request) => {
+                    let io = request.io.release();
+
+                    Unbound {
+                        buf: request.buf,
+                        addr: request.addr,
+                        io,
+                    }
+                }
+                Self::Response(response) => {
+                    let io = response.io.release();
+
+                    Unbound {
+                        buf: unsafe { response.buf.as_mut().unwrap() },
+                        addr: response.addr,
+                        io,
+                    }
+                }
+                _ => unreachable!(),
+            };
+
+            unbound
+        }
+
+        fn unbound(&mut self) -> Result<&mut Unbound<'b, N, T>, Error<T::Error>>
         where
             T: Io,
         {
-            match self {
-                Self::ResponseState(response) => Ok(response.as_mut().unwrap()),
-                _ => Err(Error::InvalidState),
+            if let Self::Unbound(new) = self {
+                Ok(new)
+            } else {
+                Err(Error::InvalidState)
             }
         }
 
-        fn response_ref(&self) -> Result<&ClientResponseState<'b, N, T>, Error<T::Error>>
+        fn request(&mut self) -> Result<&mut Request<'b, N, T>, Error<T::Error>>
         where
             T: Io,
         {
-            match self {
-                Self::ResponseState(response) => Ok(response.as_ref().unwrap()),
-                _ => Err(Error::InvalidState),
+            if let Self::Request(request) = self {
+                Ok(request)
+            } else {
+                Err(Error::InvalidState)
+            }
+        }
+
+        fn response(&mut self) -> Result<&mut Response<'b, N, T>, Error<T::Error>>
+        where
+            T: Io,
+        {
+            if let Self::Response(response) = self {
+                Ok(response)
+            } else {
+                Err(Error::InvalidState)
+            }
+        }
+
+        fn response_ref(&self) -> Result<&Response<'b, N, T>, Error<T::Error>>
+        where
+            T: Io,
+        {
+            if let Self::Response(response) = self {
+                Ok(response)
+            } else {
+                Err(Error::InvalidState)
             }
         }
 
@@ -75,13 +243,12 @@ mod embedded_svc_compat {
             T: Read + Write,
         {
             match self {
-                Self::NewState(new) => &mut new.as_mut().unwrap().socket,
-                Self::RequestState(request) => request.as_mut().unwrap().io.as_raw_writer(),
-                Self::ResponseState(response) => response.as_mut().unwrap().io.as_raw_reader(),
+                Self::Unbound(unbound) => &mut unbound.io,
+                Self::Request(request) => request.io.as_raw_writer(),
+                Self::Response(response) => response.io.as_raw_reader(),
+                _ => unreachable!(),
             }
         }
-
-        // TODO: Completion
     }
 
     impl<'b, const N: usize, T> Io for ClientConnection<'b, N, T>
@@ -121,76 +288,19 @@ mod embedded_svc_compat {
             uri: &'a str,
             headers: &'a [(&'a str, &'a str)],
         ) -> Self::IntoRequestFuture<'a> {
-            async move {
-                match self {
-                    Self::NewState(new) => {
-                        let mut new = new.take().unwrap();
-
-                        if !new.socket.is_connected().await.map_err(Error::Io)? {
-                            // TODO: Need to validate that the socket is still alive
-
-                            new.socket.connect(new.addr).await.map_err(Error::Io)?;
-                        }
-
-                        send_request(Some(method.into()), Some(uri), &mut new.socket).await?;
-                        let body_type = send_headers(headers, &mut new.socket).await?;
-                        send_headers_end(&mut new.socket).await?;
-
-                        *self = Self::RequestState(Some(ClientRequestState {
-                            buf: new.buf,
-                            addr: new.addr,
-                            io: SendBody::new(body_type, new.socket),
-                        }));
-
-                        Ok(())
-                    }
-                    _ => Err(Error::InvalidState),
-                }
-            }
+            async move { self.start_request(method, uri, headers).await }
         }
 
         fn request(&mut self) -> Result<&mut Self::Write, Self::Error> {
-            self.request_write()
+            Ok(&mut self.request()?.io)
         }
 
         fn initiate_response(&mut self) -> Self::IntoResponseFuture<'_> {
-            async move {
-                match self {
-                    Self::RequestState(request) => {
-                        let request = request.take().unwrap();
-
-                        let buf = request.buf;
-                        let mut io = request.io.release();
-
-                        let mut raw_response = Response::new();
-
-                        let (buf, read_len) = raw_response.receive(buf, &mut io).await?;
-
-                        let buf_ptr: *mut [u8] = buf; // TODO
-
-                        let body = Body::new(
-                            BodyType::from_headers(raw_response.headers.iter()),
-                            buf,
-                            read_len,
-                            io,
-                        );
-
-                        *self = Self::ResponseState(Some(ClientResponseState {
-                            buf: buf_ptr,
-                            addr: request.addr,
-                            response: raw_response,
-                            io: body,
-                        }));
-
-                        Ok(())
-                    }
-                    _ => Err(Error::InvalidState),
-                }
-            }
+            async move { self.complete_request().await }
         }
 
         fn response(&mut self) -> Result<(&Self::Headers, &mut Self::Read), Self::Error> {
-            let response = self.response_mut()?;
+            let response = self.response()?;
 
             Ok((&response.response, &mut response.io))
         }
@@ -206,21 +316,23 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct ClientNewState<'b, const N: usize, T> {
+    pub struct Transition(());
+
+    pub struct Unbound<'b, const N: usize, T> {
         buf: &'b mut [u8],
-        socket: T,
+        io: T,
         addr: SocketAddr,
     }
 
-    pub struct ClientRequestState<'b, const N: usize, T> {
+    pub struct Request<'b, const N: usize, T> {
         buf: &'b mut [u8],
         io: SendBody<T>,
         addr: SocketAddr,
     }
 
-    pub struct ClientResponseState<'b, const N: usize, T> {
+    pub struct Response<'b, const N: usize, T> {
         buf: *mut [u8],
-        response: Response<'b, N>,
+        response: RawResponse<'b, N>,
         io: Body<'b, T>,
         addr: SocketAddr,
     }
