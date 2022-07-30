@@ -13,7 +13,7 @@ extern crate alloc;
 
 #[cfg(feature = "experimental")]
 pub mod asynch;
+pub mod captive;
 pub mod close;
-
 #[cfg(feature = "std")]
 pub mod std_mutex;

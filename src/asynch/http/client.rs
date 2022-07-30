@@ -83,7 +83,7 @@ where
         let mut state = self.unbind();
 
         let result = async {
-            send_request(Some(method.into()), Some(uri), &mut state.io).await?;
+            send_request(Some(method), Some(uri), &mut state.io).await?;
 
             let body_type = send_headers(headers, &mut state.io).await?;
             send_headers_end(&mut state.io).await?;

@@ -3,6 +3,7 @@ use embassy_util::blocking_mutex::raw::RawMutex;
 pub struct StdRawMutex(std::sync::Mutex<()>);
 
 unsafe impl RawMutex for StdRawMutex {
+    #[allow(clippy::declare_interior_mutable_const)]
     const INIT: Self = Self(std::sync::Mutex::new(()));
 
     fn lock<R>(&self, f: impl FnOnce() -> R) -> R {
