@@ -39,19 +39,15 @@ impl<T> TcpClientSocket for &mut T
 where
     T: TcpClientSocket,
 {
-    type ConnectFuture<'m>
-    where
-        Self: 'm,
-    = T::ConnectFuture<'m>;
+    type ConnectFuture<'m> = T::ConnectFuture<'m>
+    where Self: 'm;
 
     fn connect(&mut self, remote: SocketAddr) -> Self::ConnectFuture<'_> {
         (*self).connect(remote)
     }
 
-    type IsConnectedFuture<'m>
-    where
-        Self: 'm,
-    = T::IsConnectedFuture<'m>;
+    type IsConnectedFuture<'m> = T::IsConnectedFuture<'m>
+    where Self: 'm;
 
     fn is_connected(&mut self) -> Self::IsConnectedFuture<'_> {
         (*self).is_connected()
@@ -93,15 +89,11 @@ impl<T> TcpServerSocket for &mut T
 where
     T: TcpServerSocket,
 {
-    type Acceptor<'m>
-    where
-        Self: 'm,
-    = T::Acceptor<'m>;
+    type Acceptor<'m> = T::Acceptor<'m>
+    where Self: 'm;
 
-    type BindFuture<'m>
-    where
-        Self: 'm,
-    = T::BindFuture<'m>;
+    type BindFuture<'m> = T::BindFuture<'m>
+    where Self: 'm;
 
     fn bind(&mut self, remote: SocketAddr) -> Self::BindFuture<'_> {
         (*self).bind(remote)
@@ -114,15 +106,11 @@ where
 {
     type Error = T::Error;
 
-    type Connection<'m>
-    where
-        Self: 'm,
-    = T::Connection<'m>;
+    type Connection<'m> = T::Connection<'m>
+    where Self: 'm;
 
-    type AcceptFuture<'m>
-    where
-        Self: 'm,
-    = T::AcceptFuture<'m>;
+    type AcceptFuture<'m> = T::AcceptFuture<'m>
+    where Self: 'm;
 
     fn accept(&self) -> Self::AcceptFuture<'_> {
         (**self).accept()
@@ -135,15 +123,11 @@ where
 {
     type Error = T::Error;
 
-    type Connection<'m>
-    where
-        Self: 'm,
-    = T::Connection<'m>;
+    type Connection<'m> = T::Connection<'m>
+    where Self: 'm;
 
-    type AcceptFuture<'m>
-    where
-        Self: 'm,
-    = T::AcceptFuture<'m>;
+    type AcceptFuture<'m> = T::AcceptFuture<'m>
+    where Self: 'm;
 
     fn accept(&self) -> Self::AcceptFuture<'_> {
         (**self).accept()

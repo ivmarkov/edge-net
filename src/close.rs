@@ -94,10 +94,8 @@ pub mod asynch {
     where
         T: Read,
     {
-        type ReadFuture<'a>
-        where
-            Self: 'a,
-        = T::ReadFuture<'a>;
+        type ReadFuture<'a> = T::ReadFuture<'a>
+        where Self: 'a;
 
         fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
             self.0.read(buf)
@@ -108,19 +106,15 @@ pub mod asynch {
     where
         T: Write,
     {
-        type WriteFuture<'a>
-        where
-            Self: 'a,
-        = T::WriteFuture<'a>;
+        type WriteFuture<'a> = T::WriteFuture<'a>
+        where Self: 'a;
 
         fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
             self.0.write(buf)
         }
 
-        type FlushFuture<'a>
-        where
-            Self: 'a,
-        = T::FlushFuture<'a>;
+        type FlushFuture<'a> = T::FlushFuture<'a>
+        where Self: 'a;
 
         fn flush(&mut self) -> Self::FlushFuture<'_> {
             self.0.flush()

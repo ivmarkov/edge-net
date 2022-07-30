@@ -574,10 +574,8 @@ mod embedded_svc_compat {
     where
         T: Read,
     {
-        type ReceiveFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<(FrameType, usize), Self::Error>>;
+        type ReceiveFuture<'a> = impl Future<Output = Result<(FrameType, usize), Self::Error>>
+        where Self: 'a;
 
         fn recv<'a>(&'a mut self, frame_data_buf: &'a mut [u8]) -> Self::ReceiveFuture<'a> {
             async move {
@@ -593,10 +591,8 @@ mod embedded_svc_compat {
         T: Write,
         M: Fn() -> Option<u32>,
     {
-        type SendFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<(), Self::Error>>;
+        type SendFuture<'a> = impl Future<Output = Result<(), Self::Error>>
+        where Self: 'a;
 
         fn send<'a>(
             &'a mut self,

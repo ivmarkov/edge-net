@@ -312,14 +312,10 @@ mod embedded_svc_compat {
         type RawConnection = T;
 
         type IntoRequestFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<(), Self::Error>>;
+        = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
 
         type IntoResponseFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<(), Self::Error>>;
+        = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
 
         fn initiate_request<'a>(
             &'a mut self,

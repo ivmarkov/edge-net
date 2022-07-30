@@ -384,9 +384,7 @@ mod embedded_svc_compat {
         type RawConnection = T;
 
         type IntoResponseFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<(), Self::Error>>;
+        = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
 
         fn request(&mut self) -> Result<(&Self::Headers, &mut Self::Read), Self::Error> {
             ServerConnection::request(self)
@@ -419,11 +417,7 @@ mod embedded_svc_compat {
         T: Read + Write,
     {
         type HandleFuture<'a>
-        where
-            Self: 'a,
-            'b: 'a,
-            T: 'a,
-        = impl Future<Output = Result<(), HandlerError>>;
+        = impl Future<Output = Result<(), HandlerError>> where Self: 'a, 'b: 'a, T: 'a;
 
         fn handle<'a>(
             &'a self,
@@ -446,11 +440,7 @@ mod embedded_svc_compat {
         T: Read + Write,
     {
         type HandleFuture<'a>
-        where
-            Self: 'a,
-            'b: 'a,
-            T: 'a,
-        = impl Future<Output = Result<(), HandlerError>>;
+        = impl Future<Output = Result<(), HandlerError>> where Self: 'a, 'b: 'a, T: 'a;
 
         fn handle<'a>(
             &'a self,

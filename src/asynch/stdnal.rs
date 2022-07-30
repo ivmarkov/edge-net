@@ -35,14 +35,10 @@ impl Close for StdTcpClientSocket {
 
 impl TcpClientSocket for StdTcpClientSocket {
     type ConnectFuture<'m>
-    where
-        Self: 'm,
-    = impl Future<Output = Result<(), Self::Error>>;
+    = impl Future<Output = Result<(), Self::Error>> where Self: 'm;
 
     type IsConnectedFuture<'m>
-    where
-        Self: 'm,
-    = impl Future<Output = Result<bool, Self::Error>>;
+    = impl Future<Output = Result<bool, Self::Error>> where Self: 'm;
 
     fn connect(&mut self, remote: SocketAddr) -> Self::ConnectFuture<'_> {
         async move {
@@ -67,9 +63,7 @@ impl TcpClientSocket for StdTcpClientSocket {
 
 impl Read for StdTcpClientSocket {
     type ReadFuture<'a>
-    where
-        Self: 'a,
-    = impl Future<Output = Result<usize, Self::Error>>;
+    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
 
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
         async move {
@@ -84,9 +78,7 @@ impl Read for StdTcpClientSocket {
 
 impl Write for StdTcpClientSocket {
     type WriteFuture<'a>
-    where
-        Self: 'a,
-    = impl Future<Output = Result<usize, Self::Error>>;
+    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
 
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
         async move {
@@ -99,9 +91,7 @@ impl Write for StdTcpClientSocket {
     }
 
     type FlushFuture<'a>
-    where
-        Self: 'a,
-    = impl Future<Output = Result<(), Self::Error>>;
+    = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
 
     fn flush(&mut self) -> Self::FlushFuture<'_> {
         async move {
@@ -128,14 +118,10 @@ impl Io for StdTcpServerSocket {
 
 impl TcpServerSocket for StdTcpServerSocket {
     type Acceptor<'m>
-    where
-        Self: 'm,
-    = StdTcpAcceptor;
+    = StdTcpAcceptor where Self: 'm;
 
     type BindFuture<'m>
-    where
-        Self: 'm,
-    = impl Future<Output = Result<Self::Acceptor<'m>, Self::Error>> + 'm;
+    = impl Future<Output = Result<Self::Acceptor<'m>, Self::Error>> + 'm where Self: 'm;
 
     fn bind(&mut self, remote: SocketAddr) -> Self::BindFuture<'_> {
         async move { Async::<TcpListener>::bind(to_std_addr(remote)?).map(StdTcpAcceptor) }
@@ -150,9 +136,7 @@ impl TcpAcceptor for StdTcpAcceptor {
     type Connection<'m> = StdTcpConnection;
 
     type AcceptFuture<'m>
-    where
-        Self: 'm,
-    = impl Future<Output = Result<Self::Connection<'m>, Self::Error>> + 'm;
+    = impl Future<Output = Result<Self::Connection<'m>, Self::Error>> + 'm where Self: 'm;
 
     fn accept(&self) -> Self::AcceptFuture<'_> {
         async move {
@@ -171,9 +155,7 @@ impl Io for StdTcpConnection {
 
 impl Read for StdTcpConnection {
     type ReadFuture<'a>
-    where
-        Self: 'a,
-    = impl Future<Output = Result<usize, Self::Error>>;
+    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
 
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
         async move { self.0.read(buf).await }
@@ -182,18 +164,14 @@ impl Read for StdTcpConnection {
 
 impl Write for StdTcpConnection {
     type WriteFuture<'a>
-    where
-        Self: 'a,
-    = impl Future<Output = Result<usize, Self::Error>>;
+    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
 
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
         async move { self.0.write(buf).await }
     }
 
     type FlushFuture<'a>
-    where
-        Self: 'a,
-    = impl Future<Output = Result<(), Self::Error>>;
+    = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
 
     fn flush(&mut self) -> Self::FlushFuture<'_> {
         async move { self.0.flush().await }
