@@ -22,8 +22,8 @@ alloc = ["embedded-io/alloc", "embedded-svc?/alloc"]
 [dependencies]
 embedded-io = { version = "0.3", default-features = false }
 #embedded-svc = { version = "0.22", default-features = false, optional = true }
-#embedded-svc = { version = "0.22", git = "https://github.com/esp-rs/embedded-svc", branch = "http-server-traits-rework", optional = true }
-embedded-svc = { version = "0.22", path = "../embedded-svc", optional = true }
+embedded-svc = { version = "0.22", git = "https://github.com/esp-rs/embedded-svc", branch = "http-server-traits-rework", optional = true }
+#embedded-svc = { version = "0.22", path = "../embedded-svc", optional = true }
 heapless = { version = "0.7", default-features = false }
 embassy-util = { version = "0.1", git = "https://github.com/embassy-rs/embassy" }
 uncased = "0.9"
