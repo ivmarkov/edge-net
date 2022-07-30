@@ -186,7 +186,7 @@ mod server {
             self.running.store(true, Ordering::Relaxed);
 
             self.handle = Some(thread::spawn(move || {
-                let result = Self::run(&*running, ip, ttl, socket);
+                let result = Self::run(&running, ip, ttl, socket);
 
                 running.store(false, Ordering::Relaxed);
 
