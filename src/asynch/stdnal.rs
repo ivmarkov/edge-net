@@ -11,7 +11,6 @@ use embedded_io::Io;
 use no_std_net::SocketAddr;
 
 use crate::asynch::tcp::TcpClientSocket;
-use crate::close::Close;
 
 use super::tcp::{TcpAcceptor, TcpServerSocket};
 
@@ -25,12 +24,6 @@ impl StdTcpClientSocket {
 
 impl Io for StdTcpClientSocket {
     type Error = io::Error;
-}
-
-impl Close for StdTcpClientSocket {
-    fn close(&mut self) {
-        let _ = self.disconnect();
-    }
 }
 
 impl TcpClientSocket for StdTcpClientSocket {

@@ -1,7 +1,8 @@
 use core::future::Future;
 use core::{mem, str};
 
-use embedded_io::asynch::Read;
+use embedded_io::asynch::{Read, Write};
+use embedded_io::Io;
 use no_std_net::SocketAddr;
 
 use crate::asynch::http::{
@@ -40,15 +41,17 @@ where
         self.start_request(method, uri, headers).await
     }
 
-    pub fn request(&mut self) -> Result<&mut SendBody<T>, Error<T::Error>> {
-        Ok(&mut self.request_mut()?.io)
+    pub fn assert_request(&mut self) -> Result<(), Error<T::Error>> {
+        self.request_mut()?;
+
+        Ok(())
     }
 
     pub async fn initiate_response(&mut self) -> Result<(), Error<T::Error>> {
         self.complete_request().await
     }
 
-    pub fn response(
+    pub fn split(
         &mut self,
     ) -> Result<(&ResponseHeaders<'b, N>, &mut Body<'b, T>), Error<T::Error>> {
         let response = self.response_mut()?;
@@ -262,6 +265,44 @@ where
     }
 }
 
+impl<'b, const N: usize, T> Io for ClientConnection<'b, N, T>
+where
+    T: Io,
+{
+    type Error = Error<T::Error>;
+}
+
+impl<'b, const N: usize, T> Read for ClientConnection<'b, N, T>
+where
+    T: TcpClientSocket,
+{
+    type ReadFuture<'a> = impl Future<Output = Result<usize, Self::Error>>
+    where Self: 'a;
+
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+        async move { self.response_mut()?.io.read(buf).await }
+    }
+}
+
+impl<'b, const N: usize, T> Write for ClientConnection<'b, N, T>
+where
+    T: TcpClientSocket,
+{
+    type WriteFuture<'a> = impl Future<Output = Result<usize, Self::Error>>
+    where Self: 'a;
+
+    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+        async move { self.request_mut()?.io.write(buf).await }
+    }
+
+    type FlushFuture<'a> = impl Future<Output = Result<(), Self::Error>>
+    where Self: 'a;
+
+    fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+        async move { self.request_mut()?.io.flush().await }
+    }
+}
+
 pub struct TransitionState(());
 
 pub struct UnboundState<'b, const N: usize, T> {
@@ -288,22 +329,12 @@ mod embedded_svc_compat {
     use super::*;
 
     use embedded_svc::http::client::asynch::{Connection, Method};
-    use embedded_svc::io::asynch::Io;
-
-    impl<'b, const N: usize, T> Io for ClientConnection<'b, N, T>
-    where
-        T: Io,
-    {
-        type Error = Error<T::Error>;
-    }
 
     impl<'b, const N: usize, T> Connection for ClientConnection<'b, N, T>
     where
         T: TcpClientSocket,
     {
         type Read = Body<'b, T>;
-
-        type Write = SendBody<T>;
 
         type Headers = ResponseHeaders<'b, N>;
 
@@ -326,16 +357,16 @@ mod embedded_svc_compat {
             async move { ClientConnection::initiate_request(self, method.into(), uri, headers).await }
         }
 
-        fn request(&mut self) -> Result<&mut Self::Write, Self::Error> {
-            ClientConnection::request(self)
+        fn assert_request(&mut self) -> Result<(), Self::Error> {
+            ClientConnection::assert_request(self)
         }
 
         fn initiate_response(&mut self) -> Self::IntoResponseFuture<'_> {
             async move { ClientConnection::initiate_response(self).await }
         }
 
-        fn response(&mut self) -> Result<(&Self::Headers, &mut Self::Read), Self::Error> {
-            ClientConnection::response(self)
+        fn split(&mut self) -> Result<(&Self::Headers, &mut Self::Read), Self::Error> {
+            ClientConnection::split(self)
         }
 
         fn headers(&self) -> Result<&Self::Headers, Self::Error> {

@@ -2,10 +2,8 @@ use core::fmt::{self, Debug, Display, Write as _};
 use core::future::Future;
 use core::mem;
 
-use embassy_util::blocking_mutex::raw::RawMutex;
-use embassy_util::channel::mpmc::Channel;
-use embassy_util::{select3, select_all};
 use embedded_io::asynch::{Read, Write};
+use embedded_io::Io;
 
 use log::trace;
 
@@ -86,9 +84,7 @@ where
         Ok(Self::Request(RequestState { request, io }))
     }
 
-    pub fn request(
-        &mut self,
-    ) -> Result<(&RequestHeaders<'b, N>, &mut Body<'b, T>), Error<T::Error>> {
+    pub fn split(&mut self) -> Result<(&RequestHeaders<'b, N>, &mut Body<'b, T>), Error<T::Error>> {
         self.request_mut().map(|req| (&req.request, &mut req.io))
     }
 
@@ -105,8 +101,10 @@ where
         self.complete_request(Some(status), message, headers).await
     }
 
-    pub fn response(&mut self) -> Result<&mut SendBody<T>, Error<T::Error>> {
-        self.response_mut()
+    pub fn assert_response(&mut self) -> Result<(), Error<T::Error>> {
+        self.response_mut()?;
+
+        Ok(())
     }
 
     pub fn raw_connection(&mut self) -> Result<&mut T, Error<T::Error>> {
@@ -218,6 +216,44 @@ where
     }
 }
 
+impl<'b, const N: usize, T> Io for ServerConnection<'b, N, T>
+where
+    T: Io,
+{
+    type Error = Error<T::Error>;
+}
+
+impl<'b, const N: usize, T> Read for ServerConnection<'b, N, T>
+where
+    T: Read + Write,
+{
+    type ReadFuture<'a> = impl Future<Output = Result<usize, Self::Error>>
+    where Self: 'a;
+
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+        async move { self.request_mut()?.io.read(buf).await }
+    }
+}
+
+impl<'b, const N: usize, T> Write for ServerConnection<'b, N, T>
+where
+    T: Read + Write,
+{
+    type WriteFuture<'a> = impl Future<Output = Result<usize, Self::Error>>
+    where Self: 'a;
+
+    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+        async move { self.response_mut()?.write(buf).await }
+    }
+
+    type FlushFuture<'a> = impl Future<Output = Result<(), Self::Error>>
+    where Self: 'a;
+
+    fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+        async move { self.response_mut()?.flush().await }
+    }
+}
+
 pub struct TransitionState(());
 
 pub struct RequestState<'b, const N: usize, T> {
@@ -275,13 +311,13 @@ where
 
     match handler.handle(path, method, &mut connection).await {
         Result::Ok(_) => {
-            if connection.request().is_ok() {
+            if connection.split().is_ok() {
                 connection
                     .complete_request(Some(200), Some("OK"), &[])
                     .await?;
             }
 
-            if connection.response().is_ok() {
+            if connection.assert_response().is_ok() {
                 connection.complete_response().await?;
             }
         }
@@ -291,11 +327,13 @@ where
     Ok(())
 }
 
+#[cfg(feature = "embassy-util")]
 pub struct Server<const N: usize, const B: usize, A, H> {
     acceptor: A,
     handler: H,
 }
 
+#[cfg(feature = "embassy-util")]
 impl<const N: usize, const B: usize, A, H> Server<N, B, A, H>
 where
     A: TcpAcceptor,
@@ -305,11 +343,16 @@ where
         Self { acceptor, handler }
     }
 
-    pub async fn process<const P: usize, const W: usize, R: RawMutex, Q: Future<Output = ()>>(
+    pub async fn process<
+        const P: usize,
+        const W: usize,
+        R: embassy_util::blocking_mutex::raw::RawMutex,
+        Q: Future<Output = ()>,
+    >(
         &mut self,
         quit: Q,
     ) -> Result<(), Error<A::Error>> {
-        let channel = Channel::<R, _, W>::new();
+        let channel = embassy_util::channel::mpmc::Channel::<R, _, W>::new();
         let mut handlers = heapless::Vec::<_, P>::new();
 
         for _ in 0..P {
@@ -331,7 +374,7 @@ where
             .into_array::<P>()
             .unwrap_or_else(|_| unreachable!());
 
-        select3(
+        embassy_util::select3(
             quit,
             async {
                 loop {
@@ -340,7 +383,7 @@ where
                     channel.send(io).await;
                 }
             },
-            select_all(handlers),
+            embassy_util::select_all(handlers),
         )
         .await;
 
@@ -353,21 +396,13 @@ mod embedded_svc_compat {
     use core::future::Future;
 
     use embedded_io::asynch::{Read, Write};
-    use embedded_io::Io;
 
     use embedded_svc::http::server::asynch::Connection;
     use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
-    use crate::asynch::http::{Body, Error, Method, RequestHeaders, SendBody};
+    use crate::asynch::http::{Body, Method, RequestHeaders};
 
     use super::*;
-
-    impl<'b, const N: usize, T> Io for ServerConnection<'b, N, T>
-    where
-        T: Io,
-    {
-        type Error = Error<T::Error>;
-    }
 
     impl<'b, const N: usize, T> Connection for ServerConnection<'b, N, T>
     where
@@ -377,8 +412,6 @@ mod embedded_svc_compat {
 
         type Read = Body<'b, T>;
 
-        type Write = SendBody<T>;
-
         type RawConnectionError = T::Error;
 
         type RawConnection = T;
@@ -386,8 +419,8 @@ mod embedded_svc_compat {
         type IntoResponseFuture<'a>
         = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
 
-        fn request(&mut self) -> Result<(&Self::Headers, &mut Self::Read), Self::Error> {
-            ServerConnection::request(self)
+        fn split(&mut self) -> Result<(&Self::Headers, &mut Self::Read), Self::Error> {
+            ServerConnection::split(self)
         }
 
         fn headers(&self) -> Result<&Self::Headers, Self::Error> {
@@ -403,8 +436,8 @@ mod embedded_svc_compat {
             async move { ServerConnection::initiate_response(self, status, message, headers).await }
         }
 
-        fn response(&mut self) -> Result<&mut Self::Write, Self::Error> {
-            ServerConnection::response(self)
+        fn assert_response(&mut self) -> Result<(), Self::Error> {
+            ServerConnection::assert_response(self)
         }
 
         fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {

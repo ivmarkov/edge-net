@@ -10,16 +10,14 @@ description = "no_std and no-alloc async implementations of various network prot
 repository = "https://github.com/ivmarkov/edge-net"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust = "1.61"
+rust-version = "1.61"
 
 [features]
 default = ["std"]
 
-experimental = ["embedded-io/async", "embedded-svc?/experimental"]
-
 std = ["alloc", "embedded-io/std", "embedded-svc?/std", "async-io", "futures-lite"]
 alloc = ["embedded-io/alloc", "embedded-svc?/alloc"]
-nightly = ["embedded-io/async", "embedded-svc?/experimental", "embassy-util"]
+nightly = ["embedded-io/async", "embedded-svc?/nightly", "embedded-svc?/experimental"]
 
 [dependencies]
 embedded-io = { version = "0.3", default-features = false }
@@ -35,8 +33,8 @@ domain = { version = "0.7.0-dev", git = "https://github.com/NLnetLabs/domain", d
 futures-lite = { version = "1", default-features = false, optional = true }
 async-io = { version = "1", default-features = false, optional = true }
 #embedded-svc = { version = "0.22", default-features = false, optional = true }
-embedded-svc = { version = "0.22", git = "https://github.com/esp-rs/embedded-svc", branch = "http-server-traits-rework", optional = true }
-#embedded-svc = { version = "0.22", path = "../embedded-svc", optional = true }
+#embedded-svc = { version = "0.22", git = "https://github.com/esp-rs/embedded-svc", branch = "http-server-traits-rework", optional = true }
+embedded-svc = { version = "0.22", path = "../embedded-svc", optional = true }
 
 [dev-dependencies]
 anyhow = "1"

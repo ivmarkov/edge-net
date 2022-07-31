@@ -10,8 +10,6 @@ use httparse::{Header, Status, EMPTY_HEADER};
 use log::trace;
 use uncased::UncasedStr;
 
-use crate::close::Close;
-
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
 
@@ -623,19 +621,6 @@ where
     type Error = Error<R::Error>;
 }
 
-impl<'b, R> Close for Body<'b, R>
-where
-    R: Close,
-{
-    fn close(&mut self) {
-        match self {
-            Self::Close(r) => r.close(),
-            Self::ContentLen(r) => r.close(),
-            Self::Chunked(r) => r.close(),
-        }
-    }
-}
-
 impl<'b, R> Read for Body<'b, R>
 where
     R: Read,
@@ -687,15 +672,6 @@ where
     R: Io,
 {
     type Error = R::Error;
-}
-
-impl<'b, R> Close for PartiallyRead<'b, R>
-where
-    R: Close,
-{
-    fn close(&mut self) {
-        self.input.close()
-    }
 }
 
 impl<'b, R> Read for PartiallyRead<'b, R>
@@ -750,15 +726,6 @@ where
     R: Io,
 {
     type Error = Error<R::Error>;
-}
-
-impl<R> Close for ContentLenRead<R>
-where
-    R: Close,
-{
-    fn close(&mut self) {
-        self.input.close()
-    }
 }
 
 impl<R> Read for ContentLenRead<R>
@@ -989,15 +956,6 @@ where
     }
 }
 
-impl<'b, R> Close for ChunkedRead<'b, R>
-where
-    R: Close,
-{
-    fn close(&mut self) {
-        self.input.close()
-    }
-}
-
 impl<'b, R> Io for ChunkedRead<'b, R>
 where
     R: Io,
@@ -1092,19 +1050,6 @@ where
     type Error = Error<W::Error>;
 }
 
-impl<W> Close for SendBody<W>
-where
-    W: Close,
-{
-    fn close(&mut self) {
-        match self {
-            Self::Close(w) => w.close(),
-            Self::ContentLen(w) => w.close(),
-            Self::Chunked(w) => w.close(),
-        }
-    }
-}
-
 impl<W> Write for SendBody<W>
 where
     W: Write,
@@ -1167,15 +1112,6 @@ where
     type Error = Error<W::Error>;
 }
 
-impl<W> Close for ContentLenWrite<W>
-where
-    W: Close,
-{
-    fn close(&mut self) {
-        self.output.close()
-    }
-}
-
 impl<W> Write for ContentLenWrite<W>
 where
     W: Write,
@@ -1230,15 +1166,6 @@ where
     W: Io,
 {
     type Error = Error<W::Error>;
-}
-
-impl<W> Close for ChunkedWrite<W>
-where
-    W: Close,
-{
-    fn close(&mut self) {
-        self.output.close()
-    }
 }
 
 impl<W> Write for ChunkedWrite<W>
