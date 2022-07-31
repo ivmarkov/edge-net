@@ -33,9 +33,10 @@ domain = { version = "0.7.0-dev", git = "https://github.com/NLnetLabs/domain", d
 futures-lite = { version = "1", default-features = false, optional = true }
 async-io = { version = "1", default-features = false, optional = true }
 #embedded-svc = { version = "0.22", default-features = false, optional = true }
-#embedded-svc = { version = "0.22", git = "https://github.com/esp-rs/embedded-svc", branch = "http-server-traits-rework", optional = true }
-embedded-svc = { version = "0.22", path = "../embedded-svc", optional = true }
+embedded-svc = { version = "0.22", git = "https://github.com/esp-rs/embedded-svc", branch = "http-server-traits-rework", optional = true }
+#embedded-svc = { version = "0.22", path = "../embedded-svc", optional = true }
 
 [dev-dependencies]
 anyhow = "1"
+smol = "1"
 simple_logger="2.2"

@@ -1424,9 +1424,9 @@ where
             .map_err(Error::Io)?;
     }
 
-    output.write_all(b" ").await.map_err(Error::Io)?;
-
     if let Some(extra) = extra {
+        output.write_all(b" ").await.map_err(Error::Io)?;
+
         output
             .write_all(extra.as_bytes())
             .await

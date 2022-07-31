@@ -249,7 +249,7 @@ where
     type FlushFuture<'a> = impl Future<Output = Result<(), Self::Error>>
     where Self: 'a;
 
-    fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+    fn flush(&mut self) -> Self::FlushFuture<'_> {
         async move { self.response_mut()?.flush().await }
     }
 }

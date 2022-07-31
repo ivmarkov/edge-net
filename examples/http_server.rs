@@ -3,41 +3,28 @@
 
 use core::future::{pending, Future};
 
-use embassy_util::blocking_mutex::raw::RawMutex;
-use embedded_svc::io::asynch::Write;
-use embedded_svc::{
-    executor::asynch::Blocker,
-    http::server::{
-        asynch::{Connection, Handler, Request},
-        HandlerResult,
+use edge_net::asynch::{
+    http::{
+        server::{Handler, HandlerError, Server, ServerConnection},
+        Method,
     },
-    mutex::StdRawCondvar,
-    utils::{
-        asynch::executor::embedded::{CondvarWait, EmbeddedBlocker},
-        http::server::registration::ChainRoot,
-    },
-};
-use embedded_svc_impl::asynch::{
-    http::server::Server,
     stdnal::StdTcpServerSocket,
     tcp::{TcpAcceptor, TcpServerSocket},
 };
-use embedded_svc_impl::std_mutex::StdRawMutex;
+use edge_net::std_mutex::StdRawMutex;
+use embassy_util::blocking_mutex::raw::RawMutex;
+use embedded_io::asynch::{Read, Write};
 
 fn main() {
     simple_logger::SimpleLogger::new().env().init().unwrap();
 
-    let wait = CondvarWait::<StdRawCondvar>::new();
+    smol::block_on(accept());
+}
 
-    let blocker = EmbeddedBlocker::new(wait.notify_factory(), wait);
-
+pub async fn accept() {
     let mut socket = StdTcpServerSocket::new();
 
-    blocker.block_on(async move {
-        let acceptor = socket.bind("0.0.0.0:8080".parse().unwrap()).await.unwrap();
-
-        run::<StdRawMutex, _>(acceptor).await;
-    });
+    run::<StdRawMutex, _>(socket.bind("0.0.0.0:8080".parse().unwrap()).await.unwrap()).await;
 }
 
 pub async fn run<R, A>(acceptor: A)
@@ -45,58 +32,38 @@ where
     R: RawMutex,
     A: TcpAcceptor,
 {
-    let handler = ChainRoot
-        .get("/", Simple)
-        .post("/", Simple2)
-        .get("/foo", Simple2);
-
-    let mut server = Server::<128, 2048, _, _>::new(acceptor, handler);
+    let mut server = Server::<128, 2048, _, _>::new(acceptor, SimpleHandler);
 
     server.process::<4, 4, R, _>(pending()).await.unwrap();
 }
 
-pub struct Simple;
+pub struct SimpleHandler;
 
-impl<C> Handler<C> for Simple
+impl<'b, const N: usize, T> Handler<'b, N, T> for SimpleHandler
 where
-    C: Connection,
+    T: Read + Write,
 {
-    type HandleFuture<'a>
-    = impl Future<Output = HandlerResult>
-    where
-    Self: 'a,
-    C: 'a;
+    type HandleFuture<'a> = impl Future<Output = Result<(), HandlerError>>
+    where Self: 'a, 'b: 'a, T: 'a;
 
-    fn handle<'a>(&'a self, connection: C) -> Self::HandleFuture<'a> {
+    fn handle<'a>(
+        &'a self,
+        path: &'a str,
+        method: Method,
+        connection: &'a mut ServerConnection<'b, N, T>,
+    ) -> Self::HandleFuture<'a> {
         async move {
-            let request = Request::wrap(connection)?;
+            if path == "/" {
+                if method == Method::Get {
+                    connection.initiate_response(200, None, &[]).await?;
 
-            request
-                .into_ok_response()
-                .await?
-                .write_all("Hello!".as_bytes())
-                .await?;
-
-            Ok(())
-        }
-    }
-}
-
-pub struct Simple2;
-
-impl<C> Handler<C> for Simple2
-where
-    C: Connection,
-{
-    type HandleFuture<'a>
-    = impl Future<Output = HandlerResult>
-    where
-    Self: 'a,
-    C: 'a;
-
-    fn handle<'a>(&'a self, mut connection: C) -> Self::HandleFuture<'a> {
-        async move {
-            connection.initiate_response(200, Some("OK"), &[]).await?;
+                    connection.write_all("Hello!".as_bytes()).await?;
+                } else {
+                    connection.initiate_response(405, None, &[]).await?;
+                }
+            } else {
+                connection.initiate_response(404, None, &[]).await?;
+            }
 
             Ok(())
         }

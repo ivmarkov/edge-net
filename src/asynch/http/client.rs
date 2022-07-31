@@ -108,7 +108,7 @@ where
                 Ok(())
             }
             Err(e) => {
-                state.io.close();
+                let _ = state.io.disconnect();
                 *self = Self::Unbound(state);
 
                 Err(e)
@@ -133,7 +133,7 @@ where
         let mut state = self.unbind();
 
         if result.is_err() {
-            state.io.close();
+            let _ = state.io.disconnect();
         }
 
         *self = Self::Unbound(state);
@@ -168,7 +168,7 @@ where
                 Ok(())
             }
             Err(e) => {
-                state.io.close();
+                let _ = state.io.disconnect();
 
                 state.buf = unsafe { buf_ptr.as_mut().unwrap() };
 
@@ -298,7 +298,7 @@ where
     type FlushFuture<'a> = impl Future<Output = Result<(), Self::Error>>
     where Self: 'a;
 
-    fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+    fn flush(&mut self) -> Self::FlushFuture<'_> {
         async move { self.request_mut()?.io.flush().await }
     }
 }
