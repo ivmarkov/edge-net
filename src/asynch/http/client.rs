@@ -17,7 +17,10 @@ use super::Method;
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
-pub enum ClientConnection<'b, const N: usize, T> {
+pub enum ClientConnection<'b, const N: usize, T>
+where
+    T: TcpClientSocket,
+{
     Transition(TransitionState),
     Unbound(UnboundState<'b, N, T>),
     Request(RequestState<'b, N, T>),
@@ -28,8 +31,13 @@ impl<'b, const N: usize, T> ClientConnection<'b, N, T>
 where
     T: TcpClientSocket,
 {
-    pub fn new(buf: &'b mut [u8], io: T, addr: SocketAddr) -> Self {
-        Self::Unbound(UnboundState { buf, io, addr })
+    pub fn new(buf: &'b mut [u8], socket: &'b T, addr: SocketAddr) -> Self {
+        Self::Unbound(UnboundState {
+            buf,
+            socket,
+            addr,
+            io: None,
+        })
     }
 
     pub async fn initiate_request<'a>(
@@ -53,7 +61,7 @@ where
 
     pub fn split(
         &mut self,
-    ) -> Result<(&ResponseHeaders<'b, N>, &mut Body<'b, T>), Error<T::Error>> {
+    ) -> Result<(&ResponseHeaders<'b, N>, &mut Body<'b, T::Connection<'b>>), Error<T::Error>> {
         let response = self.response_mut()?;
 
         Ok((&response.response, &mut response.io))
@@ -65,7 +73,7 @@ where
         Ok(&response.response)
     }
 
-    pub fn raw_connection(&mut self) -> Result<&mut T, Error<T::Error>> {
+    pub fn raw_connection(&mut self) -> Result<&mut T::Connection<'b>, Error<T::Error>> {
         Ok(self.io_mut())
     }
 
@@ -77,21 +85,36 @@ where
     ) -> Result<(), Error<T::Error>> {
         let _ = self.complete().await;
 
-        let state = self.unbound_mut()?;
+        let mut state = self.unbound_mut()?;
 
-        if !state.io.is_connected().await.map_err(Error::Io)? {
-            // TODO: Need to validate that the socket is still alive
-
-            state.io.connect(state.addr).await.map_err(Error::Io)?;
-        }
+        let fresh_connection = if state.io.is_none() {
+            state.io = Some(state.socket.connect(state.addr).await.map_err(Error::Io)?);
+            true
+        } else {
+            false
+        };
 
         let mut state = self.unbind();
 
         let result = async {
-            send_request(Some(method), Some(uri), &mut state.io).await?;
+            match send_request(Some(method), Some(uri), state.io.as_mut().unwrap()).await {
+                Ok(_) => (),
+                Err(Error::Io(_)) => {
+                    if !fresh_connection {
+                        // Attempt to reconnect and re-send the request
+                        state.io = None;
+                        state.io = Some(state.socket.connect(state.addr).await.map_err(Error::Io)?);
 
-            let body_type = send_headers(headers, &mut state.io).await?;
-            send_headers_end(&mut state.io).await?;
+                        send_request(Some(method), Some(uri), state.io.as_mut().unwrap()).await?;
+                    }
+                }
+                Err(other) => Err(other)?,
+            }
+
+            let io = state.io.as_mut().unwrap();
+
+            let body_type = send_headers(headers, &mut *io).await?;
+            send_headers_end(io).await?;
 
             Ok(body_type)
         }
@@ -101,14 +124,15 @@ where
             Ok(body_type) => {
                 *self = Self::Request(RequestState {
                     buf: state.buf,
+                    socket: state.socket,
                     addr: state.addr,
-                    io: SendBody::new(body_type, state.io),
+                    io: SendBody::new(body_type, state.io.unwrap()),
                 });
 
                 Ok(())
             }
             Err(e) => {
-                let _ = state.io.disconnect();
+                state.io = None;
                 *self = Self::Unbound(state);
 
                 Err(e)
@@ -116,7 +140,7 @@ where
         }
     }
 
-    async fn complete(&mut self) -> Result<(), Error<T::Error>> {
+    pub async fn complete(&mut self) -> Result<(), Error<T::Error>> {
         let result = async {
             if self.request_mut().is_ok() {
                 self.complete_request().await?;
@@ -133,7 +157,7 @@ where
         let mut state = self.unbind();
 
         if result.is_err() {
-            let _ = state.io.disconnect();
+            state.io = None;
         }
 
         *self = Self::Unbound(state);
@@ -149,27 +173,30 @@ where
 
         let mut response = ResponseHeaders::new();
 
-        match response.receive(state.buf, &mut state.io).await {
+        match response
+            .receive(state.buf, &mut state.io.as_mut().unwrap())
+            .await
+        {
             Ok((buf, read_len)) => {
                 let io = Body::new(
                     BodyType::from_headers(response.headers.iter()),
                     buf,
                     read_len,
-                    state.io,
+                    state.io.unwrap(),
                 );
 
                 *self = Self::Response(ResponseState {
                     buf: buf_ptr,
-                    addr: state.addr,
                     response,
+                    socket: state.socket,
+                    addr: state.addr,
                     io,
                 });
 
                 Ok(())
             }
             Err(e) => {
-                let _ = state.io.disconnect();
-
+                state.io = None;
                 state.buf = unsafe { buf_ptr.as_mut().unwrap() };
 
                 *self = Self::Unbound(state);
@@ -204,8 +231,9 @@ where
 
                 UnboundState {
                     buf: request.buf,
+                    socket: request.socket,
                     addr: request.addr,
-                    io,
+                    io: Some(io),
                 }
             }
             Self::Response(response) => {
@@ -213,8 +241,9 @@ where
 
                 UnboundState {
                     buf: unsafe { response.buf.as_mut().unwrap() },
+                    socket: response.socket,
                     addr: response.addr,
-                    io,
+                    io: Some(io),
                 }
             }
             _ => unreachable!(),
@@ -255,9 +284,9 @@ where
         }
     }
 
-    fn io_mut(&mut self) -> &mut T {
+    fn io_mut(&mut self) -> &mut T::Connection<'b> {
         match self {
-            Self::Unbound(unbound) => &mut unbound.io,
+            Self::Unbound(unbound) => unbound.io.as_mut().unwrap(),
             Self::Request(request) => request.io.as_raw_writer(),
             Self::Response(response) => response.io.as_raw_reader(),
             _ => unreachable!(),
@@ -267,14 +296,14 @@ where
 
 impl<'b, const N: usize, T> Io for ClientConnection<'b, N, T>
 where
-    T: Io,
+    T: TcpClientSocket,
 {
     type Error = Error<T::Error>;
 }
 
 impl<'b, const N: usize, T> Read for ClientConnection<'b, N, T>
 where
-    T: TcpClientSocket,
+    T: TcpClientSocket + 'b,
 {
     type ReadFuture<'a> = impl Future<Output = Result<usize, Self::Error>>
     where Self: 'a;
@@ -286,7 +315,7 @@ where
 
 impl<'b, const N: usize, T> Write for ClientConnection<'b, N, T>
 where
-    T: TcpClientSocket,
+    T: TcpClientSocket + 'b,
 {
     type WriteFuture<'a> = impl Future<Output = Result<usize, Self::Error>>
     where Self: 'a;
@@ -305,23 +334,35 @@ where
 
 pub struct TransitionState(());
 
-pub struct UnboundState<'b, const N: usize, T> {
+pub struct UnboundState<'b, const N: usize, T>
+where
+    T: TcpClientSocket,
+{
     buf: &'b mut [u8],
-    io: T,
+    socket: &'b T,
     addr: SocketAddr,
+    io: Option<T::Connection<'b>>,
 }
 
-pub struct RequestState<'b, const N: usize, T> {
+pub struct RequestState<'b, const N: usize, T>
+where
+    T: TcpClientSocket,
+{
     buf: &'b mut [u8],
-    io: SendBody<T>,
+    socket: &'b T,
     addr: SocketAddr,
+    io: SendBody<T::Connection<'b>>,
 }
 
-pub struct ResponseState<'b, const N: usize, T> {
+pub struct ResponseState<'b, const N: usize, T>
+where
+    T: TcpClientSocket,
+{
     buf: *mut [u8],
     response: ResponseHeaders<'b, N>,
-    io: Body<'b, T>,
+    socket: &'b T,
     addr: SocketAddr,
+    io: Body<'b, T::Connection<'b>>,
 }
 
 #[cfg(feature = "embedded-svc")]
@@ -332,15 +373,15 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize, T> Connection for ClientConnection<'b, N, T>
     where
-        T: TcpClientSocket,
+        T: TcpClientSocket + 'b,
     {
-        type Read = Body<'b, T>;
+        type Read = Body<'b, T::Connection<'b>>;
 
         type Headers = ResponseHeaders<'b, N>;
 
         type RawConnectionError = T::Error;
 
-        type RawConnection = T;
+        type RawConnection = T::Connection<'b>;
 
         type IntoRequestFuture<'a>
         = impl Future<Output = Result<(), Self::Error>> where Self: 'a;

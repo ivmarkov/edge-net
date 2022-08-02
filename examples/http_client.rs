@@ -20,7 +20,7 @@ async fn read() -> anyhow::Result<()> {
 
     let mut connection = ClientConnection::<1024, _>::new(
         &mut buf,
-        socket,
+        &socket,
         "34.227.213.82:80".parse().unwrap(), /*httpbin.org*/
     );
 

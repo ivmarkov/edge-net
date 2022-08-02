@@ -1,7 +1,7 @@
 use std::net::{TcpListener, TcpStream};
 use std::{io, net::ToSocketAddrs};
 
-use core::future::{ready, Future};
+use core::future::Future;
 
 use async_io::Async;
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
@@ -14,94 +14,36 @@ use crate::asynch::tcp::TcpClientSocket;
 
 use super::tcp::{TcpAcceptor, TcpServerSocket};
 
-pub struct StdTcpClientSocket(Option<Async<TcpStream>>);
+pub struct StdTcpClientSocket(());
 
 impl StdTcpClientSocket {
     pub const fn new() -> Self {
-        Self(None)
+        Self(())
     }
-}
-
-impl Io for StdTcpClientSocket {
-    type Error = io::Error;
 }
 
 impl TcpClientSocket for StdTcpClientSocket {
+    type Error = io::Error;
+
+    type Connection<'m> = StdTcpConnection;
+
     type ConnectFuture<'m>
-    = impl Future<Output = Result<(), Self::Error>> where Self: 'm;
+    = impl Future<Output = Result<StdTcpConnection, Self::Error>> where Self: 'm;
 
-    type IsConnectedFuture<'m>
-    = impl Future<Output = Result<bool, Self::Error>> where Self: 'm;
-
-    fn connect(&mut self, remote: SocketAddr) -> Self::ConnectFuture<'_> {
+    fn connect(&self, remote: SocketAddr) -> Self::ConnectFuture<'_> {
         async move {
-            self.disconnect()?;
+            let connection = Async::<TcpStream>::connect(to_std_addr(remote)?).await?;
 
-            self.0 = Some(Async::<TcpStream>::connect(to_std_addr(remote)?).await?);
-
-            Ok(())
-        }
-    }
-
-    fn is_connected(&mut self) -> Self::IsConnectedFuture<'_> {
-        ready(Ok(self.0.is_some()))
-    }
-
-    fn disconnect(&mut self) -> Result<(), Self::Error> {
-        self.0 = None;
-
-        Ok(())
-    }
-}
-
-impl Read for StdTcpClientSocket {
-    type ReadFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
-
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-        async move {
-            if let Some(socket) = self.0.as_mut() {
-                socket.read(buf).await
-            } else {
-                Err(io::ErrorKind::NotConnected.into())
-            }
+            Ok(StdTcpConnection(connection))
         }
     }
 }
 
-impl Write for StdTcpClientSocket {
-    type WriteFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
-
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-        async move {
-            if let Some(socket) = self.0.as_mut() {
-                socket.write(buf).await
-            } else {
-                Err(io::ErrorKind::NotConnected.into())
-            }
-        }
-    }
-
-    type FlushFuture<'a>
-    = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
-
-    fn flush(&mut self) -> Self::FlushFuture<'_> {
-        async move {
-            if let Some(socket) = self.0.as_mut() {
-                socket.flush().await
-            } else {
-                Err(io::ErrorKind::NotConnected.into())
-            }
-        }
-    }
-}
-
-pub struct StdTcpServerSocket;
+pub struct StdTcpServerSocket(());
 
 impl StdTcpServerSocket {
     pub const fn new() -> Self {
-        Self
+        Self(())
     }
 }
 
@@ -133,9 +75,9 @@ impl TcpAcceptor for StdTcpAcceptor {
 
     fn accept(&self) -> Self::AcceptFuture<'_> {
         async move {
-            Ok(StdTcpConnection(
-                self.0.accept().await.map(|(socket, _)| socket)?,
-            ))
+            let connection = self.0.accept().await.map(|(socket, _)| socket)?;
+
+            Ok(StdTcpConnection(connection))
         }
     }
 }
