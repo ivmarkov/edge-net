@@ -313,7 +313,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct Headers<'b, const N: usize>([httparse::Header<'b>; N]);
+pub struct Headers<'b, const N: usize = 64>([httparse::Header<'b>; N]);
 
 impl<'b, const N: usize> Headers<'b, N> {
     pub const fn new() -> Self {

@@ -2,7 +2,7 @@ use core::future::Future;
 
 use no_std_net::SocketAddr;
 
-pub trait TcpClientSocket {
+pub trait TcpConnector {
     type Error: embedded_io::Error;
 
     /// Type holding state of a TCP connection.
@@ -21,9 +21,9 @@ pub trait TcpClientSocket {
     fn connect<'m>(&'m self, remote: SocketAddr) -> Self::ConnectFuture<'m>;
 }
 
-impl<T> TcpClientSocket for &T
+impl<T> TcpConnector for &T
 where
-    T: TcpClientSocket,
+    T: TcpConnector,
 {
     type Error = T::Error;
 
@@ -40,7 +40,9 @@ where
     }
 }
 
-pub trait TcpServerSocket: embedded_io::Io {
+pub trait TcpBinder {
+    type Error: embedded_io::Error;
+
     type Acceptor<'m>: TcpAcceptor<Error = Self::Error>
     where
         Self: 'm;
@@ -49,7 +51,7 @@ pub trait TcpServerSocket: embedded_io::Io {
     where
         Self: 'm;
 
-    fn bind(&mut self, remote: SocketAddr) -> Self::BindFuture<'_>;
+    fn bind(&self, remote: SocketAddr) -> Self::BindFuture<'_>;
 }
 
 pub trait TcpAcceptor {
@@ -67,17 +69,19 @@ pub trait TcpAcceptor {
     fn accept(&self) -> Self::AcceptFuture<'_>;
 }
 
-impl<T> TcpServerSocket for &mut T
+impl<T> TcpBinder for &T
 where
-    T: TcpServerSocket,
+    T: TcpBinder,
 {
+    type Error = T::Error;
+
     type Acceptor<'m> = T::Acceptor<'m>
     where Self: 'm;
 
     type BindFuture<'m> = T::BindFuture<'m>
     where Self: 'm;
 
-    fn bind(&mut self, remote: SocketAddr) -> Self::BindFuture<'_> {
+    fn bind(&self, remote: SocketAddr) -> Self::BindFuture<'_> {
         (*self).bind(remote)
     }
 }

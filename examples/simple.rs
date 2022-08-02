@@ -1,4 +1,4 @@
-use edge_net::asynch::{stdnal::StdTcpClientSocket, tcp::TcpClientSocket};
+use edge_net::asynch::{stdnal::StdTcpConnector, tcp::TcpConnector};
 use embedded_io::asynch::{Read, Write};
 
 fn main() {
@@ -8,9 +8,9 @@ fn main() {
 async fn read() -> anyhow::Result<()> {
     println!("About to open a TCP connection to 1.1.1.1 port 80");
 
-    let socket = StdTcpClientSocket::new();
+    let connector = StdTcpConnector::new();
 
-    let mut connection = socket.connect("1.1.1.1:80".parse().unwrap()).await?;
+    let mut connection = connector.connect("1.1.1.1:80".parse().unwrap()).await?;
 
     connection
         .write_all("GET / HTTP/1.0\n\n".as_bytes())

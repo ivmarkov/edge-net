@@ -2,8 +2,8 @@ use std::error::Error;
 
 use edge_net::asynch::http::client::ClientConnection;
 use edge_net::asynch::http::Method;
-use edge_net::asynch::stdnal::StdTcpClientSocket;
-use edge_net::asynch::tcp::TcpClientSocket;
+use edge_net::asynch::stdnal::StdTcpConnector;
+use edge_net::asynch::tcp::TcpConnector;
 use embedded_io::asynch::Read;
 
 fn main() {
@@ -15,12 +15,12 @@ fn main() {
 async fn read() -> anyhow::Result<()> {
     println!("About to open an HTTP connection to httpbin.org port 80");
 
-    let socket = StdTcpClientSocket::new();
+    let connector = StdTcpConnector::new();
     let mut buf = [0_u8; 8192];
 
     let mut connection = ClientConnection::<1024, _>::new(
         &mut buf,
-        &socket,
+        &connector,
         "34.227.213.82:80".parse().unwrap(), /*httpbin.org*/
     );
 
@@ -36,7 +36,7 @@ async fn request<'b, const N: usize, T>(
     uri: &str,
 ) -> anyhow::Result<()>
 where
-    T: TcpClientSocket,
+    T: TcpConnector,
     T::Error: Error + Send + Sync + 'static,
 {
     connection

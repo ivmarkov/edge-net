@@ -8,8 +8,8 @@ use edge_net::asynch::{
         server::{Handler, HandlerError, Server, ServerConnection},
         Method,
     },
-    stdnal::StdTcpServerSocket,
-    tcp::{TcpAcceptor, TcpServerSocket},
+    stdnal::StdTcpBinder,
+    tcp::{TcpAcceptor, TcpBinder},
 };
 use edge_net::std_mutex::StdRawMutex;
 use embassy_util::blocking_mutex::raw::RawMutex;
@@ -22,9 +22,9 @@ fn main() {
 }
 
 pub async fn accept() {
-    let mut socket = StdTcpServerSocket::new();
+    let binder = StdTcpBinder::new();
 
-    run::<StdRawMutex, _>(socket.bind("0.0.0.0:8080".parse().unwrap()).await.unwrap()).await;
+    run::<StdRawMutex, _>(binder.bind("0.0.0.0:8080".parse().unwrap()).await.unwrap()).await;
 }
 
 pub async fn run<R, A>(acceptor: A)
