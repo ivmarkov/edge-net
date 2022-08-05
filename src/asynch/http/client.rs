@@ -59,6 +59,7 @@ where
         self.complete_request().await
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn split(
         &mut self,
     ) -> Result<(&ResponseHeaders<'b, N>, &mut Body<'b, T::Connection<'b>>), Error<T::Error>> {
