@@ -1,4 +1,4 @@
-use std::net::{TcpListener, TcpStream};
+use std::net::{self, TcpStream};
 use std::{io, net::ToSocketAddrs};
 
 use core::future::Future;
@@ -10,19 +10,19 @@ use embedded_io::asynch::{Read, Write};
 use embedded_io::Io;
 use no_std_net::SocketAddr;
 
-use crate::asynch::tcp::TcpConnector;
+use embedded_nal_async::TcpConnect;
 
-use super::tcp::{TcpAcceptor, TcpBinder};
+use super::tcp::{TcpAccept, TcpListen};
 
-pub struct StdTcpConnector(());
+pub struct StdTcpConnect(());
 
-impl StdTcpConnector {
+impl StdTcpConnect {
     pub const fn new() -> Self {
         Self(())
     }
 }
 
-impl TcpConnector for StdTcpConnector {
+impl TcpConnect for StdTcpConnect {
     type Error = io::Error;
 
     type Connection<'m> = StdTcpConnection;
@@ -39,31 +39,31 @@ impl TcpConnector for StdTcpConnector {
     }
 }
 
-pub struct StdTcpBinder(());
+pub struct StdTcpListen(());
 
-impl StdTcpBinder {
+impl StdTcpListen {
     pub const fn new() -> Self {
         Self(())
     }
 }
 
-impl TcpBinder for StdTcpBinder {
+impl TcpListen for StdTcpListen {
     type Error = io::Error;
 
     type Acceptor<'m>
-    = StdTcpAcceptor where Self: 'm;
+    = StdTcpAccept where Self: 'm;
 
-    type BindFuture<'m>
+    type ListenFuture<'m>
     = impl Future<Output = Result<Self::Acceptor<'m>, Self::Error>> + 'm where Self: 'm;
 
-    fn bind(&self, remote: SocketAddr) -> Self::BindFuture<'_> {
-        async move { Async::<TcpListener>::bind(to_std_addr(remote)?).map(StdTcpAcceptor) }
+    fn listen(&self, remote: SocketAddr) -> Self::ListenFuture<'_> {
+        async move { Async::<net::TcpListener>::bind(to_std_addr(remote)?).map(StdTcpAccept) }
     }
 }
 
-pub struct StdTcpAcceptor(Async<TcpListener>);
+pub struct StdTcpAccept(Async<net::TcpListener>);
 
-impl TcpAcceptor for StdTcpAcceptor {
+impl TcpAccept for StdTcpAccept {
     type Error = io::Error;
 
     type Connection<'m> = StdTcpConnection;

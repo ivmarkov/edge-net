@@ -7,8 +7,8 @@ use embedded_io::asynch::{Read, Write};
 use embedded_io::Io;
 
 use httparse::{Header, Status, EMPTY_HEADER};
+
 use log::trace;
-use uncased::UncasedStr;
 
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
@@ -120,73 +120,71 @@ pub enum Method {
 
 impl Method {
     pub fn new(method: &str) -> Option<Self> {
-        let method = UncasedStr::new(method);
-
-        if method == UncasedStr::new("Delete") {
+        if method.eq_ignore_ascii_case("Delete") {
             Some(Self::Delete)
-        } else if method == UncasedStr::new("Get") {
+        } else if method.eq_ignore_ascii_case("Get") {
             Some(Self::Get)
-        } else if method == UncasedStr::new("Head") {
+        } else if method.eq_ignore_ascii_case("Head") {
             Some(Self::Head)
-        } else if method == UncasedStr::new("Post") {
+        } else if method.eq_ignore_ascii_case("Post") {
             Some(Self::Post)
-        } else if method == UncasedStr::new("Put") {
+        } else if method.eq_ignore_ascii_case("Put") {
             Some(Self::Put)
-        } else if method == UncasedStr::new("Connect") {
+        } else if method.eq_ignore_ascii_case("Connect") {
             Some(Self::Connect)
-        } else if method == UncasedStr::new("Options") {
+        } else if method.eq_ignore_ascii_case("Options") {
             Some(Self::Options)
-        } else if method == UncasedStr::new("Trace") {
+        } else if method.eq_ignore_ascii_case("Trace") {
             Some(Self::Trace)
-        } else if method == UncasedStr::new("Copy") {
+        } else if method.eq_ignore_ascii_case("Copy") {
             Some(Self::Copy)
-        } else if method == UncasedStr::new("Lock") {
+        } else if method.eq_ignore_ascii_case("Lock") {
             Some(Self::Lock)
-        } else if method == UncasedStr::new("MkCol") {
+        } else if method.eq_ignore_ascii_case("MkCol") {
             Some(Self::MkCol)
-        } else if method == UncasedStr::new("Move") {
+        } else if method.eq_ignore_ascii_case("Move") {
             Some(Self::Move)
-        } else if method == UncasedStr::new("Propfind") {
+        } else if method.eq_ignore_ascii_case("Propfind") {
             Some(Self::Propfind)
-        } else if method == UncasedStr::new("Proppatch") {
+        } else if method.eq_ignore_ascii_case("Proppatch") {
             Some(Self::Proppatch)
-        } else if method == UncasedStr::new("Search") {
+        } else if method.eq_ignore_ascii_case("Search") {
             Some(Self::Search)
-        } else if method == UncasedStr::new("Unlock") {
+        } else if method.eq_ignore_ascii_case("Unlock") {
             Some(Self::Unlock)
-        } else if method == UncasedStr::new("Bind") {
+        } else if method.eq_ignore_ascii_case("Bind") {
             Some(Self::Bind)
-        } else if method == UncasedStr::new("Rebind") {
+        } else if method.eq_ignore_ascii_case("Rebind") {
             Some(Self::Rebind)
-        } else if method == UncasedStr::new("Unbind") {
+        } else if method.eq_ignore_ascii_case("Unbind") {
             Some(Self::Unbind)
-        } else if method == UncasedStr::new("Acl") {
+        } else if method.eq_ignore_ascii_case("Acl") {
             Some(Self::Acl)
-        } else if method == UncasedStr::new("Report") {
+        } else if method.eq_ignore_ascii_case("Report") {
             Some(Self::Report)
-        } else if method == UncasedStr::new("MkActivity") {
+        } else if method.eq_ignore_ascii_case("MkActivity") {
             Some(Self::MkActivity)
-        } else if method == UncasedStr::new("Checkout") {
+        } else if method.eq_ignore_ascii_case("Checkout") {
             Some(Self::Checkout)
-        } else if method == UncasedStr::new("Merge") {
+        } else if method.eq_ignore_ascii_case("Merge") {
             Some(Self::Merge)
-        } else if method == UncasedStr::new("MSearch") {
+        } else if method.eq_ignore_ascii_case("MSearch") {
             Some(Self::MSearch)
-        } else if method == UncasedStr::new("Notify") {
+        } else if method.eq_ignore_ascii_case("Notify") {
             Some(Self::Notify)
-        } else if method == UncasedStr::new("Subscribe") {
+        } else if method.eq_ignore_ascii_case("Subscribe") {
             Some(Self::Subscribe)
-        } else if method == UncasedStr::new("Unsubscribe") {
+        } else if method.eq_ignore_ascii_case("Unsubscribe") {
             Some(Self::Unsubscribe)
-        } else if method == UncasedStr::new("Patch") {
+        } else if method.eq_ignore_ascii_case("Patch") {
             Some(Self::Patch)
-        } else if method == UncasedStr::new("Purge") {
+        } else if method.eq_ignore_ascii_case("Purge") {
             Some(Self::Purge)
-        } else if method == UncasedStr::new("MkCalendar") {
+        } else if method.eq_ignore_ascii_case("MkCalendar") {
             Some(Self::MkCalendar)
-        } else if method == UncasedStr::new("Link") {
+        } else if method.eq_ignore_ascii_case("Link") {
             Some(Self::Link)
-        } else if method == UncasedStr::new("Unlink") {
+        } else if method.eq_ignore_ascii_case("Unlink") {
             Some(Self::Unlink)
         } else {
             None
@@ -371,13 +369,13 @@ impl<'b, const N: usize> Headers<'b, N> {
 
     pub fn get(&self, name: &str) -> Option<&str> {
         self.iter()
-            .find(|(hname, _)| UncasedStr::new(name) == UncasedStr::new(hname))
+            .find(|(hname, _)| name.eq_ignore_ascii_case(hname))
             .map(|(_, value)| value)
     }
 
     pub fn get_raw(&self, name: &str) -> Option<&[u8]> {
         self.iter_raw()
-            .find(|(hname, _)| UncasedStr::new(name) == UncasedStr::new(hname))
+            .find(|(hname, _)| name.eq_ignore_ascii_case(hname))
             .map(|(_, value)| value)
     }
 
@@ -387,7 +385,7 @@ impl<'b, const N: usize> Headers<'b, N> {
 
     pub fn set_raw(&mut self, name: &'b str, value: &'b [u8]) -> &mut Self {
         for header in &mut self.0 {
-            if header.name.is_empty() || UncasedStr::new(header.name) == UncasedStr::new(name) {
+            if header.name.is_empty() || header.name.eq_ignore_ascii_case(name) {
                 *header = Header { name, value };
                 return self;
             }
@@ -401,7 +399,7 @@ impl<'b, const N: usize> Headers<'b, N> {
             .0
             .iter()
             .enumerate()
-            .find(|(_, header)| UncasedStr::new(header.name) == UncasedStr::new(name));
+            .find(|(_, header)| header.name.eq_ignore_ascii_case(name));
 
         if let Some((mut index, _)) = index {
             while index < self.0.len() - 1 {
@@ -537,15 +535,13 @@ pub enum BodyType {
 
 impl BodyType {
     pub fn from_header(name: &str, value: &str) -> Self {
-        if UncasedStr::new("Transfer-Encoding") == UncasedStr::new(name) {
-            if UncasedStr::new(value) == UncasedStr::new("Chunked") {
+        if "Transfer-Encoding".eq_ignore_ascii_case(name) {
+            if value.eq_ignore_ascii_case("Chunked") {
                 return Self::Chunked;
             }
-        } else if UncasedStr::new("Content-Length") == UncasedStr::new(name) {
+        } else if "Content-Length".eq_ignore_ascii_case(name) {
             return Self::ContentLen(value.parse::<u64>().unwrap()); // TODO
-        } else if UncasedStr::new("Connection") == UncasedStr::new(name)
-            && UncasedStr::new(value) == UncasedStr::new("Close")
-        {
+        } else if "Connection".eq_ignore_ascii_case(name) && value.eq_ignore_ascii_case("Close") {
             return Self::Close;
         }
 
@@ -1031,6 +1027,8 @@ where
             Self::Chunked(w) => w.finish().await?,
         }
 
+        self.flush().await?;
+
         Ok(())
     }
 
@@ -1129,7 +1127,7 @@ where
 
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
         async move {
-            if self.content_len > self.write_len + buf.len() as u64 {
+            if self.content_len >= self.write_len + buf.len() as u64 {
                 let write = self.output.write(buf).await.map_err(Error::Io)?;
                 self.write_len += write as u64;
 
@@ -1425,7 +1423,11 @@ async fn send_status_line<W>(
 where
     W: Write,
 {
+    output.write_all(b"HTTP/1.1").await.map_err(Error::Io)?;
+
     if let Some(token) = token {
+        output.write_all(b" ").await.map_err(Error::Io)?;
+
         output
             .write_all(token.as_bytes())
             .await
@@ -1441,10 +1443,7 @@ where
             .map_err(Error::Io)?;
     }
 
-    output
-        .write_all(b" HTTP/1.1\r\n")
-        .await
-        .map_err(Error::Io)?;
+    output.write_all(b"\r\n").await.map_err(Error::Io)?;
 
     Ok(())
 }

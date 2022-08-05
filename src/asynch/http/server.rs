@@ -5,13 +5,13 @@ use core::mem;
 use embedded_io::asynch::{Read, Write};
 use embedded_io::Io;
 
-use log::trace;
+use log::{info, warn};
 
 use crate::asynch::http::{
     send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, RequestHeaders,
     SendBody,
 };
-use crate::asynch::tcp::TcpAcceptor;
+use crate::asynch::tcp::TcpAccept;
 
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
@@ -280,6 +280,7 @@ pub trait Handler<'b, const N: usize, T> {
 
 pub async fn handle_connection<const N: usize, const B: usize, T, H>(
     mut io: T,
+    handler_id: usize,
     handler: &H,
 ) -> Error<T::Error>
 where
@@ -289,9 +290,18 @@ where
     let mut buf = [0_u8; B];
 
     loop {
+        warn!("Handler {}: Waiting for new request", handler_id);
+
         if let Err(e) = handle_request::<N, _, _>(&mut buf, &mut io, handler).await {
+            info!(
+                "Handler {}: Error when handling request: {:?}",
+                handler_id, e
+            );
+
             return e;
         }
+
+        warn!("Handler {}: Request complete", handler_id);
     }
 }
 
@@ -336,7 +346,7 @@ pub struct Server<const N: usize, const B: usize, A, H> {
 #[cfg(feature = "embassy-util")]
 impl<const N: usize, const B: usize, A, H> Server<N, B, A, H>
 where
-    A: TcpAcceptor,
+    A: TcpAccept,
     H: for<'b, 't> Handler<'b, N, &'b mut A::Connection<'t>>,
 {
     pub const fn new(acceptor: A, handler: H) -> Self {
@@ -352,18 +362,31 @@ where
         &mut self,
         quit: Q,
     ) -> Result<(), Error<A::Error>> {
+        warn!("Creating queue for {} requests", W);
         let channel = embassy_util::channel::mpmc::Channel::<R, _, W>::new();
+
+        warn!("Creating {} handlers", P);
         let mut handlers = heapless::Vec::<_, P>::new();
 
-        for _ in 0..P {
+        for index in 0..P {
+            let channel = &channel;
+            let handler_id = index;
+            let handler = &self.handler;
+
             handlers
-                .push(async {
+                .push(async move {
                     loop {
+                        warn!("Handler {}: Waiting for connection", handler_id);
+
                         let io = channel.recv().await;
+                        warn!("Handler {}: Got connection request", handler_id);
 
-                        let err = handle_connection::<N, B, _, _>(io, &self.handler).await;
+                        let err = handle_connection::<N, B, _, _>(io, handler_id, handler).await;
 
-                        trace!("Connection closed because of error: {:?}", err);
+                        warn!(
+                            "Handler {}: Connection closed because of error: {:?}",
+                            handler_id, err
+                        );
                     }
                 })
                 .map_err(|_| ())
@@ -378,14 +401,25 @@ where
             quit,
             async {
                 loop {
-                    let io = self.acceptor.accept().await.map_err(Error::Io).unwrap();
+                    warn!("Acceptor: waiting for new connection");
 
-                    channel.send(io).await;
+                    match self.acceptor.accept().await.map_err(Error::Io) {
+                        Ok(io) => {
+                            warn!("Acceptor: got new connection");
+                            channel.send(io).await;
+                            warn!("Acceptor: connection sent");
+                        }
+                        Err(e) => {
+                            warn!("Got error when accepting a new connection: {:?}", e);
+                        }
+                    }
                 }
             },
             embassy_util::select_all(handlers),
         )
         .await;
+
+        warn!("Server processing loop quit");
 
         Ok(())
     }

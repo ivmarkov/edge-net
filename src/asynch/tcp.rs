@@ -2,59 +2,21 @@ use core::future::Future;
 
 use no_std_net::SocketAddr;
 
-pub trait TcpConnector {
+pub trait TcpListen {
     type Error: embedded_io::Error;
 
-    /// Type holding state of a TCP connection.
-    type Connection<'m>: embedded_io::asynch::Read<Error = Self::Error>
-        + embedded_io::asynch::Write<Error = Self::Error>
-    where
-        Self: 'm;
-    /// Future returned by `connect` function.
-    type ConnectFuture<'m>: Future<Output = Result<Self::Connection<'m>, Self::Error>> + 'm
+    type Acceptor<'m>: TcpAccept<Error = Self::Error>
     where
         Self: 'm;
 
-    /// Connect to the given remote host and port.
-    ///
-    /// Returns `Ok` if the connection was successful.
-    fn connect<'m>(&'m self, remote: SocketAddr) -> Self::ConnectFuture<'m>;
+    type ListenFuture<'m>: Future<Output = Result<Self::Acceptor<'m>, Self::Error>> + 'm
+    where
+        Self: 'm;
+
+    fn listen(&self, remote: SocketAddr) -> Self::ListenFuture<'_>;
 }
 
-impl<T> TcpConnector for &T
-where
-    T: TcpConnector,
-{
-    type Error = T::Error;
-
-    type Connection<'m> = T::Connection<'m>
-	where
-		Self: 'm;
-
-    type ConnectFuture<'m> = T::ConnectFuture<'m>
-	where
-		Self: 'm;
-
-    fn connect<'m>(&'m self, remote: SocketAddr) -> Self::ConnectFuture<'m> {
-        (*self).connect(remote)
-    }
-}
-
-pub trait TcpBinder {
-    type Error: embedded_io::Error;
-
-    type Acceptor<'m>: TcpAcceptor<Error = Self::Error>
-    where
-        Self: 'm;
-
-    type BindFuture<'m>: Future<Output = Result<Self::Acceptor<'m>, Self::Error>> + 'm
-    where
-        Self: 'm;
-
-    fn bind(&self, remote: SocketAddr) -> Self::BindFuture<'_>;
-}
-
-pub trait TcpAcceptor {
+pub trait TcpAccept {
     type Error: embedded_io::Error;
 
     type Connection<'m>: embedded_io::asynch::Read<Error = Self::Error>
@@ -69,26 +31,26 @@ pub trait TcpAcceptor {
     fn accept(&self) -> Self::AcceptFuture<'_>;
 }
 
-impl<T> TcpBinder for &T
+impl<T> TcpListen for &T
 where
-    T: TcpBinder,
+    T: TcpListen,
 {
     type Error = T::Error;
 
     type Acceptor<'m> = T::Acceptor<'m>
     where Self: 'm;
 
-    type BindFuture<'m> = T::BindFuture<'m>
+    type ListenFuture<'m> = T::ListenFuture<'m>
     where Self: 'm;
 
-    fn bind(&self, remote: SocketAddr) -> Self::BindFuture<'_> {
-        (*self).bind(remote)
+    fn listen(&self, remote: SocketAddr) -> Self::ListenFuture<'_> {
+        (*self).listen(remote)
     }
 }
 
-impl<T> TcpAcceptor for &T
+impl<T> TcpAccept for &T
 where
-    T: TcpAcceptor,
+    T: TcpAccept,
 {
     type Error = T::Error;
 
@@ -103,9 +65,9 @@ where
     }
 }
 
-impl<T> TcpAcceptor for &mut T
+impl<T> TcpAccept for &mut T
 where
-    T: TcpAcceptor,
+    T: TcpAccept,
 {
     type Error = T::Error;
 

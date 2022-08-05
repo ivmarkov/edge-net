@@ -1,10 +1,11 @@
 use std::error::Error;
 
+use embedded_io::asynch::Read;
+use embedded_nal_async::TcpConnect;
+
 use edge_net::asynch::http::client::ClientConnection;
 use edge_net::asynch::http::Method;
-use edge_net::asynch::stdnal::StdTcpConnector;
-use edge_net::asynch::tcp::TcpConnector;
-use embedded_io::asynch::Read;
+use edge_net::asynch::stdnal::StdTcpConnect;
 
 fn main() {
     simple_logger::SimpleLogger::new().env().init().unwrap();
@@ -15,7 +16,7 @@ fn main() {
 async fn read() -> anyhow::Result<()> {
     println!("About to open an HTTP connection to httpbin.org port 80");
 
-    let connector = StdTcpConnector::new();
+    let connector = StdTcpConnect::new();
     let mut buf = [0_u8; 8192];
 
     let mut connection = ClientConnection::<1024, _>::new(
@@ -36,7 +37,7 @@ async fn request<'b, const N: usize, T>(
     uri: &str,
 ) -> anyhow::Result<()>
 where
-    T: TcpConnector,
+    T: TcpConnect,
     T::Error: Error + Send + Sync + 'static,
 {
     connection

@@ -393,8 +393,6 @@ where
 }
 
 pub mod http {
-    use uncased::UncasedStr;
-
     pub const NONCE_LEN: usize = 16;
     pub const MAX_BASE64_KEY_LEN: usize = 28;
     pub const MAX_BASE64_KEY_RESPONSE_LEN: usize = 33;
@@ -425,10 +423,10 @@ pub mod http {
         let mut upgrade = false;
 
         for (name, value) in request_headers {
-            if UncasedStr::new(name) == UncasedStr::new("Connection") {
-                connection = UncasedStr::new(value) == UncasedStr::new("Upgrade");
-            } else if UncasedStr::new(name) == UncasedStr::new("Upgrade") {
-                upgrade = UncasedStr::new(value) == UncasedStr::new("websocket");
+            if name.eq_ignore_ascii_case("Connection") {
+                connection = value.eq_ignore_ascii_case("Upgrade");
+            } else if name.eq_ignore_ascii_case("Upgrade") {
+                upgrade = value.eq_ignore_ascii_case("websocket");
             }
         }
 
@@ -455,13 +453,13 @@ pub mod http {
         let mut sec_key = None;
 
         for (name, value) in request_headers {
-            if UncasedStr::new(name) == UncasedStr::new("Sec-WebSocket-Version") {
-                if UncasedStr::new(value) != UncasedStr::new(version.unwrap_or("13")) {
+            if name.eq_ignore_ascii_case("Sec-WebSocket-Version") {
+                if !value.eq_ignore_ascii_case(version.unwrap_or("13")) {
                     return Err(UpgradeError::NoVersion);
                 }
 
                 version_ok = true;
-            } else if UncasedStr::new(name) == UncasedStr::new("Sec-WebSocket-Key") {
+            } else if name.eq_ignore_ascii_case("Sec-WebSocket-Key") {
                 const WS_MAGIC_GUUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
                 let mut buf = [0_u8; MAX_BASE64_KEY_LEN + WS_MAGIC_GUUID.len()];

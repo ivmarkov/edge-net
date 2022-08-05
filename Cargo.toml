@@ -23,12 +23,12 @@ nightly = ["embedded-io/async", "embedded-svc?/nightly", "embedded-svc?/experime
 embedded-io = { version = "0.3", default-features = false }
 heapless = { version = "0.7", default-features = false }
 embassy-util = { version = "0.1", git = "https://github.com/embassy-rs/embassy", optional = true }
-uncased = "0.9"
 httparse = "1.7"
 no-std-net = { version = "0.5", default-features = false }
 log = { version = "0.4", default-features = false }
 base64 = { version = "0.13", default-features = false }
 sha1_smol = { version = "1", default-features = false }
+embedded-nal-async = "0.2"
 domain = { version = "0.7.0-dev", git = "https://github.com/NLnetLabs/domain", default-features = false, optional = true }
 futures-lite = { version = "1", default-features = false, optional = true }
 async-io = { version = "1", default-features = false, optional = true }

@@ -3,38 +3,50 @@
 
 use core::future::{pending, Future};
 
+use log::LevelFilter;
+
 use edge_net::asynch::{
     http::{
         server::{Handler, HandlerError, Server, ServerConnection},
         Method,
     },
-    stdnal::StdTcpBinder,
-    tcp::{TcpAcceptor, TcpBinder},
+    stdnal::StdTcpListen,
+    tcp::{TcpAccept, TcpListen},
 };
 use edge_net::std_mutex::StdRawMutex;
 use embassy_util::blocking_mutex::raw::RawMutex;
 use embedded_io::asynch::{Read, Write};
 
 fn main() {
-    simple_logger::SimpleLogger::new().env().init().unwrap();
+    simple_logger::SimpleLogger::new()
+        .with_level(LevelFilter::Info)
+        .env()
+        .init()
+        .unwrap();
 
     smol::block_on(accept());
 }
 
 pub async fn accept() {
-    let binder = StdTcpBinder::new();
+    let binder = StdTcpListen::new();
 
-    run::<StdRawMutex, _>(binder.bind("0.0.0.0:8080".parse().unwrap()).await.unwrap()).await;
+    run::<StdRawMutex, _>(
+        binder
+            .listen("0.0.0.0:8080".parse().unwrap())
+            .await
+            .unwrap(),
+    )
+    .await;
 }
 
 pub async fn run<R, A>(acceptor: A)
 where
     R: RawMutex,
-    A: TcpAcceptor,
+    A: TcpAccept + 'static,
 {
     let mut server = Server::<128, 2048, _, _>::new(acceptor, SimpleHandler);
 
-    server.process::<4, 4, R, _>(pending()).await.unwrap();
+    server.process::<16, 16, R, _>(pending()).await.unwrap();
 }
 
 pub struct SimpleHandler;
@@ -55,9 +67,15 @@ where
         async move {
             if path == "/" {
                 if method == Method::Get {
-                    connection.initiate_response(200, None, &[]).await?;
+                    connection
+                        .initiate_response(
+                            200,
+                            Some("OK"),
+                            &[("Content-Length", "10"), ("Content-Type", "text/plain")],
+                        )
+                        .await?;
 
-                    connection.write_all("Hello!".as_bytes()).await?;
+                    connection.write_all("Hello!\r\n\r\n".as_bytes()).await?;
                 } else {
                     connection.initiate_response(405, None, &[]).await?;
                 }

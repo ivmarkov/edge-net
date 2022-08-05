@@ -8,7 +8,7 @@ use no_std_net::SocketAddr;
 use crate::asynch::http::{
     send_headers, send_headers_end, send_request, Body, BodyType, Error, ResponseHeaders, SendBody,
 };
-use crate::asynch::tcp::TcpConnector;
+use embedded_nal_async::TcpConnect;
 
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
@@ -19,7 +19,7 @@ const COMPLETION_BUF_SIZE: usize = 64;
 
 pub enum ClientConnection<'b, const N: usize, T>
 where
-    T: TcpConnector,
+    T: TcpConnect,
 {
     Transition(TransitionState),
     Unbound(UnboundState<'b, N, T>),
@@ -29,7 +29,7 @@ where
 
 impl<'b, const N: usize, T> ClientConnection<'b, N, T>
 where
-    T: TcpConnector,
+    T: TcpConnect,
 {
     pub fn new(buf: &'b mut [u8], socket: &'b T, addr: SocketAddr) -> Self {
         Self::Unbound(UnboundState {
@@ -296,14 +296,14 @@ where
 
 impl<'b, const N: usize, T> Io for ClientConnection<'b, N, T>
 where
-    T: TcpConnector,
+    T: TcpConnect,
 {
     type Error = Error<T::Error>;
 }
 
 impl<'b, const N: usize, T> Read for ClientConnection<'b, N, T>
 where
-    T: TcpConnector + 'b,
+    T: TcpConnect + 'b,
 {
     type ReadFuture<'a> = impl Future<Output = Result<usize, Self::Error>>
     where Self: 'a;
@@ -315,7 +315,7 @@ where
 
 impl<'b, const N: usize, T> Write for ClientConnection<'b, N, T>
 where
-    T: TcpConnector + 'b,
+    T: TcpConnect + 'b,
 {
     type WriteFuture<'a> = impl Future<Output = Result<usize, Self::Error>>
     where Self: 'a;
@@ -336,7 +336,7 @@ pub struct TransitionState(());
 
 pub struct UnboundState<'b, const N: usize, T>
 where
-    T: TcpConnector,
+    T: TcpConnect,
 {
     buf: &'b mut [u8],
     socket: &'b T,
@@ -346,7 +346,7 @@ where
 
 pub struct RequestState<'b, const N: usize, T>
 where
-    T: TcpConnector,
+    T: TcpConnect,
 {
     buf: &'b mut [u8],
     socket: &'b T,
@@ -356,7 +356,7 @@ where
 
 pub struct ResponseState<'b, const N: usize, T>
 where
-    T: TcpConnector,
+    T: TcpConnect,
 {
     buf: *mut [u8],
     response: ResponseHeaders<'b, N>,
@@ -373,7 +373,7 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize, T> Connection for ClientConnection<'b, N, T>
     where
-        T: TcpConnector + 'b,
+        T: TcpConnect + 'b,
     {
         type Read = Body<'b, T::Connection<'b>>;
 
