@@ -15,7 +15,7 @@ rust-version = "1.61"
 [features]
 default = ["std"]
 
-std = ["alloc", "embedded-io/std", "embedded-svc?/std", "async-io", "futures-lite"]
+std = ["alloc", "embedded-io/std", "embedded-svc?/std", "async-io", "futures-lite", "httparse/std"]
 alloc = ["embedded-io/alloc", "embedded-svc?/alloc"]
 nightly = ["embedded-io/async", "embedded-svc?/nightly", "embedded-svc?/experimental"]
 
@@ -23,7 +23,7 @@ nightly = ["embedded-io/async", "embedded-svc?/nightly", "embedded-svc?/experime
 embedded-io = { version = "0.3", default-features = false }
 heapless = { version = "0.7", default-features = false }
 embassy-util = { version = "0.1", git = "https://github.com/embassy-rs/embassy", optional = true }
-httparse = "1.7"
+httparse = { version = "1.7", default-features = false }
 no-std-net = { version = "0.5", default-features = false }
 log = { version = "0.4", default-features = false }
 base64 = { version = "0.13", default-features = false }
