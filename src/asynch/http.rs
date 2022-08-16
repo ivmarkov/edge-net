@@ -836,7 +836,7 @@ where
         let slice = match self.parse_digits(&mut digits[..]).await? {
             // This is safe because the following call to `from_str_radix` does
             // its own verification on the bytes.
-            Some(s) => unsafe { std::str::from_utf8_unchecked(s) },
+            Some(s) => unsafe { str::from_utf8_unchecked(s) },
             None => return Ok(None),
         };
 
