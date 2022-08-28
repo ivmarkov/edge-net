@@ -15,7 +15,6 @@ rust-version = "1.61"
 [features]
 default = ["std"]
 
-<<<<<<< HEAD
 std = ["alloc", "embedded-io/std", "embedded-svc?/std", "async-io", "futures-lite", "httparse/std", "serde-json-core/std"]
 alloc = ["embedded-io/alloc", "embedded-svc?/alloc"]
 nightly = ["embedded-io/async", "embedded-svc?/nightly", "embedded-svc?/experimental"]
