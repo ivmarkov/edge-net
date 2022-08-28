@@ -15,15 +15,19 @@ rust-version = "1.61"
 [features]
 default = ["std"]
 
-std = ["alloc", "embedded-io/std", "embedded-svc?/std", "async-io", "futures-lite", "httparse/std"]
+<<<<<<< HEAD
+std = ["alloc", "embedded-io/std", "embedded-svc?/std", "async-io", "futures-lite", "httparse/std", "serde-json-core/std"]
 alloc = ["embedded-io/alloc", "embedded-svc?/alloc"]
 nightly = ["embedded-io/async", "embedded-svc?/nightly", "embedded-svc?/experimental"]
+embassy-util = ["embassy-futures", "embassy-sync"]
 
 [dependencies]
 embedded-io = { version = "0.3", default-features = false }
 heapless = { version = "0.7", default-features = false }
-embassy-util = { version = "0.1", git = "https://github.com/embassy-rs/embassy", optional = true }
 httparse = { version = "1.7", default-features = false }
+embassy-futures = { version = "0.1", git = "https://github.com/embassy-rs/embassy", optional = true }
+embassy-sync = { version = "0.1", git = "https://github.com/embassy-rs/embassy", optional = true }
+>>>>>>> 3a3bce5 (Compat with latest nightly; GitHub OTA service; json_io)
 no-std-net = { version = "0.5", default-features = false }
 log = { version = "0.4", default-features = false }
 base64 = { version = "0.13", default-features = false }
@@ -32,6 +36,8 @@ embedded-nal-async = "0.2"
 domain = { version = "0.7.0-dev", git = "https://github.com/NLnetLabs/domain", default-features = false, optional = true }
 futures-lite = { version = "1", default-features = false, optional = true }
 async-io = { version = "1", default-features = false, optional = true }
+serde = { version = "1", default-features = false, features = ["derive"] }
+serde-json-core = { version = "0.4", default-features = false }
 #embedded-svc = { version = "0.22", default-features = false, optional = true }
 embedded-svc = { version = "0.22", git = "https://github.com/esp-rs/embedded-svc", branch = "next", optional = true }
 #embedded-svc = { version = "0.22", path = "../embedded-svc", optional = true }

@@ -14,7 +14,7 @@ use edge_net::asynch::{
     tcp::{TcpAccept, TcpListen},
 };
 use edge_net::std_mutex::StdRawMutex;
-use embassy_util::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::raw::RawMutex;
 use embedded_io::asynch::{Read, Write};
 
 fn main() {

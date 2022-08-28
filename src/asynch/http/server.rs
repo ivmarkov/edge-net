@@ -11,7 +11,6 @@ use crate::asynch::http::{
     send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, RequestHeaders,
     SendBody,
 };
-use crate::asynch::tcp::TcpAccept;
 
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
@@ -346,7 +345,7 @@ pub struct Server<const N: usize, const B: usize, A, H> {
 #[cfg(feature = "embassy-util")]
 impl<const N: usize, const B: usize, A, H> Server<N, B, A, H>
 where
-    A: TcpAccept,
+    A: crate::asynch::tcp::TcpAccept,
     H: for<'b, 't> Handler<'b, N, &'b mut A::Connection<'t>>,
 {
     pub const fn new(acceptor: A, handler: H) -> Self {
@@ -356,14 +355,14 @@ where
     pub async fn process<
         const P: usize,
         const W: usize,
-        R: embassy_util::blocking_mutex::raw::RawMutex,
+        R: embassy_sync::blocking_mutex::raw::RawMutex,
         Q: Future<Output = ()>,
     >(
         &mut self,
         quit: Q,
     ) -> Result<(), Error<A::Error>> {
         warn!("Creating queue for {} requests", W);
-        let channel = embassy_util::channel::mpmc::Channel::<R, _, W>::new();
+        let channel = embassy_sync::channel::Channel::<R, _, W>::new();
 
         warn!("Creating {} handlers", P);
         let mut handlers = heapless::Vec::<_, P>::new();
@@ -397,7 +396,7 @@ where
             .into_array::<P>()
             .unwrap_or_else(|_| unreachable!());
 
-        embassy_util::select3(
+        embassy_futures::select3(
             quit,
             async {
                 loop {
@@ -415,7 +414,7 @@ where
                     }
                 }
             },
-            embassy_util::select_all(handlers),
+            embassy_futures::select_all(handlers),
         )
         .await;
 

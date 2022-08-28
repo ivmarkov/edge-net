@@ -1,4 +1,4 @@
-use embassy_util::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::raw::RawMutex;
 
 pub struct StdRawMutex(std::sync::Mutex<()>);
 
