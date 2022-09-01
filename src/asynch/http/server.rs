@@ -396,7 +396,7 @@ where
             .into_array::<P>()
             .unwrap_or_else(|_| unreachable!());
 
-        embassy_futures::select3(
+        embassy_futures::select::select3(
             quit,
             async {
                 loop {
@@ -414,7 +414,7 @@ where
                     }
                 }
             },
-            embassy_futures::select_all(handlers),
+            embassy_futures::select::select_array(handlers),
         )
         .await;
 
