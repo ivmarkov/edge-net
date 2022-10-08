@@ -8,6 +8,9 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use super::ws::{self, FrameType};
 
+#[cfg(all(feature = "embassy-util", feature = "embedded-svc"))]
+pub use embedded_svc_impl::*;
+
 #[derive(Debug)]
 pub enum WsError<E> {
     IoError(E),
@@ -145,9 +148,9 @@ pub mod embedded_svc_impl {
 
     use super::WsError;
 
-    pub struct WsSenderBridge<const N: usize, S, D>(S, PhantomData<fn() -> D>);
+    pub struct WsSvcSender<const N: usize, S, D>(S, PhantomData<fn() -> D>);
 
-    impl<const N: usize, S, D> WsSenderBridge<N, S, D> {
+    impl<const N: usize, S, D> WsSvcSender<N, S, D> {
         pub const fn new(ws_sender: S) -> Self {
             Self(ws_sender, PhantomData)
         }
@@ -170,7 +173,7 @@ pub mod embedded_svc_impl {
         }
     }
 
-    impl<const N: usize, S, D> crate::asynch::channel::Sender for WsSenderBridge<N, S, D>
+    impl<const N: usize, S, D> crate::asynch::channel::Sender for WsSvcSender<N, S, D>
     where
         S: ws::asynch::Sender,
         D: Serialize,
@@ -182,13 +185,13 @@ pub mod embedded_svc_impl {
         type SendFuture<'a> = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
 
         fn send<'a>(&'a mut self, data: &'a Self::Data) -> Self::SendFuture<'a> {
-            async move { WsSenderBridge::send(self, data).await }
+            async move { WsSvcSender::send(self, data).await }
         }
     }
 
-    pub struct WsReceiverBridge<const N: usize, R, D>(R, PhantomData<fn() -> D>);
+    pub struct WsSvcReceiver<const N: usize, R, D>(R, PhantomData<fn() -> D>);
 
-    impl<const N: usize, R, D> WsReceiverBridge<N, R, D> {
+    impl<const N: usize, R, D> WsSvcReceiver<N, R, D> {
         pub const fn new(ws_receiver: R) -> Self {
             Self(ws_receiver, PhantomData)
         }
@@ -223,7 +226,7 @@ pub mod embedded_svc_impl {
         }
     }
 
-    impl<const N: usize, R, D> crate::asynch::channel::Receiver for WsReceiverBridge<N, R, D>
+    impl<const N: usize, R, D> crate::asynch::channel::Receiver for WsSvcReceiver<N, R, D>
     where
         R: ws::asynch::Receiver,
         D: DeserializeOwned,
@@ -235,34 +238,41 @@ pub mod embedded_svc_impl {
         type RecvFuture<'a> = impl Future<Output = Result<Self::Data, Self::Error>> where Self: 'a;
 
         fn recv(&mut self) -> Self::RecvFuture<'_> {
-            async move { WsReceiverBridge::recv(self).await }
+            async move { WsSvcReceiver::recv(self).await }
         }
     }
 
-    pub trait Handler {
-        type HandleFuture<E>: Future<Output = Result<(), E>>;
-
+    pub trait AcceptorHandler {
         type SendData;
         type ReceiveData;
 
-        fn handle<S, R>(
-            &self,
+        type HandleFuture<'a, S, R>: Future<Output = Result<(), S::Error>>
+        where
+            Self: 'a,
+            S: crate::asynch::channel::Sender<Data = Self::SendData> + 'a,
+            R: crate::asynch::channel::Receiver<Error = S::Error, Data = Option<Self::ReceiveData>>
+                + 'a,
+            S::Error: Debug + 'a;
+
+        fn handle<'a, S, R>(
+            &'a self,
             sender: S,
             receiver: R,
             index: usize,
-        ) -> Self::HandleFuture<S::Error>
+        ) -> Self::HandleFuture<'a, S, R>
         where
-            S: crate::asynch::channel::Sender<Data = Self::SendData>,
-            R: crate::asynch::channel::Receiver<Error = S::Error, Data = Option<Self::ReceiveData>>,
-            S::Error: Debug;
+            S: crate::asynch::channel::Sender<Data = Self::SendData> + 'a,
+            R: crate::asynch::channel::Receiver<Error = S::Error, Data = Option<Self::ReceiveData>>
+                + 'a,
+            S::Error: Debug + 'a;
     }
 
-    pub async fn process<const N: usize, const W: usize, const F: usize, A, H>(
+    pub async fn accept<const N: usize, const W: usize, const F: usize, A, H>(
         acceptor: A,
         handler: H,
     ) where
         A: Acceptor,
-        H: Handler,
+        H: AcceptorHandler,
         H::SendData: Serialize,
         H::ReceiveData: DeserializeOwned,
     {
@@ -286,8 +296,8 @@ pub mod embedded_svc_impl {
 
                             let res = handler
                                 .handle(
-                                    WsSenderBridge::<F, _, _>::new(sender),
-                                    WsReceiverBridge::<F, _, _>::new(receiver),
+                                    WsSvcSender::<F, _, _>::new(sender),
+                                    WsSvcReceiver::<F, _, _>::new(receiver),
                                     index,
                                 )
                                 .await;
