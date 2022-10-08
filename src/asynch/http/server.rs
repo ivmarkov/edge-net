@@ -17,7 +17,9 @@ pub use embedded_svc_compat::*;
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
-pub struct HandlerError(heapless::String<128>);
+pub type HandlerErrorString = heapless::String<64>;
+
+pub struct HandlerError(HandlerErrorString);
 
 impl HandlerError {
     pub fn new(message: &str) -> Self {
@@ -28,7 +30,7 @@ impl HandlerError {
         &self.0
     }
 
-    pub fn release(self) -> heapless::String<128> {
+    pub fn release(self) -> HandlerErrorString {
         self.0
     }
 }
@@ -38,7 +40,7 @@ where
     E: Debug,
 {
     fn from(e: E) -> Self {
-        let mut string: heapless::String<128> = "".into();
+        let mut string: HandlerErrorString = "".into();
 
         if write!(&mut string, "{:?}", e).is_err() {
             string = "(Error string too big to serve)".into();
@@ -83,8 +85,14 @@ where
         Ok(Self::Request(RequestState { request, io }))
     }
 
-    pub fn split(&mut self) -> Result<(&RequestHeaders<'b, N>, &mut Body<'b, T>), Error<T::Error>> {
-        self.request_mut().map(|req| (&req.request, &mut req.io))
+    pub fn is_request_initiated(&self) -> bool {
+        matches!(self, Self::Request(_))
+    }
+
+    pub fn split(&mut self) -> (&RequestHeaders<'b, N>, &mut Body<'b, T>) {
+        let req = self.request_mut().expect("Not in request mode");
+
+        (&req.request, &mut req.io)
     }
 
     pub fn headers(&self) -> Result<&RequestHeaders<'b, N>, Error<T::Error>> {
@@ -100,10 +108,8 @@ where
         self.complete_request(Some(status), message, headers).await
     }
 
-    pub fn assert_response(&mut self) -> Result<(), Error<T::Error>> {
-        self.response_mut()?;
-
-        Ok(())
+    pub fn is_response_initiated(&self) -> bool {
+        matches!(self, Self::Response(_))
     }
 
     pub fn raw_connection(&mut self) -> Result<&mut T, Error<T::Error>> {
@@ -320,13 +326,13 @@ where
 
     match handler.handle(path, method, &mut connection).await {
         Result::Ok(_) => {
-            if connection.split().is_ok() {
+            if connection.is_request_initiated() {
                 connection
                     .complete_request(Some(200), Some("OK"), &[])
                     .await?;
             }
 
-            if connection.assert_response().is_ok() {
+            if connection.is_response_initiated() {
                 connection.complete_response().await?;
             }
         }
@@ -430,12 +436,43 @@ mod embedded_svc_compat {
 
     use embedded_io::asynch::{Read, Write};
 
-    use embedded_svc::http::server::asynch::Connection;
+    use embedded_svc::http::server::asynch::{Connection, Headers, Query};
     use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
     use crate::asynch::http::{Body, Method, RequestHeaders};
 
     use super::*;
+
+    impl<'b, const N: usize, T> Headers for ServerConnection<'b, N, T>
+    where
+        T: Read + Write,
+    {
+        fn header(&self, name: &str) -> Option<&'_ str> {
+            self.request_ref()
+                .expect("Not in request mode")
+                .request
+                .header(name)
+        }
+    }
+
+    impl<'b, const N: usize, T> Query for ServerConnection<'b, N, T>
+    where
+        T: Read + Write,
+    {
+        fn uri(&self) -> &'_ str {
+            self.request_ref()
+                .expect("Not in request mode")
+                .request
+                .uri()
+        }
+
+        fn method(&self) -> embedded_svc::http::Method {
+            self.request_ref()
+                .expect("Not in request mode")
+                .request
+                .method()
+        }
+    }
 
     impl<'b, const N: usize, T> Connection for ServerConnection<'b, N, T>
     where
@@ -452,13 +489,13 @@ mod embedded_svc_compat {
         type IntoResponseFuture<'a>
         = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
 
-        fn split(&mut self) -> Result<(&Self::Headers, &mut Self::Read), Self::Error> {
+        fn split(&mut self) -> (&Self::Headers, &mut Self::Read) {
             ServerConnection::split(self)
         }
 
-        fn headers(&self) -> Result<&Self::Headers, Self::Error> {
-            ServerConnection::headers(self)
-        }
+        // fn headers(&self) -> Result<&Self::Headers, Self::Error> {
+        //     ServerConnection::headers(self)
+        // }
 
         fn initiate_response<'a>(
             &'a mut self,
@@ -469,8 +506,8 @@ mod embedded_svc_compat {
             async move { ServerConnection::initiate_response(self, status, message, headers).await }
         }
 
-        fn assert_response(&mut self) -> Result<(), Self::Error> {
-            ServerConnection::assert_response(self)
+        fn is_response_initiated(&self) -> bool {
+            ServerConnection::is_response_initiated(self)
         }
 
         fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {

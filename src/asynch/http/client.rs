@@ -49,23 +49,23 @@ where
         self.start_request(method, uri, headers).await
     }
 
-    pub fn assert_request(&mut self) -> Result<(), Error<T::Error>> {
-        self.request_mut()?;
-
-        Ok(())
+    pub fn is_request_initiated(&self) -> bool {
+        matches!(self, Self::Request(_))
     }
 
     pub async fn initiate_response(&mut self) -> Result<(), Error<T::Error>> {
         self.complete_request().await
     }
 
-    #[allow(clippy::type_complexity)]
-    pub fn split(
-        &mut self,
-    ) -> Result<(&ResponseHeaders<'b, N>, &mut Body<'b, T::Connection<'b>>), Error<T::Error>> {
-        let response = self.response_mut()?;
+    pub fn is_response_initiated(&self) -> bool {
+        matches!(self, Self::Response(_))
+    }
 
-        Ok((&response.response, &mut response.io))
+    #[allow(clippy::type_complexity)]
+    pub fn split(&mut self) -> (&ResponseHeaders<'b, N>, &mut Body<'b, T::Connection<'b>>) {
+        let response = self.response_mut().expect("Not in response mode");
+
+        (&response.response, &mut response.io)
     }
 
     pub fn headers(&self) -> Result<&ResponseHeaders<'b, N>, Error<T::Error>> {
@@ -370,7 +370,35 @@ where
 mod embedded_svc_compat {
     use super::*;
 
-    use embedded_svc::http::client::asynch::{Connection, Method};
+    use embedded_svc::http::client::asynch::{Connection, Headers, Method, Status};
+
+    impl<'b, const N: usize, T> Headers for ClientConnection<'b, N, T>
+    where
+        T: TcpConnect + 'b,
+    {
+        fn header(&self, name: &str) -> Option<&'_ str> {
+            let response = self.response_ref().expect("Not in response state");
+
+            response.response.header(name)
+        }
+    }
+
+    impl<'b, const N: usize, T> Status for ClientConnection<'b, N, T>
+    where
+        T: TcpConnect + 'b,
+    {
+        fn status(&self) -> u16 {
+            let response = self.response_ref().expect("Not in response state");
+
+            response.response.status()
+        }
+
+        fn status_message(&self) -> Option<&'_ str> {
+            let response = self.response_ref().expect("Not in response state");
+
+            response.response.status_message()
+        }
+    }
 
     impl<'b, const N: usize, T> Connection for ClientConnection<'b, N, T>
     where
@@ -399,20 +427,20 @@ mod embedded_svc_compat {
             async move { ClientConnection::initiate_request(self, method.into(), uri, headers).await }
         }
 
-        fn assert_request(&mut self) -> Result<(), Self::Error> {
-            ClientConnection::assert_request(self)
+        fn is_request_initiated(&self) -> bool {
+            ClientConnection::is_request_initiated(self)
         }
 
         fn initiate_response(&mut self) -> Self::IntoResponseFuture<'_> {
             async move { ClientConnection::initiate_response(self).await }
         }
 
-        fn split(&mut self) -> Result<(&Self::Headers, &mut Self::Read), Self::Error> {
-            ClientConnection::split(self)
+        fn is_response_initiated(&self) -> bool {
+            ClientConnection::is_response_initiated(self)
         }
 
-        fn headers(&self) -> Result<&Self::Headers, Self::Error> {
-            ClientConnection::headers(self)
+        fn split(&mut self) -> (&Self::Headers, &mut Self::Read) {
+            ClientConnection::split(self)
         }
 
         fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {

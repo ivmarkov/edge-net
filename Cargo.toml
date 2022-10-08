@@ -36,6 +36,7 @@ futures-lite = { version = "1", default-features = false, optional = true }
 async-io = { version = "1", default-features = false, optional = true }
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde-json-core = { version = "0.4", default-features = false }
+postcard = "0.7"
 #embedded-svc = { version = "0.23", default-features = false, optional = true }
 embedded-svc = { version = "0.23", git = "https://github.com/esp-rs/embedded-svc", optional = true }
 #embedded-svc = { version = "0.23", path = "../embedded-svc", optional = true }
