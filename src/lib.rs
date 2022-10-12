@@ -12,4 +12,3 @@ pub mod asynch;
 pub mod captive;
 #[cfg(all(feature = "std", feature = "embassy-util"))]
 pub mod std_mutex;
-pub mod utils;

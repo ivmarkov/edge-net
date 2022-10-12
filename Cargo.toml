@@ -15,7 +15,7 @@ rust-version = "1.61"
 [features]
 default = ["std"]
 
-std = ["alloc", "embedded-io/std", "embedded-svc?/std", "async-io", "futures-lite", "httparse/std", "serde-json-core/std", "domain?/std"]
+std = ["alloc", "embedded-io/std", "embedded-svc?/std", "async-io", "futures-lite", "httparse/std", "domain?/std"]
 alloc = ["embedded-io/alloc", "embedded-svc?/alloc"]
 nightly = ["embedded-io/async", "embedded-svc?/nightly", "embedded-svc?/experimental"]
 embassy-util = ["embassy-futures", "embassy-sync"]
@@ -31,15 +31,12 @@ log = { version = "0.4", default-features = false }
 base64 = { version = "0.13", default-features = false }
 sha1_smol = { version = "1", default-features = false }
 embedded-nal-async = "0.2"
-domain = { version = "0.7.0", default-features = false, optional = true }
+domain = { version = "0.7", default-features = false, optional = true }
 futures-lite = { version = "1", default-features = false, optional = true }
 async-io = { version = "1", default-features = false, optional = true }
-serde = { version = "1", default-features = false, features = ["derive"] }
-serde-json-core = { version = "0.4", default-features = false }
-postcard = "0.7"
 #embedded-svc = { version = "0.23", default-features = false, optional = true }
-embedded-svc = { version = "0.23", git = "https://github.com/esp-rs/embedded-svc", optional = true }
-#embedded-svc = { version = "0.23", path = "../embedded-svc", optional = true }
+embedded-svc = { version = "0.23", git = "https://github.com/esp-rs/embedded-svc", default-features = false, optional = true }
+#embedded-svc = { version = "0.23", path = "../embedded-svc", default-features = false, optional = true }
 
 [dev-dependencies]
 anyhow = "1"
