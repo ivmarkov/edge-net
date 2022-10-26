@@ -306,7 +306,7 @@ impl<'b, const N: usize, T> Read for ClientConnection<'b, N, T>
 where
     T: TcpConnect + 'b,
 {
-    type ReadFuture<'a> = impl Future<Output = Result<usize, Self::Error>>
+    type ReadFuture<'a> = impl Future<Output = Result<usize, Self::Error>> + 'a
     where Self: 'a;
 
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
@@ -318,14 +318,14 @@ impl<'b, const N: usize, T> Write for ClientConnection<'b, N, T>
 where
     T: TcpConnect + 'b,
 {
-    type WriteFuture<'a> = impl Future<Output = Result<usize, Self::Error>>
+    type WriteFuture<'a> = impl Future<Output = Result<usize, Self::Error>> + 'a
     where Self: 'a;
 
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
         async move { self.request_mut()?.io.write(buf).await }
     }
 
-    type FlushFuture<'a> = impl Future<Output = Result<(), Self::Error>>
+    type FlushFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a
     where Self: 'a;
 
     fn flush(&mut self) -> Self::FlushFuture<'_> {
@@ -413,10 +413,10 @@ mod embedded_svc_compat {
         type RawConnection = T::Connection<'b>;
 
         type IntoRequestFuture<'a>
-        = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
+        = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
 
         type IntoResponseFuture<'a>
-        = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
+        = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
 
         fn initiate_request<'a>(
             &'a mut self,

@@ -55,7 +55,7 @@ impl<'b, const N: usize, T> Handler<'b, N, T> for SimpleHandler
 where
     T: Read + Write,
 {
-    type HandleFuture<'a> = impl Future<Output = Result<(), HandlerError>>
+    type HandleFuture<'a> = impl Future<Output = Result<(), HandlerError>> + 'a
     where Self: 'a, 'b: 'a, T: 'a;
 
     fn handle<'a>(

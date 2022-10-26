@@ -630,7 +630,7 @@ where
     R: Read,
 {
     type ReadFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
+    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
 
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
         async move {
@@ -683,7 +683,7 @@ where
     R: Read,
 {
     type ReadFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
+    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
 
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
         async move {
@@ -737,7 +737,7 @@ where
     R: Read,
 {
     type ReadFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
+    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
 
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
         async move {
@@ -972,7 +972,7 @@ where
     R: Read,
 {
     type ReadFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
+    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
 
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
         async move {
@@ -1061,7 +1061,7 @@ where
     W: Write,
 {
     type WriteFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
+    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
 
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
         async move {
@@ -1074,7 +1074,7 @@ where
     }
 
     type FlushFuture<'a>
-    = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
+    = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
 
     fn flush(&mut self) -> Self::FlushFuture<'_> {
         async move {
@@ -1123,7 +1123,7 @@ where
     W: Write,
 {
     type WriteFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
+    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
 
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
         async move {
@@ -1139,7 +1139,7 @@ where
     }
 
     type FlushFuture<'a>
-    = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
+    = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
 
     fn flush(&mut self) -> Self::FlushFuture<'_> {
         async move { self.output.flush().await.map_err(Error::Io) }
@@ -1179,7 +1179,7 @@ where
     W: Write,
 {
     type WriteFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> where Self: 'a;
+    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
 
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
         async move {
@@ -1205,7 +1205,7 @@ where
     }
 
     type FlushFuture<'a>
-    = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
+    = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
 
     fn flush(&mut self) -> Self::FlushFuture<'_> {
         async move { self.output.flush().await.map_err(Error::Io) }

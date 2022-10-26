@@ -232,7 +232,7 @@ impl<'b, const N: usize, T> Read for ServerConnection<'b, N, T>
 where
     T: Read + Write,
 {
-    type ReadFuture<'a> = impl Future<Output = Result<usize, Self::Error>>
+    type ReadFuture<'a> = impl Future<Output = Result<usize, Self::Error>> + 'a
     where Self: 'a;
 
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
@@ -244,14 +244,14 @@ impl<'b, const N: usize, T> Write for ServerConnection<'b, N, T>
 where
     T: Read + Write,
 {
-    type WriteFuture<'a> = impl Future<Output = Result<usize, Self::Error>>
+    type WriteFuture<'a> = impl Future<Output = Result<usize, Self::Error>> + 'a
     where Self: 'a;
 
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
         async move { self.response_mut()?.write(buf).await }
     }
 
-    type FlushFuture<'a> = impl Future<Output = Result<(), Self::Error>>
+    type FlushFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a
     where Self: 'a;
 
     fn flush(&mut self) -> Self::FlushFuture<'_> {
@@ -487,7 +487,7 @@ mod embedded_svc_compat {
         type RawConnection = T;
 
         type IntoResponseFuture<'a>
-        = impl Future<Output = Result<(), Self::Error>> where Self: 'a;
+        = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
 
         fn split(&mut self) -> (&Self::Headers, &mut Self::Read) {
             ServerConnection::split(self)
@@ -520,7 +520,7 @@ mod embedded_svc_compat {
         T: Read + Write,
     {
         type HandleFuture<'a>
-        = impl Future<Output = Result<(), HandlerError>> where Self: 'a, 'b: 'a, T: 'a;
+        = impl Future<Output = Result<(), HandlerError>> + 'a where Self: 'a, 'b: 'a, T: 'a;
 
         fn handle<'a>(
             &'a self,
@@ -543,7 +543,7 @@ mod embedded_svc_compat {
         T: Read + Write,
     {
         type HandleFuture<'a>
-        = impl Future<Output = Result<(), HandlerError>> where Self: 'a, 'b: 'a, T: 'a;
+        = impl Future<Output = Result<(), HandlerError>> + 'a where Self: 'a, 'b: 'a, T: 'a;
 
         fn handle<'a>(
             &'a self,
