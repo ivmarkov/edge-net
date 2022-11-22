@@ -2,10 +2,10 @@ name: Publish
 
 on:
   workflow_dispatch
-  CRATE_NAME: edge-net
 
 env:
   rust_toolchain: nightly
+  CRATE_NAME: edge-net
 
 jobs:
   publish:
