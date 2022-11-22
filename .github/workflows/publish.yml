@@ -2,6 +2,7 @@ name: Publish
 
 on:
   workflow_dispatch
+  CRATE_NAME: edge-net
 
 env:
   rust_toolchain: nightly
@@ -25,3 +26,13 @@ jobs:
         run: cargo login ${{ secrets.crates_io_token }}
       - name: Build | Publish
         run: cargo publish
+      - name: Get the crate version from cargo
+        run: |
+          version=$(cargo metadata --format-version=1 --no-deps | jq -r ".packages[] | select(.name == \"${{env.CRATE_NAME}}\") | .version")
+          echo "crate_version=$version" >> $GITHUB_ENV
+          echo "${{env.CRATE_NAME}} version: $version"
+      - name: Tag the new release
+        uses: rickstaa/action-create-tag@v1
+        with:
+          tag: v${{env.crate_version}}
+          message: "Release v${{env.crate_version}}"
