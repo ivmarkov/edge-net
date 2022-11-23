@@ -1,6 +1,6 @@
 [package]
 name = "edge-net"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2018"
 resolver = "2"
@@ -15,17 +15,18 @@ rust-version = "1.61"
 [features]
 default = ["std"]
 
-std = ["alloc", "embedded-io/std", "embedded-svc?/std", "async-io", "futures-lite", "httparse/std", "domain?/std"]
+std = ["alloc", "embedded-io/std", "embassy-sync/std", "embedded-svc?/std", "async-io", "futures-lite", "httparse/std", "domain?/std"]
 alloc = ["embedded-io/alloc", "embedded-svc?/alloc"]
-nightly = ["embedded-io/async", "embedded-svc?/nightly", "embedded-svc?/experimental"]
-embassy-util = ["embassy-futures", "embassy-sync"]
+nightly = ["embedded-io/async", "embassy-sync/nightly", "embedded-svc?/nightly", "embedded-svc?/experimental"]
+embassy-util = [] # Just for backward compat. To be removed in future
+chain = [] # See https://github.com/rust-lang/rust/issues/104691
 
 [dependencies]
 embedded-io = { version = "0.3", default-features = false }
 heapless = { version = "0.7", default-features = false }
 httparse = { version = "1.7", default-features = false }
-embassy-futures = { version = "0.1", optional = true }
-embassy-sync = { version = "0.1", optional = true }
+embassy-futures = "0.1"
+embassy-sync = { version = "0.1", default-features = false }
 no-std-net = { version = "0.5", default-features = false }
 log = { version = "0.4", default-features = false }
 base64 = { version = "0.13", default-features = false }

@@ -342,13 +342,11 @@ where
     Ok(())
 }
 
-#[cfg(feature = "embassy-util")]
 pub struct Server<const N: usize, const B: usize, A, H> {
     acceptor: A,
     handler: H,
 }
 
-#[cfg(feature = "embassy-util")]
 impl<const N: usize, const B: usize, A, H> Server<N, B, A, H>
 where
     A: crate::asynch::tcp::TcpAccept,
@@ -437,9 +435,10 @@ mod embedded_svc_compat {
     use embedded_io::asynch::{Read, Write};
 
     use embedded_svc::http::server::asynch::{Connection, Headers, Query};
-    use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
-    use crate::asynch::http::{Body, Method, RequestHeaders};
+    #[cfg(feature = "chain")]
+    use crate::asynch::http::Method;
+    use crate::asynch::http::{Body, RequestHeaders};
 
     use super::*;
 
@@ -515,7 +514,11 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize, T> Handler<'b, N, T> for ChainRoot
+    // Does not typecheck with latest nightly
+    // See https://github.com/rust-lang/rust/issues/104691
+    #[cfg(feature = "chain")]
+    impl<'b, const N: usize, T> Handler<'b, N, T>
+        for embedded_svc::utils::http::server::registration::ChainRoot
     where
         T: Read + Write,
     {
@@ -536,7 +539,11 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize, T, H, Q> Handler<'b, N, T> for ChainHandler<H, Q>
+    // Does not typecheck with latest nightly
+    // See https://github.com/rust-lang/rust/issues/104691
+    #[cfg(feature = "chain")]
+    impl<'b, const N: usize, T, H, Q> Handler<'b, N, T>
+        for embedded_svc::utils::http::server::registration::ChainHandler<H, Q>
     where
         H: for<'a> embedded_svc::http::server::asynch::Handler<&'a mut ServerConnection<'b, N, T>>,
         Q: Handler<'b, N, T>,

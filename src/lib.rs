@@ -10,5 +10,5 @@
 pub mod asynch;
 #[cfg(feature = "domain")]
 pub mod captive;
-#[cfg(all(feature = "std", feature = "embassy-util"))]
+#[cfg(feature = "std")]
 pub mod std_mutex;
