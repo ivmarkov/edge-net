@@ -19,7 +19,6 @@ std = ["alloc", "embedded-io/std", "embassy-sync/std", "embedded-svc?/std", "asy
 alloc = ["embedded-io/alloc", "embedded-svc?/alloc"]
 nightly = ["embedded-io/async", "embassy-sync/nightly", "embedded-svc?/nightly", "embedded-svc?/experimental"]
 embassy-util = [] # Just for backward compat. To be removed in future
-chain = [] # See https://github.com/rust-lang/rust/issues/104691
 
 [dependencies]
 embedded-io = { version = "0.3", default-features = false }

@@ -269,18 +269,12 @@ pub struct RequestState<'b, const N: usize, T> {
 pub type ResponseState<T> = SendBody<T>;
 
 pub trait Handler<'b, const N: usize, T> {
-    type HandleFuture<'a>: Future<Output = Result<(), HandlerError>>
-    where
-        Self: 'a,
-        'b: 'a,
-        T: 'a;
-
-    fn handle<'a>(
+    async fn handle<'a>(
         &'a self,
         path: &'a str,
         method: Method,
         connection: &'a mut ServerConnection<'b, N, T>,
-    ) -> Self::HandleFuture<'a>;
+    ) -> Result<(), HandlerError>;
 }
 
 pub async fn handle_connection<const N: usize, const B: usize, T, H>(
@@ -436,7 +430,6 @@ mod embedded_svc_compat {
 
     use embedded_svc::http::server::asynch::{Connection, Headers, Query};
 
-    #[cfg(feature = "chain")]
     use crate::asynch::http::Method;
     use crate::asynch::http::{Body, RequestHeaders};
 
@@ -514,34 +507,23 @@ mod embedded_svc_compat {
         }
     }
 
-    // Does not typecheck with latest nightly
-    // See https://github.com/rust-lang/rust/issues/104691
-    #[cfg(feature = "chain")]
     impl<'b, const N: usize, T> Handler<'b, N, T>
         for embedded_svc::utils::http::server::registration::ChainRoot
     where
         T: Read + Write,
     {
-        type HandleFuture<'a>
-        = impl Future<Output = Result<(), HandlerError>> + 'a where Self: 'a, 'b: 'a, T: 'a;
-
-        fn handle<'a>(
+        async fn handle<'a>(
             &'a self,
             _path: &'a str,
             _method: Method,
             connection: &'a mut ServerConnection<'b, N, T>,
-        ) -> Self::HandleFuture<'a> {
-            async move {
-                connection.initiate_response(404, None, &[]).await?;
+        ) -> Result<(), HandlerError> {
+            connection.initiate_response(404, None, &[]).await?;
 
-                Ok(())
-            }
+            Ok(())
         }
     }
 
-    // Does not typecheck with latest nightly
-    // See https://github.com/rust-lang/rust/issues/104691
-    #[cfg(feature = "chain")]
     impl<'b, const N: usize, T, H, Q> Handler<'b, N, T>
         for embedded_svc::utils::http::server::registration::ChainHandler<H, Q>
     where
@@ -549,24 +531,19 @@ mod embedded_svc_compat {
         Q: Handler<'b, N, T>,
         T: Read + Write,
     {
-        type HandleFuture<'a>
-        = impl Future<Output = Result<(), HandlerError>> + 'a where Self: 'a, 'b: 'a, T: 'a;
-
-        fn handle<'a>(
+        async fn handle<'a>(
             &'a self,
             path: &'a str,
             method: Method,
             connection: &'a mut ServerConnection<'b, N, T>,
-        ) -> Self::HandleFuture<'a> {
-            async move {
-                if self.path == path && self.method == method.into() {
-                    self.handler
-                        .handle(connection)
-                        .await
-                        .map_err(|e| HandlerError(e.release()))
-                } else {
-                    self.next.handle(path, method, connection).await
-                }
+        ) -> Result<(), HandlerError> {
+            if self.path == path && self.method == method.into() {
+                self.handler
+                    .handle(connection)
+                    .await
+                    .map_err(|e| HandlerError(e.release()))
+            } else {
+                self.next.handle(path, method, connection).await
             }
         }
     }
