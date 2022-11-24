@@ -1,7 +1,10 @@
-#![feature(generic_associated_types)]
+#![feature(cfg_version)]
+#![cfg_attr(not(version("1.65")), feature(generic_associated_types))]
 #![feature(type_alias_impl_trait)]
+#![cfg_attr(version("1.67"), allow(incomplete_features))]
+#![cfg_attr(version("1.67"), feature(async_fn_in_trait))]
 
-use core::future::{pending, Future};
+use core::future::pending;
 
 use log::LevelFilter;
 
@@ -51,11 +54,60 @@ where
 
 pub struct SimpleHandler;
 
+impl SimpleHandler {
+    async fn handle<'a, 'b, const N: usize, T>(
+        &'a self,
+        path: &'a str,
+        method: Method,
+        connection: &'a mut ServerConnection<'b, N, T>,
+    ) -> Result<(), HandlerError>
+    where
+        'b: 'a,
+        T: Read + Write + 'a,
+    {
+        if path == "/" {
+            if method == Method::Get {
+                connection
+                    .initiate_response(
+                        200,
+                        Some("OK"),
+                        &[("Content-Length", "10"), ("Content-Type", "text/plain")],
+                    )
+                    .await?;
+
+                connection.write_all("Hello!\r\n\r\n".as_bytes()).await?;
+            } else {
+                connection.initiate_response(405, None, &[]).await?;
+            }
+        } else {
+            connection.initiate_response(404, None, &[]).await?;
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(version("1.67"))]
 impl<'b, const N: usize, T> Handler<'b, N, T> for SimpleHandler
 where
     T: Read + Write,
 {
-    type HandleFuture<'a> = impl Future<Output = Result<(), HandlerError>> + 'a
+    async fn handle<'a>(
+        &'a self,
+        path: &'a str,
+        method: Method,
+        connection: &'a mut ServerConnection<'b, N, T>,
+    ) -> Result<(), HandlerError> {
+        SimpleHandler::handle(self, path, method, connection).await
+    }
+}
+
+#[cfg(not(version("1.67")))]
+impl<'b, const N: usize, T> Handler<'b, N, T> for SimpleHandler
+where
+    T: Read + Write,
+{
+    type HandleFuture<'a> = impl core::future::Future<Output = Result<(), HandlerError>> + 'a
     where Self: 'a, 'b: 'a, T: 'a;
 
     fn handle<'a>(
@@ -64,26 +116,6 @@ where
         method: Method,
         connection: &'a mut ServerConnection<'b, N, T>,
     ) -> Self::HandleFuture<'a> {
-        async move {
-            if path == "/" {
-                if method == Method::Get {
-                    connection
-                        .initiate_response(
-                            200,
-                            Some("OK"),
-                            &[("Content-Length", "10"), ("Content-Type", "text/plain")],
-                        )
-                        .await?;
-
-                    connection.write_all("Hello!\r\n\r\n".as_bytes()).await?;
-                } else {
-                    connection.initiate_response(405, None, &[]).await?;
-                }
-            } else {
-                connection.initiate_response(404, None, &[]).await?;
-            }
-
-            Ok(())
-        }
+        SimpleHandler::handle(self, path, method, connection)
     }
 }
