@@ -72,7 +72,7 @@ where
             Self::IncompleteHeaders => write!(f, "HTTP headers section is incomplete"),
             Self::IncompleteBody => write!(f, "HTTP body is incomplete"),
             Self::InvalidState => write!(f, "Connection is not in requested state"),
-            Self::Io(e) => write!(f, "{}", e),
+            Self::Io(e) => write!(f, "{e}"),
         }
     }
 }
@@ -1293,7 +1293,7 @@ impl<'b, const N: usize> Display for RequestHeaders<'b, N> {
                 break;
             }
 
-            writeln!(f, "{}: {}", name, value)?;
+            writeln!(f, "{name}: {value}")?;
         }
 
         Ok(())
@@ -1375,7 +1375,7 @@ impl<'b, const N: usize> Display for ResponseHeaders<'b, N> {
                 break;
             }
 
-            writeln!(f, "{}: {}", name, value)?;
+            writeln!(f, "{name}: {value}")?;
         }
 
         Ok(())

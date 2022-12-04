@@ -42,7 +42,7 @@ where
     fn from(e: E) -> Self {
         let mut string: HandlerErrorString = "".into();
 
-        if write!(&mut string, "{:?}", e).is_err() {
+        if write!(&mut string, "{e:?}").is_err() {
             string = "(Error string too big to serve)".into();
         }
 
