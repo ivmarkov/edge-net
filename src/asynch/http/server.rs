@@ -268,6 +268,19 @@ pub struct RequestState<'b, const N: usize, T> {
 
 pub type ResponseState<T> = SendBody<T>;
 
+#[cfg(version("1.67"))]
+pub trait Handler<'b, const N: usize, T> {
+    async fn handle<'a>(
+        &'a self,
+        path: &'a str,
+        method: Method,
+        connection: &'a mut ServerConnection<'b, N, T>,
+    ) -> Result<(), HandlerError>;
+}
+
+// Does not typecheck with latest nightly 1.67
+// See https://github.com/rust-lang/rust/issues/104691
+#[cfg(not(version("1.67")))]
 pub trait Handler<'b, const N: usize, T> {
     type HandleFuture<'a>: Future<Output = Result<(), HandlerError>>
     where
@@ -435,8 +448,8 @@ mod embedded_svc_compat {
     use embedded_io::asynch::{Read, Write};
 
     use embedded_svc::http::server::asynch::{Connection, Headers, Query};
+    use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
-    #[cfg(feature = "chain")]
     use crate::asynch::http::Method;
     use crate::asynch::http::{Body, RequestHeaders};
 
@@ -514,11 +527,51 @@ mod embedded_svc_compat {
         }
     }
 
+    #[cfg(version("1.67"))]
+    impl<'b, const N: usize, T> Handler<'b, N, T> for ChainRoot
+    where
+        T: Read + Write,
+    {
+        async fn handle<'a>(
+            &'a self,
+            _path: &'a str,
+            _method: Method,
+            connection: &'a mut ServerConnection<'b, N, T>,
+        ) -> Result<(), HandlerError> {
+            connection.initiate_response(404, None, &[]).await?;
+
+            Ok(())
+        }
+    }
+
+    #[cfg(version("1.67"))]
+    impl<'b, const N: usize, T, H, Q> Handler<'b, N, T> for ChainHandler<H, Q>
+    where
+        H: for<'a> embedded_svc::http::server::asynch::Handler<&'a mut ServerConnection<'b, N, T>>,
+        Q: Handler<'b, N, T>,
+        T: Read + Write,
+    {
+        async fn handle<'a>(
+            &'a self,
+            path: &'a str,
+            method: Method,
+            connection: &'a mut ServerConnection<'b, N, T>,
+        ) -> Result<(), HandlerError> {
+            if self.path == path && self.method == method.into() {
+                self.handler
+                    .handle(connection)
+                    .await
+                    .map_err(|e| HandlerError(e.release()))
+            } else {
+                self.next.handle(path, method, connection).await
+            }
+        }
+    }
+
     // Does not typecheck with latest nightly
     // See https://github.com/rust-lang/rust/issues/104691
-    #[cfg(feature = "chain")]
-    impl<'b, const N: usize, T> Handler<'b, N, T>
-        for embedded_svc::utils::http::server::registration::ChainRoot
+    #[cfg(not(version("1.67")))]
+    impl<'b, const N: usize, T> Handler<'b, N, T> for ChainRoot
     where
         T: Read + Write,
     {
@@ -541,9 +594,8 @@ mod embedded_svc_compat {
 
     // Does not typecheck with latest nightly
     // See https://github.com/rust-lang/rust/issues/104691
-    #[cfg(feature = "chain")]
-    impl<'b, const N: usize, T, H, Q> Handler<'b, N, T>
-        for embedded_svc::utils::http::server::registration::ChainHandler<H, Q>
+    #[cfg(not(version("1.67")))]
+    impl<'b, const N: usize, T, H, Q> Handler<'b, N, T> for ChainHandler<H, Q>
     where
         H: for<'a> embedded_svc::http::server::asynch::Handler<&'a mut ServerConnection<'b, N, T>>,
         Q: Handler<'b, N, T>,
