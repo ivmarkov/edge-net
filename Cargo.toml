@@ -1,6 +1,6 @@
 [package]
 name = "edge-net"
-version = "0.1.2"
+version = "0.2.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2018"
 resolver = "2"
@@ -34,7 +34,7 @@ embedded-nal-async = "0.2"
 domain = { version = "0.7", default-features = false, optional = true }
 futures-lite = { version = "1", default-features = false, optional = true }
 async-io = { version = "1", default-features = false, optional = true }
-embedded-svc = { version = "0.23", default-features = false, optional = true }
+embedded-svc = { version = "0.24", default-features = false, optional = true }
 
 [dev-dependencies]
 anyhow = "1"

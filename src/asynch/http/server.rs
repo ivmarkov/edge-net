@@ -547,7 +547,7 @@ mod embedded_svc_compat {
     #[cfg(version("1.67"))]
     impl<'b, const N: usize, T, H, Q> Handler<'b, N, T> for ChainHandler<H, Q>
     where
-        H: for<'a> embedded_svc::http::server::asynch::Handler<&'a mut ServerConnection<'b, N, T>>,
+        H: embedded_svc::http::server::asynch::Handler<ServerConnection<'b, N, T>>,
         Q: Handler<'b, N, T>,
         T: Read + Write,
     {
@@ -597,7 +597,7 @@ mod embedded_svc_compat {
     #[cfg(not(version("1.67")))]
     impl<'b, const N: usize, T, H, Q> Handler<'b, N, T> for ChainHandler<H, Q>
     where
-        H: for<'a> embedded_svc::http::server::asynch::Handler<&'a mut ServerConnection<'b, N, T>>,
+        H: embedded_svc::http::server::asynch::Handler<ServerConnection<'b, N, T>>,
         Q: Handler<'b, N, T>,
         T: Read + Write,
     {
