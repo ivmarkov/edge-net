@@ -397,11 +397,14 @@ pub mod http {
     pub const MAX_BASE64_KEY_LEN: usize = 28;
     pub const MAX_BASE64_KEY_RESPONSE_LEN: usize = 33;
 
+    pub const UPGRADE_REQUEST_HEADERS_LEN: usize = 4;
+    pub const UPGRADE_RESPONSE_HEADERS_LEN: usize = 3;
+
     pub fn upgrade_request_headers<'a>(
         version: Option<&'a str>,
         nonce: &[u8; NONCE_LEN],
         nonce_base64_buf: &'a mut [u8; MAX_BASE64_KEY_LEN],
-    ) -> impl IntoIterator<Item = (&'a str, &'a str)> {
+    ) -> [(&'a str, &'a str); UPGRADE_REQUEST_HEADERS_LEN] {
         let nonce_base64_len =
             base64::encode_config_slice(nonce, base64::STANDARD_NO_PAD, nonce_base64_buf);
 
@@ -445,7 +448,7 @@ pub mod http {
         request_headers: H,
         version: Option<&'a str>,
         sec_key_response_base64_buf: &'b mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
-    ) -> Result<impl IntoIterator<Item = (&'b str, &'b str)>, UpgradeError>
+    ) -> Result<[(&'b str, &'b str); UPGRADE_RESPONSE_HEADERS_LEN], UpgradeError>
     where
         H: IntoIterator<Item = (&'a str, &'a str)>,
     {

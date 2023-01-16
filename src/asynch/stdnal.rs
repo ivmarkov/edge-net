@@ -12,7 +12,7 @@ use no_std_net::SocketAddr;
 
 use embedded_nal_async::TcpConnect;
 
-use super::tcp::{TcpAccept, TcpListen};
+use super::tcp::{TcpAccept, TcpListen, TcpSplittableConnection};
 
 pub struct StdTcpConnect(());
 
@@ -108,6 +108,51 @@ impl Write for StdTcpConnection {
 
     fn flush(&mut self) -> Self::FlushFuture<'_> {
         async move { self.0.flush().await }
+    }
+}
+
+pub struct StdTcpConnectionRef<'r>(&'r Async<TcpStream>);
+
+impl<'r> Io for StdTcpConnectionRef<'r> {
+    type Error = io::Error;
+}
+
+impl<'r> Read for StdTcpConnectionRef<'r> {
+    type ReadFuture<'a>
+    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
+
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+        async move { self.0.read(buf).await }
+    }
+}
+
+impl<'r> Write for StdTcpConnectionRef<'r> {
+    type WriteFuture<'a>
+    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
+
+    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+        async move { self.0.write(buf).await }
+    }
+
+    type FlushFuture<'a>
+    = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
+
+    fn flush(&mut self) -> Self::FlushFuture<'_> {
+        async move { self.0.flush().await }
+    }
+}
+
+impl TcpSplittableConnection for StdTcpConnection {
+    type Error = io::Error;
+
+    type Read<'a> = StdTcpConnectionRef<'a> where Self: 'a;
+
+    type Write<'a> = StdTcpConnectionRef<'a> where Self: 'a;
+
+    type SplitFuture<'a> = impl Future<Output = Result<(Self::Read<'a>, Self::Write<'a>), io::Error>> where Self: 'a;
+
+    fn split(&mut self) -> Self::SplitFuture<'_> {
+        async move { Ok((StdTcpConnectionRef(&self.0), StdTcpConnectionRef(&self.0))) }
     }
 }
 

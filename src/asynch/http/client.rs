@@ -8,6 +8,7 @@ use no_std_net::SocketAddr;
 use crate::asynch::http::{
     send_headers, send_headers_end, send_request, Body, BodyType, Error, ResponseHeaders, SendBody,
 };
+use crate::asynch::ws::http::{upgrade_request_headers, MAX_BASE64_KEY_LEN, NONCE_LEN};
 use embedded_nal_async::TcpConnect;
 
 #[cfg(feature = "embedded-svc")]
@@ -49,6 +50,22 @@ where
         self.start_request(method, uri, headers).await
     }
 
+    pub async fn initiate_ws_upgrade_request<'a>(
+        &'a mut self,
+        uri: &'a str,
+        version: Option<&'a str>,
+        nonce: &[u8; NONCE_LEN],
+    ) -> Result<(), Error<T::Error>> {
+        let mut nonce_base64_buf = [0_u8; MAX_BASE64_KEY_LEN];
+
+        self.initiate_request(
+            Method::Get,
+            uri,
+            &upgrade_request_headers(version, nonce, &mut nonce_base64_buf),
+        )
+        .await
+    }
+
     pub fn is_request_initiated(&self) -> bool {
         matches!(self, Self::Request(_))
     }
@@ -74,8 +91,34 @@ where
         Ok(&response.response)
     }
 
+    pub fn is_ws_upgrade_accepted(
+        &mut self,
+        _nonce: &[u8; NONCE_LEN],
+    ) -> Result<bool, Error<T::Error>> {
+        let headers = self.headers()?;
+
+        let succeeded = matches!(headers.code, Some(200))
+            && headers
+                .headers
+                .connection()
+                .map(|v| v.eq_ignore_ascii_case("Upgrade"))
+                .unwrap_or(false)
+            && headers
+                .headers
+                .upgrade()
+                .map(|v| v.eq_ignore_ascii_case("websocket"))
+                .unwrap_or(false)
+            && headers.headers.get("Sec-WebSocket-Accept").is_some();
+
+        Ok(succeeded)
+    }
+
     pub fn raw_connection(&mut self) -> Result<&mut T::Connection<'b>, Error<T::Error>> {
         Ok(self.io_mut())
+    }
+
+    pub fn release(self) -> Result<T::Connection<'b>, Error<T::Error>> {
+        Ok(self.io_release())
     }
 
     async fn start_request<'a>(
@@ -290,6 +333,15 @@ where
             Self::Unbound(unbound) => unbound.io.as_mut().unwrap(),
             Self::Request(request) => request.io.as_raw_writer(),
             Self::Response(response) => response.io.as_raw_reader(),
+            _ => unreachable!(),
+        }
+    }
+
+    fn io_release(self) -> T::Connection<'b> {
+        match self {
+            Self::Unbound(unbound) => unbound.io.unwrap(),
+            Self::Request(request) => request.io.release(),
+            Self::Response(response) => response.io.release(),
             _ => unreachable!(),
         }
     }

@@ -2,6 +2,23 @@ use core::future::Future;
 
 use no_std_net::SocketAddr;
 
+pub trait TcpSplittableConnection {
+    type Error: embedded_io::Error;
+
+    type Read<'a>: embedded_io::asynch::Read<Error = Self::Error>
+    where
+        Self: 'a;
+    type Write<'a>: embedded_io::asynch::Write<Error = Self::Error>
+    where
+        Self: 'a;
+
+    type SplitFuture<'a>: Future<Output = Result<(Self::Read<'a>, Self::Write<'a>), Self::Error>>
+    where
+        Self: 'a;
+
+    fn split(&mut self) -> Self::SplitFuture<'_>;
+}
+
 pub trait TcpListen {
     type Error: embedded_io::Error;
 
