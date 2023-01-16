@@ -1,10 +1,10 @@
 pub use rumqttc::*;
 
 #[cfg(feature = "embedded-svc")]
-pub use embedded_svc_impl::*;
+pub use embedded_svc_compat::*;
 
 #[cfg(feature = "embedded-svc")]
-mod embedded_svc_impl {
+mod embedded_svc_compat {
     use core::future::Future;
     use core::marker::PhantomData;
 
