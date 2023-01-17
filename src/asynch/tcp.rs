@@ -19,6 +19,24 @@ pub trait TcpSplittableConnection {
     fn split(&mut self) -> Self::SplitFuture<'_>;
 }
 
+impl<'t, T> TcpSplittableConnection for &'t mut T
+where
+    T: TcpSplittableConnection + 't,
+{
+    type Error = T::Error;
+
+    type Read<'a> = T::Read<'a> where Self: 'a;
+
+    type Write<'a> = T::Write<'a> where Self: 'a;
+
+    type SplitFuture<'a> = impl Future<Output = Result<(Self::Read<'a>, Self::Write<'a>), Self::Error>>
+    where Self: 'a;
+
+    fn split(&mut self) -> Self::SplitFuture<'_> {
+        async move { (**self).split().await }
+    }
+}
+
 pub trait TcpListen {
     type Error: embedded_io::Error;
 

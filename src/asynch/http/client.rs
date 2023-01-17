@@ -41,6 +41,12 @@ where
         })
     }
 
+    pub fn reinitialize(&mut self, addr: SocketAddr) -> Result<(), Error<T::Error>> {
+        let _ = self.complete();
+
+        Ok(())
+    }
+
     pub async fn initiate_request<'a>(
         &'a mut self,
         method: Method,
@@ -115,10 +121,6 @@ where
 
     pub fn raw_connection(&mut self) -> Result<&mut T::Connection<'b>, Error<T::Error>> {
         Ok(self.io_mut())
-    }
-
-    pub fn release(self) -> Result<T::Connection<'b>, Error<T::Error>> {
-        Ok(self.io_release())
     }
 
     async fn start_request<'a>(
@@ -333,15 +335,6 @@ where
             Self::Unbound(unbound) => unbound.io.as_mut().unwrap(),
             Self::Request(request) => request.io.as_raw_writer(),
             Self::Response(response) => response.io.as_raw_reader(),
-            _ => unreachable!(),
-        }
-    }
-
-    fn io_release(self) -> T::Connection<'b> {
-        match self {
-            Self::Unbound(unbound) => unbound.io.unwrap(),
-            Self::Request(request) => request.io.release(),
-            Self::Response(response) => response.io.release(),
             _ => unreachable!(),
         }
     }
