@@ -42,7 +42,7 @@ where
     }
 
     pub fn reinitialize(&mut self, addr: SocketAddr) -> Result<(), Error<T::Error>> {
-        let _ = self.complete();
+        let _ = self.complete().await;
 
         Ok(())
     }
