@@ -5,6 +5,7 @@ pub use embedded_svc_compat::*;
 
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
+    use core::fmt::{Debug, Display};
     use core::future::Future;
     use core::marker::PhantomData;
 
@@ -17,6 +18,36 @@ mod embedded_svc_compat {
 
     use rumqttc::{AsyncClient, ClientError, ConnectionError, EventLoop, PubAck, SubAck, UnsubAck};
 
+    #[derive(Debug)]
+    pub enum MqttError {
+        ClientError(ClientError),
+        ConnectionError(ConnectionError),
+    }
+
+    impl Display for MqttError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
+            match self {
+                MqttError::ClientError(error) => write!(f, "ClientError: {error}"),
+                MqttError::ConnectionError(error) => write!(f, "ConnectionError: {error}"),
+            }
+        }
+    }
+
+    #[cfg(feature = "std")]
+    impl std::error::Error for MqttError {}
+
+    impl From<ClientError> for MqttError {
+        fn from(value: ClientError) -> Self {
+            Self::ClientError(value)
+        }
+    }
+
+    impl From<ConnectionError> for MqttError {
+        fn from(value: ConnectionError) -> Self {
+            Self::ConnectionError(value)
+        }
+    }
+
     pub struct MqttClient(AsyncClient);
 
     impl MqttClient {
@@ -26,7 +57,7 @@ mod embedded_svc_compat {
     }
 
     impl ErrorType for MqttClient {
-        type Error = ClientError;
+        type Error = MqttError;
     }
 
     impl Client for MqttClient {
@@ -110,7 +141,7 @@ mod embedded_svc_compat {
     }
 
     impl<F, M> ErrorType for MqttConnection<F, M> {
-        type Error = ConnectionError;
+        type Error = MqttError;
     }
 
     impl<F, M> Connection for MqttConnection<F, M>
@@ -158,7 +189,7 @@ mod embedded_svc_compat {
                                 return Some(Ok(event));
                             }
                         }
-                        Err(err) => return Some(Err(err)),
+                        Err(err) => return Some(Err(MqttError::ConnectionError(err))),
                     }
                 }
             }
