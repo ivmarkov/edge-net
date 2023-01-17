@@ -43,6 +43,7 @@ where
 
     pub fn reinitialize(&mut self, addr: SocketAddr) -> Result<(), Error<T::Error>> {
         let _ = self.complete().await;
+        self.unbound_mut().unwrap().addr = addr;
 
         Ok(())
     }
