@@ -211,7 +211,7 @@ impl Dns for StdBlockingDns {
         host: &'m str,
         addr_type: AddrType,
     ) -> Self::GetHostByNameFuture<'m> {
-        async move { dns_lookup_host(&host, addr_type) }
+        async move { dns_lookup_host(host, addr_type) }
     }
 
     type GetHostByAddressFuture<'m> = impl Future<Output = Result<heapless::String<256>, Self::Error>> + 'm
