@@ -211,8 +211,6 @@ impl Dns for StdBlockingDns {
         host: &'m str,
         addr_type: AddrType,
     ) -> Self::GetHostByNameFuture<'m> {
-        let host = host.to_string();
-
         async move { dns_lookup_host(&host, addr_type) }
     }
 
