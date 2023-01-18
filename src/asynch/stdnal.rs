@@ -111,6 +111,20 @@ impl Write for StdTcpConnection {
     }
 }
 
+impl TcpSplittableConnection for StdTcpConnection {
+    type Error = io::Error;
+
+    type Read<'a> = StdTcpConnectionRef<'a> where Self: 'a;
+
+    type Write<'a> = StdTcpConnectionRef<'a> where Self: 'a;
+
+    type SplitFuture<'a> = impl Future<Output = Result<(Self::Read<'a>, Self::Write<'a>), io::Error>> where Self: 'a;
+
+    fn split(&mut self) -> Self::SplitFuture<'_> {
+        async move { Ok((StdTcpConnectionRef(&self.0), StdTcpConnectionRef(&self.0))) }
+    }
+}
+
 pub struct StdTcpConnectionRef<'r>(&'r Async<TcpStream>);
 
 impl<'r> Io for StdTcpConnectionRef<'r> {
@@ -139,20 +153,6 @@ impl<'r> Write for StdTcpConnectionRef<'r> {
 
     fn flush(&mut self) -> Self::FlushFuture<'_> {
         async move { self.0.flush().await }
-    }
-}
-
-impl TcpSplittableConnection for StdTcpConnection {
-    type Error = io::Error;
-
-    type Read<'a> = StdTcpConnectionRef<'a> where Self: 'a;
-
-    type Write<'a> = StdTcpConnectionRef<'a> where Self: 'a;
-
-    type SplitFuture<'a> = impl Future<Output = Result<(Self::Read<'a>, Self::Write<'a>), io::Error>> where Self: 'a;
-
-    fn split(&mut self) -> Self::SplitFuture<'_> {
-        async move { Ok((StdTcpConnectionRef(&self.0), StdTcpConnectionRef(&self.0))) }
     }
 }
 

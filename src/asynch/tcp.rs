@@ -51,21 +51,6 @@ pub trait TcpListen {
     fn listen(&self, remote: SocketAddr) -> Self::ListenFuture<'_>;
 }
 
-pub trait TcpAccept {
-    type Error: embedded_io::Error;
-
-    type Connection<'m>: embedded_io::asynch::Read<Error = Self::Error>
-        + embedded_io::asynch::Write<Error = Self::Error>
-    where
-        Self: 'm;
-
-    type AcceptFuture<'m>: Future<Output = Result<Self::Connection<'m>, Self::Error>> + 'm
-    where
-        Self: 'm;
-
-    fn accept(&self) -> Self::AcceptFuture<'_>;
-}
-
 impl<T> TcpListen for &T
 where
     T: TcpListen,
@@ -81,6 +66,38 @@ where
     fn listen(&self, remote: SocketAddr) -> Self::ListenFuture<'_> {
         (*self).listen(remote)
     }
+}
+
+impl<T> TcpListen for &mut T
+where
+    T: TcpListen,
+{
+    type Error = T::Error;
+
+    type Acceptor<'m> = T::Acceptor<'m>
+    where Self: 'm;
+
+    type ListenFuture<'m> = T::ListenFuture<'m>
+    where Self: 'm;
+
+    fn listen(&self, remote: SocketAddr) -> Self::ListenFuture<'_> {
+        (**self).listen(remote)
+    }
+}
+
+pub trait TcpAccept {
+    type Error: embedded_io::Error;
+
+    type Connection<'m>: embedded_io::asynch::Read<Error = Self::Error>
+        + embedded_io::asynch::Write<Error = Self::Error>
+    where
+        Self: 'm;
+
+    type AcceptFuture<'m>: Future<Output = Result<Self::Connection<'m>, Self::Error>> + 'm
+    where
+        Self: 'm;
+
+    fn accept(&self) -> Self::AcceptFuture<'_>;
 }
 
 impl<T> TcpAccept for &T
