@@ -190,7 +190,7 @@ where
     type GetHostByAddressFuture<'m> = impl Future<Output = Result<heapless::String<256>, Self::Error>> + 'm
 	where Self: 'm;
 
-    fn get_host_by_address<'m>(&'m self, _addr: IpAddr) -> Self::GetHostByAddressFuture<'m> {
+    fn get_host_by_address(&self, _addr: IpAddr) -> Self::GetHostByAddressFuture<'_> {
         async move { Err(io::ErrorKind::Unsupported.into()) }
     }
 }
@@ -212,7 +212,7 @@ impl Dns for StdDns<()> {
     type GetHostByAddressFuture<'m> = impl Future<Output = Result<heapless::String<256>, Self::Error>> + 'm
 	where Self: 'm;
 
-    fn get_host_by_address<'m>(&'m self, _addr: IpAddr) -> Self::GetHostByAddressFuture<'m> {
+    fn get_host_by_address(&self, _addr: IpAddr) -> Self::GetHostByAddressFuture<'_> {
         async move { Err(io::ErrorKind::Unsupported.into()) }
     }
 }
@@ -220,7 +220,6 @@ impl Dns for StdDns<()> {
 fn dns_lookup_host(host: &str, addr_type: AddrType) -> Result<IpAddr, io::Error> {
     (host, 0_u16)
         .to_socket_addrs()?
-        .into_iter()
         .find(|addr| match addr_type {
             AddrType::IPv4 => matches!(addr, std::net::SocketAddr::V4(_)),
             AddrType::IPv6 => matches!(addr, std::net::SocketAddr::V6(_)),
