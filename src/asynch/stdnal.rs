@@ -1,7 +1,7 @@
-use std::net::{self, TcpStream};
-use std::{io, net::ToSocketAddrs};
-
 use core::future::Future;
+
+use std::io;
+use std::net::{self, TcpStream, ToSocketAddrs};
 
 use async_io::Async;
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
@@ -10,7 +10,7 @@ use embedded_io::asynch::{Read, Write};
 use embedded_io::Io;
 use no_std_net::SocketAddr;
 
-use embedded_nal_async::TcpConnect;
+use embedded_nal_async::{AddrType, Dns, IpAddr, TcpConnect};
 
 use super::tcp::{TcpAccept, TcpListen, TcpSplittableConnection};
 
@@ -154,6 +154,90 @@ impl<'r> Write for StdTcpConnectionRef<'r> {
     fn flush(&mut self) -> Self::FlushFuture<'_> {
         async move { self.0.flush().await }
     }
+}
+
+pub struct StdDns<U>(U);
+
+impl<U> StdDns<U>
+where
+    U: crate::asynch::Unblocker,
+{
+    pub const fn new(unblocker: U) -> Self {
+        Self(unblocker)
+    }
+}
+
+impl<U> Dns for StdDns<U>
+where
+    U: crate::asynch::Unblocker,
+{
+    type Error = io::Error;
+
+    type GetHostByNameFuture<'m> = impl Future<Output = Result<IpAddr, Self::Error>> + 'm
+	where Self: 'm;
+
+    fn get_host_by_name<'m>(
+        &'m self,
+        host: &'m str,
+        addr_type: AddrType,
+    ) -> Self::GetHostByNameFuture<'m> {
+        let host = host.to_string();
+
+        async move {
+            self.0
+                .unblock(move || dns_lookup_host(&host, addr_type))
+                .await
+        }
+    }
+
+    type GetHostByAddressFuture<'m> = impl Future<Output = Result<heapless::String<256>, Self::Error>> + 'm
+	where Self: 'm;
+
+    fn get_host_by_address<'m>(&'m self, _addr: IpAddr) -> Self::GetHostByAddressFuture<'m> {
+        async move { Err(io::ErrorKind::Unsupported.into()) }
+    }
+}
+
+pub struct StdDnsBlocking;
+
+impl Dns for StdDnsBlocking {
+    type Error = io::Error;
+
+    type GetHostByNameFuture<'m> = impl Future<Output = Result<IpAddr, Self::Error>> + 'm
+	where Self: 'm;
+
+    fn get_host_by_name<'m>(
+        &'m self,
+        host: &'m str,
+        addr_type: AddrType,
+    ) -> Self::GetHostByNameFuture<'m> {
+        let host = host.to_string();
+
+        async move { dns_lookup_host(&host, addr_type) }
+    }
+
+    type GetHostByAddressFuture<'m> = impl Future<Output = Result<heapless::String<256>, Self::Error>> + 'm
+	where Self: 'm;
+
+    fn get_host_by_address<'m>(&'m self, _addr: IpAddr) -> Self::GetHostByAddressFuture<'m> {
+        async move { Err(io::ErrorKind::Unsupported.into()) }
+    }
+}
+
+fn dns_lookup_host(host: &str, addr_type: AddrType) -> Result<IpAddr, io::Error> {
+    (host, 0_u16)
+        .to_socket_addrs()?
+        .into_iter()
+        .find(|addr| match addr_type {
+            AddrType::IPv4 => matches!(addr, std::net::SocketAddr::V4(_)),
+            AddrType::IPv6 => matches!(addr, std::net::SocketAddr::V6(_)),
+            AddrType::Either => true,
+        })
+        .map(|addr| match addr {
+            std::net::SocketAddr::V4(v4) => v4.ip().octets().into(),
+            std::net::SocketAddr::V6(v6) => v6.ip().octets().into(),
+        })
+        .ok_or_else(|| io::ErrorKind::AddrNotAvailable.into())
 }
 
 fn to_std_addr(addr: SocketAddr) -> std::io::Result<std::net::SocketAddr> {
