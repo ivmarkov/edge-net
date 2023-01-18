@@ -198,9 +198,9 @@ where
     }
 }
 
-pub struct StdDnsBlocking;
+pub struct StdBlockingDns;
 
-impl Dns for StdDnsBlocking {
+impl Dns for StdBlockingDns {
     type Error = io::Error;
 
     type GetHostByNameFuture<'m> = impl Future<Output = Result<IpAddr, Self::Error>> + 'm
