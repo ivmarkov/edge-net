@@ -158,10 +158,7 @@ impl<'r> Write for StdTcpConnectionRef<'r> {
 
 pub struct StdDns<U>(U);
 
-impl<U> StdDns<U>
-where
-    U: crate::asynch::Unblocker,
-{
+impl<U> StdDns<U> {
     pub const fn new(unblocker: U) -> Self {
         Self(unblocker)
     }
@@ -198,9 +195,7 @@ where
     }
 }
 
-pub struct StdBlockingDns;
-
-impl Dns for StdBlockingDns {
+impl Dns for StdDns<()> {
     type Error = io::Error;
 
     type GetHostByNameFuture<'m> = impl Future<Output = Result<IpAddr, Self::Error>> + 'm
