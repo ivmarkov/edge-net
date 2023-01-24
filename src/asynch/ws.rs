@@ -37,8 +37,8 @@ impl FrameType {
 pub enum Error<E> {
     Incomplete(usize),
     Invalid,
-    TooShort,
-    TooLong,
+    BufferOverflow,
+    InvalidLen,
     Other(E),
 }
 
@@ -47,8 +47,8 @@ impl Error<()> {
         match self {
             Self::Incomplete(v) => Error::Incomplete(v),
             Self::Invalid => Error::Invalid,
-            Self::TooShort => Error::TooShort,
-            Self::TooLong => Error::TooLong,
+            Self::BufferOverflow => Error::BufferOverflow,
+            Self::InvalidLen => Error::InvalidLen,
             Self::Other(_) => panic!(),
         }
     }
@@ -174,7 +174,7 @@ impl FrameHeader {
 
     pub fn serialize(&self, buf: &mut [u8]) -> Result<usize, Error<()>> {
         if buf.len() < self.serialized_len() {
-            return Err(Error::TooShort);
+            return Err(Error::InvalidLen);
         }
 
         buf[0] = 0;
@@ -298,20 +298,18 @@ impl FrameHeader {
     pub async fn recv_payload<'a, R>(
         &'a self,
         mut read: R,
-        payload: &'a mut [u8],
+        payload_buf: &'a mut [u8],
     ) -> Result<(), Error<R::Error>>
     where
         R: Read,
     {
-        let payload_buf_len = payload.len() as u64;
-
-        if payload_buf_len < self.payload_len {
-            Err(Error::TooShort)
-        } else if payload_buf_len > self.payload_len {
-            Err(Error::TooLong)
-        } else if payload.is_empty() {
+        if (payload_buf.len() as u64) < self.payload_len {
+            Err(Error::BufferOverflow)
+        } else if self.payload_len == 0 {
             Ok(())
         } else {
+            let payload = &mut payload_buf[..self.payload_len as _];
+
             read.read_exact(payload).await.map_err(Error::from)?;
 
             self.mask(payload, 0);
@@ -330,10 +328,8 @@ impl FrameHeader {
     {
         let payload_buf_len = payload.len() as u64;
 
-        if payload_buf_len < self.payload_len {
-            Err(Error::TooShort)
-        } else if payload_buf_len > self.payload_len {
-            Err(Error::TooLong)
+        if payload_buf_len != self.payload_len {
+            Err(Error::InvalidLen)
         } else if payload.is_empty() {
             Ok(())
         } else if self.mask_key.is_none() {
@@ -397,18 +393,26 @@ pub mod http {
     pub const MAX_BASE64_KEY_LEN: usize = 28;
     pub const MAX_BASE64_KEY_RESPONSE_LEN: usize = 33;
 
-    pub const UPGRADE_REQUEST_HEADERS_LEN: usize = 4;
+    pub const UPGRADE_REQUEST_HEADERS_LEN: usize = 7;
     pub const UPGRADE_RESPONSE_HEADERS_LEN: usize = 3;
 
     pub fn upgrade_request_headers<'a>(
+        host: Option<&'a str>,
+        origin: Option<&'a str>,
         version: Option<&'a str>,
         nonce: &[u8; NONCE_LEN],
         nonce_base64_buf: &'a mut [u8; MAX_BASE64_KEY_LEN],
     ) -> [(&'a str, &'a str); UPGRADE_REQUEST_HEADERS_LEN] {
         let nonce_base64_len =
-            base64::encode_config_slice(nonce, base64::STANDARD_NO_PAD, nonce_base64_buf);
+            base64::encode_config_slice(nonce, base64::URL_SAFE, nonce_base64_buf);
+
+        let host = host.map(|host| ("Host", host)).unwrap_or(("", ""));
+        let origin = origin.map(|origin| ("Origin", origin)).unwrap_or(("", ""));
 
         [
+            host,
+            origin,
+            ("Content-Length", "0"),
             ("Connection", "Upgrade"),
             ("Upgrade", "websocket"),
             ("Sec-WebSocket-Version", version.unwrap_or("13")),
@@ -505,6 +509,60 @@ pub mod http {
             }
         } else {
             Err(UpgradeError::NoVersion)
+        }
+    }
+
+    pub mod client {
+        use embedded_nal_async::TcpConnect;
+
+        use crate::asynch::http::{client::ClientConnection, Error, Method};
+
+        use super::{upgrade_request_headers, MAX_BASE64_KEY_LEN, NONCE_LEN};
+
+        pub async fn initiate_ws_upgrade_request<'a, 'b, const N: usize, T>(
+            connection: &'a mut ClientConnection<'b, N, T>,
+            host: Option<&'a str>,
+            origin: Option<&'a str>,
+            uri: &'a str,
+            version: Option<&'a str>,
+            nonce: &[u8; NONCE_LEN],
+        ) -> Result<(), Error<T::Error>>
+        where
+            T: TcpConnect,
+        {
+            let mut nonce_base64_buf = [0_u8; MAX_BASE64_KEY_LEN];
+
+            let headers =
+                upgrade_request_headers(host, origin, version, nonce, &mut nonce_base64_buf);
+
+            connection
+                .initiate_request(Method::Get, uri, &headers)
+                .await
+        }
+
+        pub fn is_ws_upgrade_accepted<'a, 'b, const N: usize, T>(
+            connection: &'a mut ClientConnection<'b, N, T>,
+            _nonce: &'a [u8; NONCE_LEN],
+        ) -> Result<bool, Error<T::Error>>
+        where
+            T: TcpConnect,
+        {
+            let headers = connection.headers()?;
+
+            let succeeded = matches!(headers.code, Some(101))
+                && headers
+                    .headers
+                    .connection()
+                    .map(|v| v.eq_ignore_ascii_case("Upgrade"))
+                    .unwrap_or(false)
+                && headers
+                    .headers
+                    .upgrade()
+                    .map(|v| v.eq_ignore_ascii_case("websocket"))
+                    .unwrap_or(false)
+                && headers.headers.get("Sec-WebSocket-Accept").is_some();
+
+            Ok(succeeded)
         }
     }
 }

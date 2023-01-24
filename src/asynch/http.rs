@@ -244,7 +244,7 @@ pub async fn send_request<W>(
 where
     W: Write,
 {
-    send_status_line(method.map(|method| method.as_str()), path, output).await
+    send_status_line(true, method.map(|method| method.as_str()), path, output).await
 }
 
 pub async fn send_status<W>(
@@ -258,6 +258,7 @@ where
     let status_str = status.map(heapless::String::<5>::from);
 
     send_status_line(
+        false,
         status_str.as_ref().map(|status| status.as_str()),
         reason,
         output,
@@ -384,10 +385,12 @@ impl<'b, const N: usize> Headers<'b, N> {
     }
 
     pub fn set_raw(&mut self, name: &'b str, value: &'b [u8]) -> &mut Self {
-        for header in &mut self.0 {
-            if header.name.is_empty() || header.name.eq_ignore_ascii_case(name) {
-                *header = Header { name, value };
-                return self;
+        if !name.is_empty() {
+            for header in &mut self.0 {
+                if header.name.is_empty() || header.name.eq_ignore_ascii_case(name) {
+                    *header = Header { name, value };
+                    return self;
+                }
             }
         }
 
@@ -478,13 +481,19 @@ impl<'b, const N: usize> Headers<'b, N> {
 
     pub fn set_ws_upgrade_request_headers(
         &mut self,
+        host: Option<&'b str>,
+        origin: Option<&'b str>,
         version: Option<&'b str>,
         nonce: &[u8; crate::asynch::ws::http::NONCE_LEN],
         nonce_base64_buf: &'b mut [u8; crate::asynch::ws::http::MAX_BASE64_KEY_LEN],
     ) -> &mut Self {
-        for (name, value) in
-            crate::asynch::ws::http::upgrade_request_headers(version, nonce, nonce_base64_buf)
-        {
+        for (name, value) in crate::asynch::ws::http::upgrade_request_headers(
+            host,
+            origin,
+            version,
+            nonce,
+            nonce_base64_buf,
+        ) {
             self.set(name, value);
         }
 
@@ -1416,6 +1425,7 @@ where
 }
 
 async fn send_status_line<W>(
+    request: bool,
     token: Option<&str>,
     extra: Option<&str>,
     mut output: W,
@@ -1423,24 +1433,45 @@ async fn send_status_line<W>(
 where
     W: Write,
 {
-    output.write_all(b"HTTP/1.1").await.map_err(Error::Io)?;
+    let mut written = false;
+
+    if !request {
+        output.write_all(b"HTTP/1.1").await.map_err(Error::Io)?;
+        written = true;
+    }
 
     if let Some(token) = token {
-        output.write_all(b" ").await.map_err(Error::Io)?;
+        if written {
+            output.write_all(b" ").await.map_err(Error::Io)?;
+        }
 
         output
             .write_all(token.as_bytes())
             .await
             .map_err(Error::Io)?;
+
+        written = true;
     }
 
     if let Some(extra) = extra {
-        output.write_all(b" ").await.map_err(Error::Io)?;
+        if written {
+            output.write_all(b" ").await.map_err(Error::Io)?;
+        }
 
         output
             .write_all(extra.as_bytes())
             .await
             .map_err(Error::Io)?;
+
+        written = true;
+    }
+
+    if request {
+        if written {
+            output.write_all(b" ").await.map_err(Error::Io)?;
+        }
+
+        output.write_all(b"HTTP/1.1").await.map_err(Error::Io)?;
     }
 
     output.write_all(b"\r\n").await.map_err(Error::Io)?;
