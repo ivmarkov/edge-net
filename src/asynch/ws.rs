@@ -540,8 +540,8 @@ pub mod http {
                 .await
         }
 
-        pub fn is_ws_upgrade_accepted<'a, 'b, const N: usize, T>(
-            connection: &'a mut ClientConnection<'b, N, T>,
+        pub fn is_ws_upgrade_accepted<'a, const N: usize, T>(
+            connection: &'a mut ClientConnection<'_, N, T>,
             _nonce: &'a [u8; NONCE_LEN],
         ) -> Result<bool, Error<T::Error>>
         where
