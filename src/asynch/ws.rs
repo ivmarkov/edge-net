@@ -97,11 +97,6 @@ impl FrameHeader {
                 return Err(Error::Invalid);
             }
 
-            let masked = buf[1] & 0x80 != 0;
-            if masked {
-                expected_len += 4;
-            }
-
             let mut payload_len = (buf[1] & 0x7f) as u64;
             let mut payload_offset = 2;
 
@@ -118,7 +113,7 @@ impl FrameHeader {
                 expected_len += 8;
 
                 if buf.len() < expected_len {
-                    return Err(Error::Incomplete(5 - buf.len()));
+                    return Err(Error::Incomplete(expected_len - buf.len()));
                 } else {
                     payload_len = u64::from_be_bytes([
                         buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9],
@@ -127,16 +122,22 @@ impl FrameHeader {
                 }
             }
 
+            let masked = buf[1] & 0x80 != 0;
             let mask_key = if masked {
-                let mask_key = Some(u32::from_be_bytes([
-                    buf[payload_offset],
-                    buf[payload_offset + 1],
-                    buf[payload_offset + 2],
-                    buf[payload_offset + 3],
-                ]));
-                payload_offset += 4;
+                expected_len += 4;
+                if buf.len() < expected_len {
+                    return Err(Error::Incomplete(expected_len - buf.len()));
+                } else {
+                    let mask_key = Some(u32::from_be_bytes([
+                        buf[payload_offset],
+                        buf[payload_offset + 1],
+                        buf[payload_offset + 2],
+                        buf[payload_offset + 3],
+                    ]));
+                    payload_offset += 4;
 
-                mask_key
+                    mask_key
+                }
             } else {
                 None
             };
@@ -252,32 +253,22 @@ impl FrameHeader {
         R: Read,
     {
         let mut header_buf = [0; FrameHeader::MAX_LEN];
+        let mut read_offset = 0;
+        let mut read_end = FrameHeader::MIN_LEN;
 
-        read.read_exact(&mut header_buf[..FrameHeader::MIN_LEN])
-            .await
-            .map_err(Error::from)?;
+        loop {
+            read.read_exact(&mut header_buf[read_offset..read_end])
+                .await
+                .map_err(Error::from)?;
 
-        match FrameHeader::deserialize(&header_buf[..FrameHeader::MIN_LEN]) {
-            Ok((header, _)) => Ok(header),
-            Err(Error::Incomplete(more)) => {
-                let header_len = FrameHeader::MIN_LEN + more;
-                read.read_exact(&mut header_buf[FrameHeader::MIN_LEN..header_len])
-                    .await
-                    .map_err(Error::from)?;
-
-                match FrameHeader::deserialize(&header_buf[..header_len]) {
-                    Ok((header, header_len2)) => {
-                        if header_len != header_len2 {
-                            unreachable!();
-                        }
-
-                        Ok(header)
-                    }
-                    Err(Error::Incomplete(_)) => unreachable!(),
-                    Err(e) => Err(e.recast()),
+            match FrameHeader::deserialize(&header_buf[..read_end]) {
+                Ok((header, _)) => return Ok(header),
+                Err(Error::Incomplete(more)) => {
+                    read_offset = read_end;
+                    read_end += more;
                 }
+                Err(e) => return Err(e.recast()),
             }
-            Err(e) => Err(e.recast()),
         }
     }
 
