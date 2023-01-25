@@ -12,13 +12,18 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 rust-version = "1.61"
 
-[features]
-default = ["std"]
+[[example]]
+name="captive_portal"
+required-features = ["std"]
 
-std = ["alloc", "embedded-io/std", "embassy-sync/std", "embedded-svc?/std", "async-io", "futures-lite", "httparse/std", "domain?/std"]
+[features]
+default = ["std", "domain"]
+
+std = ["alloc", "embedded-io/std", "embassy-sync/std", "embedded-svc?/std", "async-io", "futures-lite", "httparse/std", "domain/std"]
 alloc = ["embedded-io/alloc", "embedded-svc?/alloc"]
 nightly = ["embedded-io/async", "embassy-sync/nightly", "embedded-svc?/nightly", "embedded-svc?/experimental"]
 embassy-util = [] # Just for backward compat. To be removed in future
+domain = []
 
 [dependencies]
 embedded-io = { version = "0.3", default-features = false }

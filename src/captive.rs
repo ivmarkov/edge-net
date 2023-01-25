@@ -1,7 +1,7 @@
 use core::fmt;
 use core::time::Duration;
 
-use log::info;
+use log::debug;
 
 use domain::{
     base::{
@@ -57,12 +57,12 @@ pub fn process_dns_request(
     let response = Octets512::new();
 
     let message = domain::base::Message::from_octets(request)?;
-    info!("Processing message with header: {:?}", message.header());
+    debug!("Processing message with header: {:?}", message.header());
 
     let mut responseb = domain::base::MessageBuilder::from_target(response)?;
 
     let response = if matches!(message.header().opcode(), Opcode::Query) {
-        info!("Message is of type Query, processing all questions");
+        debug!("Message is of type Query, processing all questions");
 
         let mut answerb = responseb.start_answer(&message, Rcode::NoError)?;
 
@@ -70,7 +70,7 @@ pub fn process_dns_request(
             let question = question?;
 
             if matches!(question.qtype(), Rtype::A) {
-                info!(
+                debug!(
                     "Question {:?} is of type A, answering with IP {:?}, TTL {:?}",
                     question, ip, ttl
                 );
@@ -81,17 +81,16 @@ pub fn process_dns_request(
                     ttl.as_secs() as u32,
                     A::from_octets(ip[0], ip[1], ip[2], ip[3]),
                 );
-                info!("Answering question {:?} with {:?}", question, record);
-
+                debug!("Answering question {:?} with {:?}", question, record);
                 answerb.push(record)?;
             } else {
-                info!("Question {:?} is not of type A, not answering", question);
+                debug!("Question {:?} is not of type A, not answering", question);
             }
         }
 
         answerb.finish()
     } else {
-        info!("Message is not of type Query, replying with NotImp");
+        debug!("Message is not of type Query, replying with NotImp");
 
         let headerb = responseb.header_mut();
 
@@ -102,7 +101,6 @@ pub fn process_dns_request(
 
         responseb.finish()
     };
-
     Ok(response)
 }
 
@@ -173,25 +171,30 @@ mod server {
             if matches!(self.get_status(), Status::Started) {
                 return Ok(());
             }
-
-            let socket =
-                UdpSocket::bind(SocketAddrV4::new(self.conf.bind_ip, self.conf.bind_port))?;
-
-            socket.set_read_timeout(Some(Duration::from_secs(1)))?;
-
+            let socket_address = SocketAddrV4::new(self.conf.bind_ip, self.conf.bind_port);
             let running = self.running.clone();
             let ip = self.conf.ip;
             let ttl = self.conf.ttl;
 
             self.running.store(true, Ordering::Relaxed);
+            self.handle = Some(
+                thread::Builder::new()
+                    // default stack size is not enough
+                    // 9000 was found via trial and error
+                    .stack_size(9000)
+                    .spawn(move || {
+                        // Socket is not movable across thread bounds
+                        // Otherwise we run into an assertion error here: https://github.com/espressif/esp-idf/blob/master/components/lwip/port/esp32/freertos/sys_arch.c#L103
+                        let socket = UdpSocket::bind(socket_address)?;
+                        socket.set_read_timeout(Some(Duration::from_secs(1)))?;
+                        let result = Self::run(&running, ip, ttl, socket);
 
-            self.handle = Some(thread::spawn(move || {
-                let result = Self::run(&running, ip, ttl, socket);
+                        running.store(false, Ordering::Relaxed);
 
-                running.store(false, Ordering::Relaxed);
-
-                result
-            }));
+                        result
+                    })
+                    .unwrap(),
+            );
 
             Ok(())
         }
@@ -229,10 +232,8 @@ mod server {
             socket: UdpSocket,
         ) -> Result<(), io::Error> {
             while running.load(Ordering::Relaxed) {
-                info!("Waiting for data");
-
                 let mut request_arr = [0_u8; 512];
-
+                debug!("Waiting for data");
                 let (request_len, source_addr) = match socket.recv_from(&mut request_arr) {
                     Ok(value) => value,
                     Err(err) => match err.kind() {
@@ -243,14 +244,13 @@ mod server {
 
                 let request = &request_arr[..request_len];
 
-                info!("Received {} bytes from {}", request.len(), source_addr);
-
+                debug!("Received {} bytes from {}", request.len(), source_addr);
                 let response = super::process_dns_request(request, &ip.octets(), ttl)
                     .map_err(|_| io::ErrorKind::Other)?;
 
                 socket.send_to(response.as_ref(), source_addr)?;
 
-                info!("Sent {} bytes to {}", response.as_ref().len(), source_addr);
+                debug!("Sent {} bytes to {}", response.as_ref().len(), source_addr);
             }
 
             Ok(())
