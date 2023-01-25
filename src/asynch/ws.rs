@@ -39,7 +39,7 @@ pub enum Error<E> {
     Invalid,
     BufferOverflow,
     InvalidLen,
-    Other(E),
+    Io(E),
 }
 
 impl Error<()> {
@@ -49,7 +49,7 @@ impl Error<()> {
             Self::Invalid => Error::Invalid,
             Self::BufferOverflow => Error::BufferOverflow,
             Self::InvalidLen => Error::InvalidLen,
-            Self::Other(_) => panic!(),
+            Self::Io(_) => panic!(),
         }
     }
 }
@@ -58,7 +58,7 @@ impl<E> From<ReadExactError<E>> for Error<E> {
     fn from(e: ReadExactError<E>) -> Self {
         match e {
             ReadExactError::UnexpectedEof => Error::Invalid,
-            ReadExactError::Other(e) => Error::Other(e),
+            ReadExactError::Other(e) => Error::Io(e),
         }
     }
 }
@@ -127,7 +127,6 @@ impl FrameHeader {
                 }
             }
 
-            let masked = buf[1] & 0x80 != 0;
             let mask_key = if masked {
                 let mask_key = Some(u32::from_be_bytes([
                     buf[payload_offset],
@@ -292,7 +291,7 @@ impl FrameHeader {
         write
             .write_all(&header_buf[..header_len])
             .await
-            .map_err(Error::Other)
+            .map_err(Error::Io)
     }
 
     pub async fn recv_payload<'a, R>(
@@ -333,7 +332,7 @@ impl FrameHeader {
         } else if payload.is_empty() {
             Ok(())
         } else if self.mask_key.is_none() {
-            write.write_all(payload).await.map_err(Error::Other)
+            write.write_all(payload).await.map_err(Error::Io)
         } else {
             let mut buf = [0_u8; 64];
 
@@ -346,7 +345,7 @@ impl FrameHeader {
 
                 self.mask(&mut buf, offset);
 
-                write.write_all(&buf).await.map_err(Error::Other)?;
+                write.write_all(&buf).await.map_err(Error::Io)?;
 
                 offset += len;
             }
