@@ -12,6 +12,10 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 rust-version = "1.61"
 
+[[example]]
+name="captive_portal"
+required-features = ["std", "domain"]
+
 [features]
 default = ["std"]
 
