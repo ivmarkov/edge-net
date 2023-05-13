@@ -21,24 +21,24 @@ default = ["std"]
 
 std = ["alloc", "embedded-io/std", "embassy-sync/std", "embedded-svc?/std", "async-io", "futures-lite", "httparse/std", "domain?/std"]
 alloc = ["embedded-io/alloc", "embedded-svc?/alloc"]
-nightly = ["embedded-io/async", "embassy-sync/nightly", "embedded-svc?/nightly", "embedded-svc?/experimental"]
+nightly = ["embedded-io/async", "embassy-sync/nightly", "embedded-svc?/nightly"]
 embassy-util = [] # Just for backward compat. To be removed in future
 
 [dependencies]
-embedded-io = { version = "0.3", default-features = false }
+embedded-io = { version = "0.4", default-features = false }
 heapless = { version = "0.7", default-features = false }
 httparse = { version = "1.7", default-features = false }
 embassy-futures = "0.1"
-embassy-sync = { version = "0.1", default-features = false }
+embassy-sync = { version = "0.2", default-features = false }
 no-std-net = { version = "0.5", default-features = false }
 log = { version = "0.4", default-features = false }
 base64 = { version = "0.13", default-features = false }
 sha1_smol = { version = "1", default-features = false }
-embedded-nal-async = "0.2"
+embedded-nal-async = "0.4"
 domain = { version = "0.7", default-features = false, optional = true }
 futures-lite = { version = "1", default-features = false, optional = true }
 async-io = { version = "1", default-features = false, optional = true }
-embedded-svc = { version = "0.24", default-features = false, optional = true }
+embedded-svc = { version = "0.25", default-features = false, optional = true }
 rumqttc = { version = "0.19", optional = true }
 
 [dev-dependencies]
