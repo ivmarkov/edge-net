@@ -1,5 +1,3 @@
-use core::future::Future;
-
 use std::io;
 use std::net::{self, TcpStream, ToSocketAddrs};
 
@@ -25,17 +23,15 @@ impl StdTcpConnect {
 impl TcpConnect for StdTcpConnect {
     type Error = io::Error;
 
-    type Connection<'m> = StdTcpConnection;
+    type Connection<'m> = StdTcpConnection where Self: 'm;
 
-    type ConnectFuture<'m>
-    = impl Future<Output = Result<StdTcpConnection, Self::Error>> + 'm where Self: 'm;
+    async fn connect<'m>(&'m self, remote: SocketAddr) -> Result<Self::Connection<'m>, Self::Error>
+    where
+        Self: 'm,
+    {
+        let connection = Async::<TcpStream>::connect(to_std_addr(remote)?).await?;
 
-    fn connect(&self, remote: SocketAddr) -> Self::ConnectFuture<'_> {
-        async move {
-            let connection = Async::<TcpStream>::connect(to_std_addr(remote)?).await?;
-
-            Ok(StdTcpConnection(connection))
-        }
+        Ok(StdTcpConnection(connection))
     }
 }
 
@@ -53,11 +49,8 @@ impl TcpListen for StdTcpListen {
     type Acceptor<'m>
     = StdTcpAccept where Self: 'm;
 
-    type ListenFuture<'m>
-    = impl Future<Output = Result<Self::Acceptor<'m>, Self::Error>> + 'm where Self: 'm;
-
-    fn listen(&self, remote: SocketAddr) -> Self::ListenFuture<'_> {
-        async move { Async::<net::TcpListener>::bind(to_std_addr(remote)?).map(StdTcpAccept) }
+    async fn listen(&self, remote: SocketAddr) -> Result<Self::Acceptor<'_>, Self::Error> {
+        Async::<net::TcpListener>::bind(to_std_addr(remote)?).map(StdTcpAccept)
     }
 }
 
@@ -68,15 +61,10 @@ impl TcpAccept for StdTcpAccept {
 
     type Connection<'m> = StdTcpConnection;
 
-    type AcceptFuture<'m>
-    = impl Future<Output = Result<Self::Connection<'m>, Self::Error>> + 'm where Self: 'm;
+    async fn accept(&self) -> Result<Self::Connection<'_>, Self::Error> {
+        let connection = self.0.accept().await.map(|(socket, _)| socket)?;
 
-    fn accept(&self) -> Self::AcceptFuture<'_> {
-        async move {
-            let connection = self.0.accept().await.map(|(socket, _)| socket)?;
-
-            Ok(StdTcpConnection(connection))
-        }
+        Ok(StdTcpConnection(connection))
     }
 }
 
@@ -87,27 +75,18 @@ impl Io for StdTcpConnection {
 }
 
 impl Read for StdTcpConnection {
-    type ReadFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
-
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-        async move { self.0.read(buf).await }
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        self.0.read(buf).await
     }
 }
 
 impl Write for StdTcpConnection {
-    type WriteFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
-
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-        async move { self.0.write(buf).await }
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.0.write(buf).await
     }
 
-    type FlushFuture<'a>
-    = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
-
-    fn flush(&mut self) -> Self::FlushFuture<'_> {
-        async move { self.0.flush().await }
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.0.flush().await
     }
 }
 
@@ -118,10 +97,8 @@ impl TcpSplittableConnection for StdTcpConnection {
 
     type Write<'a> = StdTcpConnectionRef<'a> where Self: 'a;
 
-    type SplitFuture<'a> = impl Future<Output = Result<(Self::Read<'a>, Self::Write<'a>), io::Error>> where Self: 'a;
-
-    fn split(&mut self) -> Self::SplitFuture<'_> {
-        async move { Ok((StdTcpConnectionRef(&self.0), StdTcpConnectionRef(&self.0))) }
+    async fn split(&mut self) -> Result<(Self::Read<'_>, Self::Write<'_>), io::Error> {
+        Ok((StdTcpConnectionRef(&self.0), StdTcpConnectionRef(&self.0)))
     }
 }
 
@@ -132,27 +109,18 @@ impl<'r> Io for StdTcpConnectionRef<'r> {
 }
 
 impl<'r> Read for StdTcpConnectionRef<'r> {
-    type ReadFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
-
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-        async move { self.0.read(buf).await }
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        self.0.read(buf).await
     }
 }
 
 impl<'r> Write for StdTcpConnectionRef<'r> {
-    type WriteFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
-
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-        async move { self.0.write(buf).await }
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.0.write(buf).await
     }
 
-    type FlushFuture<'a>
-    = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
-
-    fn flush(&mut self) -> Self::FlushFuture<'_> {
-        async move { self.0.flush().await }
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.0.flush().await
     }
 }
 
@@ -170,50 +138,42 @@ where
 {
     type Error = io::Error;
 
-    type GetHostByNameFuture<'m> = impl Future<Output = Result<IpAddr, Self::Error>> + 'm
-	where Self: 'm;
-
-    fn get_host_by_name<'m>(
-        &'m self,
-        host: &'m str,
+    async fn get_host_by_name(
+        &self,
+        host: &str,
         addr_type: AddrType,
-    ) -> Self::GetHostByNameFuture<'m> {
+    ) -> Result<IpAddr, Self::Error> {
         let host = host.to_string();
 
-        async move {
-            self.0
-                .unblock(move || dns_lookup_host(&host, addr_type))
-                .await
-        }
+        self.0
+            .unblock(move || dns_lookup_host(&host, addr_type))
+            .await
     }
 
-    type GetHostByAddressFuture<'m> = impl Future<Output = Result<heapless::String<256>, Self::Error>> + 'm
-	where Self: 'm;
-
-    fn get_host_by_address(&self, _addr: IpAddr) -> Self::GetHostByAddressFuture<'_> {
-        async move { Err(io::ErrorKind::Unsupported.into()) }
+    async fn get_host_by_address(
+        &self,
+        _addr: IpAddr,
+    ) -> Result<heapless::String<256>, Self::Error> {
+        Err(io::ErrorKind::Unsupported.into())
     }
 }
 
 impl Dns for StdDns<()> {
     type Error = io::Error;
 
-    type GetHostByNameFuture<'m> = impl Future<Output = Result<IpAddr, Self::Error>> + 'm
-	where Self: 'm;
-
-    fn get_host_by_name<'m>(
-        &'m self,
-        host: &'m str,
+    async fn get_host_by_name(
+        &self,
+        host: &str,
         addr_type: AddrType,
-    ) -> Self::GetHostByNameFuture<'m> {
-        async move { dns_lookup_host(host, addr_type) }
+    ) -> Result<IpAddr, Self::Error> {
+        dns_lookup_host(host, addr_type)
     }
 
-    type GetHostByAddressFuture<'m> = impl Future<Output = Result<heapless::String<256>, Self::Error>> + 'm
-	where Self: 'm;
-
-    fn get_host_by_address(&self, _addr: IpAddr) -> Self::GetHostByAddressFuture<'_> {
-        async move { Err(io::ErrorKind::Unsupported.into()) }
+    async fn get_host_by_address(
+        &self,
+        _addr: IpAddr,
+    ) -> Result<heapless::String<256>, Self::Error> {
+        Err(io::ErrorKind::Unsupported.into())
     }
 }
 

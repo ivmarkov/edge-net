@@ -1,5 +1,3 @@
-use core::future::Future;
-
 use no_std_net::SocketAddr;
 
 pub trait TcpSplittableConnection {
@@ -12,11 +10,7 @@ pub trait TcpSplittableConnection {
     where
         Self: 'a;
 
-    type SplitFuture<'a>: Future<Output = Result<(Self::Read<'a>, Self::Write<'a>), Self::Error>>
-    where
-        Self: 'a;
-
-    fn split(&mut self) -> Self::SplitFuture<'_>;
+    async fn split(&mut self) -> Result<(Self::Read<'_>, Self::Write<'_>), Self::Error>;
 }
 
 impl<'t, T> TcpSplittableConnection for &'t mut T
@@ -29,11 +23,8 @@ where
 
     type Write<'a> = T::Write<'a> where Self: 'a;
 
-    type SplitFuture<'a> = impl Future<Output = Result<(Self::Read<'a>, Self::Write<'a>), Self::Error>>
-    where Self: 'a;
-
-    fn split(&mut self) -> Self::SplitFuture<'_> {
-        async move { (**self).split().await }
+    async fn split(&mut self) -> Result<(Self::Read<'_>, Self::Write<'_>), Self::Error> {
+        (**self).split().await
     }
 }
 
@@ -44,11 +35,7 @@ pub trait TcpListen {
     where
         Self: 'm;
 
-    type ListenFuture<'m>: Future<Output = Result<Self::Acceptor<'m>, Self::Error>> + 'm
-    where
-        Self: 'm;
-
-    fn listen(&self, remote: SocketAddr) -> Self::ListenFuture<'_>;
+    async fn listen(&self, remote: SocketAddr) -> Result<Self::Acceptor<'_>, Self::Error>;
 }
 
 impl<T> TcpListen for &T
@@ -60,11 +47,8 @@ where
     type Acceptor<'m> = T::Acceptor<'m>
     where Self: 'm;
 
-    type ListenFuture<'m> = T::ListenFuture<'m>
-    where Self: 'm;
-
-    fn listen(&self, remote: SocketAddr) -> Self::ListenFuture<'_> {
-        (*self).listen(remote)
+    async fn listen(&self, remote: SocketAddr) -> Result<Self::Acceptor<'_>, Self::Error> {
+        (*self).listen(remote).await
     }
 }
 
@@ -77,11 +61,8 @@ where
     type Acceptor<'m> = T::Acceptor<'m>
     where Self: 'm;
 
-    type ListenFuture<'m> = T::ListenFuture<'m>
-    where Self: 'm;
-
-    fn listen(&self, remote: SocketAddr) -> Self::ListenFuture<'_> {
-        (**self).listen(remote)
+    async fn listen(&self, remote: SocketAddr) -> Result<Self::Acceptor<'_>, Self::Error> {
+        (**self).listen(remote).await
     }
 }
 
@@ -93,11 +74,7 @@ pub trait TcpAccept {
     where
         Self: 'm;
 
-    type AcceptFuture<'m>: Future<Output = Result<Self::Connection<'m>, Self::Error>> + 'm
-    where
-        Self: 'm;
-
-    fn accept(&self) -> Self::AcceptFuture<'_>;
+    async fn accept(&self) -> Result<Self::Connection<'_>, Self::Error>;
 }
 
 impl<T> TcpAccept for &T
@@ -109,11 +86,8 @@ where
     type Connection<'m> = T::Connection<'m>
     where Self: 'm;
 
-    type AcceptFuture<'m> = T::AcceptFuture<'m>
-    where Self: 'm;
-
-    fn accept(&self) -> Self::AcceptFuture<'_> {
-        (**self).accept()
+    async fn accept(&self) -> Result<Self::Connection<'_>, Self::Error> {
+        (**self).accept().await
     }
 }
 
@@ -126,10 +100,7 @@ where
     type Connection<'m> = T::Connection<'m>
     where Self: 'm;
 
-    type AcceptFuture<'m> = T::AcceptFuture<'m>
-    where Self: 'm;
-
-    fn accept(&self) -> Self::AcceptFuture<'_> {
-        (**self).accept()
+    async fn accept(&self) -> Result<Self::Connection<'_>, Self::Error> {
+        (**self).accept().await
     }
 }

@@ -17,7 +17,7 @@ name="captive_portal"
 required-features = ["std", "domain"]
 
 [features]
-default = ["std"]
+default = ["std", "nightly", "embassy-util"]
 
 std = ["alloc", "embedded-io/std", "embassy-sync/std", "embedded-svc?/std", "async-io", "futures-lite", "httparse/std", "domain?/std"]
 alloc = ["embedded-io/alloc", "embedded-svc?/alloc"]
@@ -30,7 +30,7 @@ heapless = { version = "0.7", default-features = false }
 httparse = { version = "1.7", default-features = false }
 embassy-futures = "0.1"
 embassy-sync = { version = "0.2", default-features = false }
-no-std-net = { version = "0.5", default-features = false }
+no-std-net = { version = "0.6", default-features = false }
 log = { version = "0.4", default-features = false }
 base64 = { version = "0.13", default-features = false }
 sha1_smol = { version = "1", default-features = false }

@@ -1,4 +1,3 @@
-use core::future::Future;
 use core::{mem, str};
 
 use embedded_io::asynch::{Read, Write};
@@ -93,7 +92,7 @@ where
     ) -> Result<(), Error<T::Error>> {
         let _ = self.complete().await;
 
-        let mut state = self.unbound_mut()?;
+        let state = self.unbound_mut()?;
 
         let fresh_connection = if state.io.is_none() {
             state.io = Some(state.socket.connect(state.addr).await.map_err(Error::Io)?);
@@ -313,11 +312,8 @@ impl<'b, const N: usize, T> Read for ClientConnection<'b, N, T>
 where
     T: TcpConnect + 'b,
 {
-    type ReadFuture<'a> = impl Future<Output = Result<usize, Self::Error>> + 'a
-    where Self: 'a;
-
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-        async move { self.response_mut()?.io.read(buf).await }
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        self.response_mut()?.io.read(buf).await
     }
 }
 
@@ -325,18 +321,12 @@ impl<'b, const N: usize, T> Write for ClientConnection<'b, N, T>
 where
     T: TcpConnect + 'b,
 {
-    type WriteFuture<'a> = impl Future<Output = Result<usize, Self::Error>> + 'a
-    where Self: 'a;
-
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-        async move { self.request_mut()?.io.write(buf).await }
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.request_mut()?.io.write(buf).await
     }
 
-    type FlushFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a
-    where Self: 'a;
-
-    fn flush(&mut self) -> Self::FlushFuture<'_> {
-        async move { self.request_mut()?.io.flush().await }
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.request_mut()?.io.flush().await
     }
 }
 

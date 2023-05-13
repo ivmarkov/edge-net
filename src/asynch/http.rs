@@ -1,6 +1,5 @@
 use core::cmp::min;
 use core::fmt::{Display, Write as _};
-use core::future::Future;
 use core::str;
 
 use embedded_io::asynch::{Read, Write};
@@ -638,16 +637,11 @@ impl<'b, R> Read for Body<'b, R>
 where
     R: Read,
 {
-    type ReadFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
-
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-        async move {
-            match self {
-                Self::Close(read) => Ok(read.read(buf).await.map_err(Error::Io)?),
-                Self::ContentLen(read) => Ok(read.read(buf).await?),
-                Self::Chunked(read) => Ok(read.read(buf).await?),
-            }
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        match self {
+            Self::Close(read) => Ok(read.read(buf).await.map_err(Error::Io)?),
+            Self::ContentLen(read) => Ok(read.read(buf).await?),
+            Self::Chunked(read) => Ok(read.read(buf).await?),
         }
     }
 }
@@ -691,21 +685,16 @@ impl<'b, R> Read for PartiallyRead<'b, R>
 where
     R: Read,
 {
-    type ReadFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        if self.buf.len() > self.read_len {
+            let len = min(buf.len(), self.buf.len() - self.read_len);
+            buf[..len].copy_from_slice(&self.buf[self.read_len..self.read_len + len]);
 
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-        async move {
-            if self.buf.len() > self.read_len {
-                let len = min(buf.len(), self.buf.len() - self.read_len);
-                buf[..len].copy_from_slice(&self.buf[self.read_len..self.read_len + len]);
+            self.read_len += len;
 
-                self.read_len += len;
-
-                Ok(len)
-            } else {
-                Ok(self.input.read(buf).await?)
-            }
+            Ok(len)
+        } else {
+            Ok(self.input.read(buf).await?)
         }
     }
 }
@@ -745,24 +734,19 @@ impl<R> Read for ContentLenRead<R>
 where
     R: Read,
 {
-    type ReadFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        let len = min(buf.len() as _, self.content_len - self.read_len);
+        if len > 0 {
+            let read = self
+                .input
+                .read(&mut buf[..len as _])
+                .await
+                .map_err(Error::Io)?;
+            self.read_len += read as u64;
 
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-        async move {
-            let len = min(buf.len() as _, self.content_len - self.read_len);
-            if len > 0 {
-                let read = self
-                    .input
-                    .read(&mut buf[..len as _])
-                    .await
-                    .map_err(Error::Io)?;
-                self.read_len += read as u64;
-
-                Ok(read)
-            } else {
-                Ok(0)
-            }
+            Ok(read)
+        } else {
+            Ok(0)
         }
     }
 }
@@ -980,21 +964,16 @@ impl<'b, R> Read for ChunkedRead<'b, R>
 where
     R: Read,
 {
-    type ReadFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
-
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-        async move {
-            for (index, byte_pos) in buf.iter_mut().enumerate() {
-                if let Some(byte) = self.next().await? {
-                    *byte_pos = byte;
-                } else {
-                    return Ok(index);
-                }
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        for (index, byte_pos) in buf.iter_mut().enumerate() {
+            if let Some(byte) = self.next().await? {
+                *byte_pos = byte;
+            } else {
+                return Ok(index);
             }
-
-            Ok(buf.len())
         }
+
+        Ok(buf.len())
     }
 }
 
@@ -1069,29 +1048,19 @@ impl<W> Write for SendBody<W>
 where
     W: Write,
 {
-    type WriteFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
-
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-        async move {
-            match self {
-                Self::Close(w) => Ok(w.write(buf).await.map_err(Error::Io)?),
-                Self::ContentLen(w) => Ok(w.write(buf).await?),
-                Self::Chunked(w) => Ok(w.write(buf).await?),
-            }
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        match self {
+            Self::Close(w) => Ok(w.write(buf).await.map_err(Error::Io)?),
+            Self::ContentLen(w) => Ok(w.write(buf).await?),
+            Self::Chunked(w) => Ok(w.write(buf).await?),
         }
     }
 
-    type FlushFuture<'a>
-    = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
-
-    fn flush(&mut self) -> Self::FlushFuture<'_> {
-        async move {
-            match self {
-                Self::Close(w) => Ok(w.flush().await.map_err(Error::Io)?),
-                Self::ContentLen(w) => Ok(w.flush().await?),
-                Self::Chunked(w) => Ok(w.flush().await?),
-            }
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        match self {
+            Self::Close(w) => Ok(w.flush().await.map_err(Error::Io)?),
+            Self::ContentLen(w) => Ok(w.flush().await?),
+            Self::Chunked(w) => Ok(w.flush().await?),
         }
     }
 }
@@ -1131,27 +1100,19 @@ impl<W> Write for ContentLenWrite<W>
 where
     W: Write,
 {
-    type WriteFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        if self.content_len >= self.write_len + buf.len() as u64 {
+            let write = self.output.write(buf).await.map_err(Error::Io)?;
+            self.write_len += write as u64;
 
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-        async move {
-            if self.content_len >= self.write_len + buf.len() as u64 {
-                let write = self.output.write(buf).await.map_err(Error::Io)?;
-                self.write_len += write as u64;
-
-                Ok(write)
-            } else {
-                Err(Error::TooLongBody)
-            }
+            Ok(write)
+        } else {
+            Err(Error::TooLongBody)
         }
     }
 
-    type FlushFuture<'a>
-    = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
-
-    fn flush(&mut self) -> Self::FlushFuture<'_> {
-        async move { self.output.flush().await.map_err(Error::Io) }
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.output.flush().await.map_err(Error::Io)
     }
 }
 
@@ -1187,37 +1148,29 @@ impl<W> Write for ChunkedWrite<W>
 where
     W: Write,
 {
-    type WriteFuture<'a>
-    = impl Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        if !buf.is_empty() {
+            let mut len_str = heapless::String::<10>::new();
+            write!(&mut len_str, "{:X}\r\n", buf.len()).unwrap();
+            self.output
+                .write_all(len_str.as_bytes())
+                .await
+                .map_err(Error::Io)?;
 
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-        async move {
-            if !buf.is_empty() {
-                let mut len_str = heapless::String::<10>::new();
-                write!(&mut len_str, "{:X}\r\n", buf.len()).unwrap();
-                self.output
-                    .write_all(len_str.as_bytes())
-                    .await
-                    .map_err(Error::Io)?;
+            self.output.write_all(buf).await.map_err(Error::Io)?;
+            self.output
+                .write_all("\r\n".as_bytes())
+                .await
+                .map_err(Error::Io)?;
 
-                self.output.write_all(buf).await.map_err(Error::Io)?;
-                self.output
-                    .write_all("\r\n".as_bytes())
-                    .await
-                    .map_err(Error::Io)?;
-
-                Ok(buf.len())
-            } else {
-                Ok(0)
-            }
+            Ok(buf.len())
+        } else {
+            Ok(0)
         }
     }
 
-    type FlushFuture<'a>
-    = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
-
-    fn flush(&mut self) -> Self::FlushFuture<'_> {
-        async move { self.output.flush().await.map_err(Error::Io) }
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.output.flush().await.map_err(Error::Io)
     }
 }
 
