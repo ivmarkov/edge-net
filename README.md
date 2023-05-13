@@ -8,4 +8,12 @@ This crate ships async + `no_std` + no-alloc implementations of various network 
 
 Suitable for MCU development, bare-metal in particular.
 
-NOTE: WIP, not working yet!
+Working:
+* WS client
+* Captive Portal
+
+Needs bugfixing:
+* HTTP / WS server
+* HTTP client
+
+PRs welcome!
