@@ -12,10 +12,6 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 rust-version = "1.67"
 
-[[example]]
-name="captive_portal"
-required-features = ["std", "domain"]
-
 [features]
 default = ["std"]
 
@@ -45,3 +41,19 @@ rumqttc = { version = "0.19", optional = true }
 anyhow = "1"
 smol = "1"
 simple_logger="2.2"
+
+[[example]]
+name = "captive_portal"
+required-features = ["std", "domain"]
+
+[[example]]
+name = "simple"
+required-features = ["std", "nightly"]
+
+[[example]]
+name = "http_client"
+required-features = ["std", "nightly"]
+
+[[example]]
+name = "http_server"
+required-features = ["std", "nightly"]
