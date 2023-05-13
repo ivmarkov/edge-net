@@ -439,6 +439,7 @@ mod embedded_svc_compat {
     use embedded_io::asynch::{Read, Write};
 
     use embedded_svc::http::server::asynch::{Connection, Headers, Query};
+    use embedded_svc::io::EmbIo;
     use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
     use crate::asynch::http::Method;
@@ -477,9 +478,46 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize, T> Connection for ServerConnection<'b, N, T>
+    impl<'b, const N: usize, T> embedded_svc::io::asynch::Read for ServerConnection<'b, N, T>
     where
         T: Read + Write,
+    {
+        type ReadFuture<'a>
+        = impl Future<Output = Result<usize, Self::Error>> + 'a
+        where
+            Self: 'a;
+
+        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+            async move { Read::read(self, buf).await }
+        }
+    }
+
+    impl<'b, const N: usize, T> embedded_svc::io::asynch::Write for ServerConnection<'b, N, T>
+    where
+        T: Read + Write,
+    {
+        type WriteFuture<'a>
+        = impl Future<Output = Result<usize, Self::Error>> + 'a
+        where
+            Self: 'a;
+
+        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+            async move { Write::write(self, buf).await }
+        }
+
+        type FlushFuture<'a>
+        = impl Future<Output = Result<(), Self::Error>> + 'a
+        where
+            Self: 'a;
+
+        fn flush(&mut self) -> Self::FlushFuture<'_> {
+            async move { Write::flush(self).await }
+        }
+    }
+
+    impl<'b, const N: usize, T> Connection for ServerConnection<'b, N, T>
+    where
+        T: Read + Write + 'b,
     {
         type Headers = RequestHeaders<'b, N>;
 
@@ -487,7 +525,7 @@ mod embedded_svc_compat {
 
         type RawConnectionError = T::Error;
 
-        type RawConnection = T;
+        type RawConnection = EmbIo<T>;
 
         type IntoResponseFuture<'a>
         = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
@@ -514,11 +552,11 @@ mod embedded_svc_compat {
         }
 
         fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {
-            ServerConnection::raw_connection(self)
+            //ServerConnection::raw_connection(self).map(EmbIo)
+            todo!()
         }
     }
 
-    #[cfg(version("1.67"))]
     impl<'b, const N: usize, T> Handler<'b, N, T> for ChainRoot
     where
         T: Read + Write,
@@ -535,12 +573,11 @@ mod embedded_svc_compat {
         }
     }
 
-    #[cfg(version("1.67"))]
     impl<'b, const N: usize, T, H, Q> Handler<'b, N, T> for ChainHandler<H, Q>
     where
         H: embedded_svc::http::server::asynch::Handler<ServerConnection<'b, N, T>>,
         Q: Handler<'b, N, T>,
-        T: Read + Write,
+        T: Read + Write + 'b,
     {
         async fn handle<'a>(
             &'a self,
@@ -555,61 +592,6 @@ mod embedded_svc_compat {
                     .map_err(|e| HandlerError(e.release()))
             } else {
                 self.next.handle(path, method, connection).await
-            }
-        }
-    }
-
-    // Does not typecheck with latest nightly
-    // See https://github.com/rust-lang/rust/issues/104691
-    #[cfg(not(version("1.67")))]
-    impl<'b, const N: usize, T> Handler<'b, N, T> for ChainRoot
-    where
-        T: Read + Write,
-    {
-        type HandleFuture<'a>
-        = impl Future<Output = Result<(), HandlerError>> + 'a where Self: 'a, 'b: 'a, T: 'a;
-
-        fn handle<'a>(
-            &'a self,
-            _path: &'a str,
-            _method: Method,
-            connection: &'a mut ServerConnection<'b, N, T>,
-        ) -> Self::HandleFuture<'a> {
-            async move {
-                connection.initiate_response(404, None, &[]).await?;
-
-                Ok(())
-            }
-        }
-    }
-
-    // Does not typecheck with latest nightly
-    // See https://github.com/rust-lang/rust/issues/104691
-    #[cfg(not(version("1.67")))]
-    impl<'b, const N: usize, T, H, Q> Handler<'b, N, T> for ChainHandler<H, Q>
-    where
-        H: embedded_svc::http::server::asynch::Handler<ServerConnection<'b, N, T>>,
-        Q: Handler<'b, N, T>,
-        T: Read + Write,
-    {
-        type HandleFuture<'a>
-        = impl Future<Output = Result<(), HandlerError>> + 'a where Self: 'a, 'b: 'a, T: 'a;
-
-        fn handle<'a>(
-            &'a self,
-            path: &'a str,
-            method: Method,
-            connection: &'a mut ServerConnection<'b, N, T>,
-        ) -> Self::HandleFuture<'a> {
-            async move {
-                if self.path == path && self.method == method.into() {
-                    self.handler
-                        .handle(connection)
-                        .await
-                        .map_err(|e| HandlerError(e.release()))
-                } else {
-                    self.next.handle(path, method, connection).await
-                }
             }
         }
     }

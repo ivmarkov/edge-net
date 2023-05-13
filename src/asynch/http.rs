@@ -1434,9 +1434,27 @@ where
 
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
+    use core::future::Future;
     use core::str;
 
+    use embedded_io::asynch::Read;
     use embedded_svc::http::client::asynch::Method;
+
+    use super::Body;
+
+    impl<'b, T> embedded_svc::io::asynch::Read for Body<'b, T>
+    where
+        T: Read + 'b,
+    {
+        type ReadFuture<'a>
+        = impl Future<Output = Result<usize, Self::Error>> + 'a
+        where
+            Self: 'a;
+
+        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+            async move { Read::read(self, buf).await }
+        }
+    }
 
     impl From<Method> for super::Method {
         fn from(method: Method) -> Self {

@@ -366,8 +366,12 @@ where
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
     use super::*;
+    use core::future::Future;
 
-    use embedded_svc::http::client::asynch::{Connection, Headers, Method, Status};
+    use embedded_svc::{
+        http::client::asynch::{Connection, Headers, Method, Status},
+        io::EmbIo,
+    };
 
     impl<'b, const N: usize, T> Headers for ClientConnection<'b, N, T>
     where
@@ -397,6 +401,43 @@ mod embedded_svc_compat {
         }
     }
 
+    impl<'b, const N: usize, T> embedded_svc::io::asynch::Read for ClientConnection<'b, N, T>
+    where
+        T: TcpConnect + 'b,
+    {
+        type ReadFuture<'a>
+        = impl Future<Output = Result<usize, Self::Error>> + 'a
+        where
+            Self: 'a;
+
+        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+            async move { Read::read(self, buf).await }
+        }
+    }
+
+    impl<'b, const N: usize, T> embedded_svc::io::asynch::Write for ClientConnection<'b, N, T>
+    where
+        T: TcpConnect + 'b,
+    {
+        type WriteFuture<'a>
+        = impl Future<Output = Result<usize, Self::Error>> + 'a
+        where
+            Self: 'a;
+
+        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+            async move { Write::write(self, buf).await }
+        }
+
+        type FlushFuture<'a>
+        = impl Future<Output = Result<(), Self::Error>> + 'a
+        where
+            Self: 'a;
+
+        fn flush(&mut self) -> Self::FlushFuture<'_> {
+            async move { Write::flush(self).await }
+        }
+    }
+
     impl<'b, const N: usize, T> Connection for ClientConnection<'b, N, T>
     where
         T: TcpConnect + 'b,
@@ -407,7 +448,7 @@ mod embedded_svc_compat {
 
         type RawConnectionError = T::Error;
 
-        type RawConnection = T::Connection<'b>;
+        type RawConnection = EmbIo<T::Connection<'b>>;
 
         type IntoRequestFuture<'a>
         = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
@@ -441,7 +482,8 @@ mod embedded_svc_compat {
         }
 
         fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {
-            ClientConnection::raw_connection(self)
+            //ClientConnection::raw_connection(self).map(EmbIo)
+            todo!()
         }
     }
 }
