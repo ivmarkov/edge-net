@@ -10,6 +10,7 @@ Suitable for MCU development, bare-metal in particular.
 
 Working:
 * WS client
+* MQTT client (just a slim wrapper around `rumqttc`, so currently needs STD)
 * Captive Portal
 
 Needs bugfixing:
