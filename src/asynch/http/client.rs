@@ -482,8 +482,10 @@ mod embedded_svc_compat {
         }
 
         fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {
+            // TODO: Needs a GAT rather than `&mut` return type
+            // or `embedded-svc` fully upgraded to async traits & `embedded-io` 0.4 to re-enable
             //ClientConnection::raw_connection(self).map(EmbIo)
-            todo!()
+            panic!("Not supported")
         }
     }
 }
