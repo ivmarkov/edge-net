@@ -16,5 +16,7 @@
 pub mod asynch;
 #[cfg(feature = "domain")]
 pub mod captive;
+#[cfg(feature = "domain")]
+pub mod mdns;
 #[cfg(feature = "std")]
 pub mod std_mutex;
