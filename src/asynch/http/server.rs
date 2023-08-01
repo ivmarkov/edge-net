@@ -67,6 +67,7 @@ impl<'b, const N: usize, T> ServerConnection<'b, N, T>
 where
     T: Read + Write,
 {
+    #[allow(clippy::needless_pass_by_ref_mut)]
     pub async fn new(
         buf: &'b mut [u8],
         mut io: T,

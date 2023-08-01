@@ -531,7 +531,7 @@ pub mod http {
         }
 
         pub fn is_ws_upgrade_accepted<'a, const N: usize, T>(
-            connection: &'a mut ClientConnection<'_, N, T>,
+            connection: &'a ClientConnection<'_, N, T>,
             _nonce: &'a [u8; NONCE_LEN],
         ) -> Result<bool, Error<T::Error>>
         where
