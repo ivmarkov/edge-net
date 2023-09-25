@@ -3,10 +3,10 @@ use no_std_net::SocketAddr;
 pub trait TcpSplittableConnection {
     type Error: embedded_io::Error;
 
-    type Read<'a>: embedded_io::asynch::Read<Error = Self::Error>
+    type Read<'a>: embedded_io_async::Read<Error = Self::Error>
     where
         Self: 'a;
-    type Write<'a>: embedded_io::asynch::Write<Error = Self::Error>
+    type Write<'a>: embedded_io_async::Write<Error = Self::Error>
     where
         Self: 'a;
 
@@ -69,8 +69,8 @@ where
 pub trait TcpAccept {
     type Error: embedded_io::Error;
 
-    type Connection<'m>: embedded_io::asynch::Read<Error = Self::Error>
-        + embedded_io::asynch::Write<Error = Self::Error>
+    type Connection<'m>: embedded_io_async::Read<Error = Self::Error>
+        + embedded_io_async::Write<Error = Self::Error>
     where
         Self: 'm;
 

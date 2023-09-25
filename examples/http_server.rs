@@ -1,8 +1,5 @@
 #![feature(cfg_version)]
-#![cfg_attr(not(version("1.65")), feature(generic_associated_types))]
-#![feature(type_alias_impl_trait)]
-#![cfg_attr(version("1.67"), allow(incomplete_features))]
-#![cfg_attr(version("1.67"), feature(async_fn_in_trait))]
+#![feature(async_fn_in_trait)]
 
 use core::future::pending;
 
@@ -18,7 +15,7 @@ use edge_net::asynch::{
 };
 use edge_net::std_mutex::StdRawMutex;
 use embassy_sync::blocking_mutex::raw::RawMutex;
-use embedded_io::asynch::{Read, Write};
+use embedded_io_async::{Read, Write};
 
 fn main() {
     simple_logger::SimpleLogger::new()

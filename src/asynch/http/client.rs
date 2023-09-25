@@ -1,7 +1,7 @@
 use core::{mem, str};
 
-use embedded_io::asynch::{Read, Write};
-use embedded_io::Io;
+use embedded_io::ErrorType;
+use embedded_io_async::{Read, Write};
 use no_std_net::SocketAddr;
 
 use crate::asynch::http::{
@@ -301,7 +301,7 @@ where
     }
 }
 
-impl<'b, const N: usize, T> Io for ClientConnection<'b, N, T>
+impl<'b, const N: usize, T> ErrorType for ClientConnection<'b, N, T>
 where
     T: TcpConnect,
 {

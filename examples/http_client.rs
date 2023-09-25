@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use embedded_io::asynch::Read;
+use embedded_io_async::Read;
 use embedded_nal_async::TcpConnect;
 
 use edge_net::asynch::http::client::ClientConnection;

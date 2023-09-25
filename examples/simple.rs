@@ -1,4 +1,4 @@
-use embedded_io::asynch::{Read, Write};
+use embedded_io_async::{Read, Write};
 use embedded_nal_async::TcpConnect;
 
 use edge_net::asynch::stdnal::StdTcpConnect;

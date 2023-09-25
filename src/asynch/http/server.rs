@@ -2,8 +2,8 @@ use core::fmt::{self, Debug, Display, Write as _};
 use core::future::Future;
 use core::mem;
 
-use embedded_io::asynch::{Read, Write};
-use embedded_io::Io;
+use embedded_io::ErrorType;
+use embedded_io_async::{Read, Write};
 
 use log::{info, warn};
 
@@ -11,6 +11,7 @@ use crate::asynch::http::{
     send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, RequestHeaders,
     SendBody,
 };
+use crate::asynch::io::map_write_err;
 
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
@@ -170,7 +171,10 @@ where
 
             self.complete_request(Some(500), Some("Internal Error"), &headers)
                 .await?;
-            self.response_mut()?.write_all(err_str.as_bytes()).await?;
+            self.response_mut()?
+                .write_all(err_str.as_bytes())
+                .await
+                .map_err(map_write_err)?;
 
             Ok(())
         } else {
@@ -222,9 +226,9 @@ where
     }
 }
 
-impl<'b, const N: usize, T> Io for ServerConnection<'b, N, T>
+impl<'b, const N: usize, T> ErrorType for ServerConnection<'b, N, T>
 where
-    T: Io,
+    T: ErrorType,
 {
     type Error = Error<T::Error>;
 }
@@ -437,7 +441,7 @@ where
 mod embedded_svc_compat {
     use core::future::Future;
 
-    use embedded_io::asynch::{Read, Write};
+    use embedded_io_async::{Read, Write};
 
     use embedded_svc::http::server::asynch::{Connection, Headers, Query};
     use embedded_svc::io::EmbIo;

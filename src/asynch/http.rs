@@ -2,8 +2,8 @@ use core::cmp::min;
 use core::fmt::{Display, Write as _};
 use core::str;
 
-use embedded_io::asynch::{Read, Write};
-use embedded_io::Io;
+use embedded_io::ErrorType;
+use embedded_io_async::{Read, Write};
 
 use httparse::{Header, Status, EMPTY_HEADER};
 
@@ -12,6 +12,7 @@ use log::trace;
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
 
+use super::io::map_write_err;
 use super::ws::http::UpgradeError;
 
 pub mod client;
@@ -294,10 +295,26 @@ where
             body = BodyType::from_header(name, unsafe { str::from_utf8_unchecked(value) });
         }
 
-        output.write_all(name.as_bytes()).await.map_err(Error::Io)?;
-        output.write_all(b": ").await.map_err(Error::Io)?;
-        output.write_all(value).await.map_err(Error::Io)?;
-        output.write_all(b"\r\n").await.map_err(Error::Io)?;
+        output
+            .write_all(name.as_bytes())
+            .await
+            .map_err(map_write_err)
+            .map_err(Error::Io)?;
+        output
+            .write_all(b": ")
+            .await
+            .map_err(map_write_err)
+            .map_err(Error::Io)?;
+        output
+            .write_all(value)
+            .await
+            .map_err(map_write_err)
+            .map_err(Error::Io)?;
+        output
+            .write_all(b"\r\n")
+            .await
+            .map_err(map_write_err)
+            .map_err(Error::Io)?;
     }
 
     Ok(body)
@@ -307,7 +324,11 @@ pub async fn send_headers_end<W>(mut output: W) -> Result<(), Error<W::Error>>
 where
     W: Write,
 {
-    output.write_all(b"\r\n").await.map_err(Error::Io)
+    output
+        .write_all(b"\r\n")
+        .await
+        .map_err(map_write_err)
+        .map_err(Error::Io)
 }
 
 #[derive(Debug)]
@@ -626,9 +647,9 @@ where
     }
 }
 
-impl<'b, R> Io for Body<'b, R>
+impl<'b, R> ErrorType for Body<'b, R>
 where
-    R: Io,
+    R: ErrorType,
 {
     type Error = Error<R::Error>;
 }
@@ -674,9 +695,9 @@ impl<'b, R> PartiallyRead<'b, R> {
     }
 }
 
-impl<'b, R> Io for PartiallyRead<'b, R>
+impl<'b, R> ErrorType for PartiallyRead<'b, R>
 where
-    R: Io,
+    R: ErrorType,
 {
     type Error = R::Error;
 }
@@ -723,9 +744,9 @@ impl<R> ContentLenRead<R> {
     }
 }
 
-impl<R> Io for ContentLenRead<R>
+impl<R> ErrorType for ContentLenRead<R>
 where
-    R: Io,
+    R: ErrorType,
 {
     type Error = Error<R::Error>;
 }
@@ -953,9 +974,9 @@ where
     }
 }
 
-impl<'b, R> Io for ChunkedRead<'b, R>
+impl<'b, R> ErrorType for ChunkedRead<'b, R>
 where
-    R: Io,
+    R: ErrorType,
 {
     type Error = Error<R::Error>;
 }
@@ -1037,9 +1058,9 @@ where
     }
 }
 
-impl<W> Io for SendBody<W>
+impl<W> ErrorType for SendBody<W>
 where
-    W: Io,
+    W: ErrorType,
 {
     type Error = Error<W::Error>;
 }
@@ -1089,9 +1110,9 @@ impl<W> ContentLenWrite<W> {
     }
 }
 
-impl<W> Io for ContentLenWrite<W>
+impl<W> ErrorType for ContentLenWrite<W>
 where
-    W: Io,
+    W: ErrorType,
 {
     type Error = Error<W::Error>;
 }
@@ -1129,7 +1150,11 @@ impl<W> ChunkedWrite<W> {
     where
         W: Write,
     {
-        self.output.write_all(b"\r\n").await.map_err(Error::Io)
+        self.output
+            .write_all(b"\r\n")
+            .await
+            .map_err(map_write_err)
+            .map_err(Error::Io)
     }
 
     pub fn release(self) -> W {
@@ -1137,9 +1162,9 @@ impl<W> ChunkedWrite<W> {
     }
 }
 
-impl<W> Io for ChunkedWrite<W>
+impl<W> ErrorType for ChunkedWrite<W>
 where
-    W: Io,
+    W: ErrorType,
 {
     type Error = Error<W::Error>;
 }
@@ -1155,12 +1180,18 @@ where
             self.output
                 .write_all(len_str.as_bytes())
                 .await
+                .map_err(map_write_err)
                 .map_err(Error::Io)?;
 
-            self.output.write_all(buf).await.map_err(Error::Io)?;
+            self.output
+                .write_all(buf)
+                .await
+                .map_err(map_write_err)
+                .map_err(Error::Io)?;
             self.output
                 .write_all("\r\n".as_bytes())
                 .await
+                .map_err(map_write_err)
                 .map_err(Error::Io)?;
 
             Ok(buf.len())
@@ -1389,18 +1420,27 @@ where
     let mut written = false;
 
     if !request {
-        output.write_all(b"HTTP/1.1").await.map_err(Error::Io)?;
+        output
+            .write_all(b"HTTP/1.1")
+            .await
+            .map_err(map_write_err)
+            .map_err(Error::Io)?;
         written = true;
     }
 
     if let Some(token) = token {
         if written {
-            output.write_all(b" ").await.map_err(Error::Io)?;
+            output
+                .write_all(b" ")
+                .await
+                .map_err(map_write_err)
+                .map_err(Error::Io)?;
         }
 
         output
             .write_all(token.as_bytes())
             .await
+            .map_err(map_write_err)
             .map_err(Error::Io)?;
 
         written = true;
@@ -1408,12 +1448,17 @@ where
 
     if let Some(extra) = extra {
         if written {
-            output.write_all(b" ").await.map_err(Error::Io)?;
+            output
+                .write_all(b" ")
+                .await
+                .map_err(map_write_err)
+                .map_err(Error::Io)?;
         }
 
         output
             .write_all(extra.as_bytes())
             .await
+            .map_err(map_write_err)
             .map_err(Error::Io)?;
 
         written = true;
@@ -1421,13 +1466,25 @@ where
 
     if request {
         if written {
-            output.write_all(b" ").await.map_err(Error::Io)?;
+            output
+                .write_all(b" ")
+                .await
+                .map_err(map_write_err)
+                .map_err(Error::Io)?;
         }
 
-        output.write_all(b"HTTP/1.1").await.map_err(Error::Io)?;
+        output
+            .write_all(b"HTTP/1.1")
+            .await
+            .map_err(map_write_err)
+            .map_err(Error::Io)?;
     }
 
-    output.write_all(b"\r\n").await.map_err(Error::Io)?;
+    output
+        .write_all(b"\r\n")
+        .await
+        .map_err(map_write_err)
+        .map_err(Error::Io)?;
 
     Ok(())
 }
@@ -1437,7 +1494,7 @@ mod embedded_svc_compat {
     use core::future::Future;
     use core::str;
 
-    use embedded_io::asynch::Read;
+    use embedded_io_async::Read;
     use embedded_svc::http::client::asynch::Method;
 
     use super::Body;

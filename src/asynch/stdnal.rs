@@ -4,8 +4,8 @@ use std::net::{self, TcpStream, ToSocketAddrs};
 use async_io::Async;
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 
-use embedded_io::asynch::{Read, Write};
-use embedded_io::Io;
+use embedded_io::ErrorType;
+use embedded_io_async::{Read, Write};
 use no_std_net::SocketAddr;
 
 use embedded_nal_async::{AddrType, Dns, IpAddr, TcpConnect};
@@ -70,7 +70,7 @@ impl TcpAccept for StdTcpAccept {
 
 pub struct StdTcpConnection(Async<TcpStream>);
 
-impl Io for StdTcpConnection {
+impl ErrorType for StdTcpConnection {
     type Error = io::Error;
 }
 
@@ -104,7 +104,7 @@ impl TcpSplittableConnection for StdTcpConnection {
 
 pub struct StdTcpConnectionRef<'r>(&'r Async<TcpStream>);
 
-impl<'r> Io for StdTcpConnectionRef<'r> {
+impl<'r> ErrorType for StdTcpConnectionRef<'r> {
     type Error = io::Error;
 }
 
