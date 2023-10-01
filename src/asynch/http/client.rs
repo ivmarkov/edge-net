@@ -1,7 +1,7 @@
 use core::{mem, str};
 
-use embedded_io::asynch::{Read, Write};
-use embedded_io::Io;
+use embedded_io::ErrorType;
+use embedded_io_async::{Read, Write};
 use no_std_net::SocketAddr;
 
 use crate::asynch::http::{
@@ -301,7 +301,7 @@ where
     }
 }
 
-impl<'b, const N: usize, T> Io for ClientConnection<'b, N, T>
+impl<'b, const N: usize, T> ErrorType for ClientConnection<'b, N, T>
 where
     T: TcpConnect,
 {
@@ -366,12 +366,8 @@ where
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
     use super::*;
-    use core::future::Future;
 
-    use embedded_svc::{
-        http::client::asynch::{Connection, Headers, Method, Status},
-        io::EmbIo,
-    };
+    use embedded_svc::http::client::asynch::{Connection, Headers, Method, Status};
 
     impl<'b, const N: usize, T> Headers for ClientConnection<'b, N, T>
     where
@@ -401,43 +397,6 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize, T> embedded_svc::io::asynch::Read for ClientConnection<'b, N, T>
-    where
-        T: TcpConnect + 'b,
-    {
-        type ReadFuture<'a>
-        = impl Future<Output = Result<usize, Self::Error>> + 'a
-        where
-            Self: 'a;
-
-        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-            async move { Read::read(self, buf).await }
-        }
-    }
-
-    impl<'b, const N: usize, T> embedded_svc::io::asynch::Write for ClientConnection<'b, N, T>
-    where
-        T: TcpConnect + 'b,
-    {
-        type WriteFuture<'a>
-        = impl Future<Output = Result<usize, Self::Error>> + 'a
-        where
-            Self: 'a;
-
-        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-            async move { Write::write(self, buf).await }
-        }
-
-        type FlushFuture<'a>
-        = impl Future<Output = Result<(), Self::Error>> + 'a
-        where
-            Self: 'a;
-
-        fn flush(&mut self) -> Self::FlushFuture<'_> {
-            async move { Write::flush(self).await }
-        }
-    }
-
     impl<'b, const N: usize, T> Connection for ClientConnection<'b, N, T>
     where
         T: TcpConnect + 'b,
@@ -448,29 +407,23 @@ mod embedded_svc_compat {
 
         type RawConnectionError = T::Error;
 
-        type RawConnection = EmbIo<T::Connection<'b>>;
+        type RawConnection = T::Connection<'b>;
 
-        type IntoRequestFuture<'a>
-        = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
-
-        type IntoResponseFuture<'a>
-        = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
-
-        fn initiate_request<'a>(
-            &'a mut self,
+        async fn initiate_request(
+            &mut self,
             method: Method,
-            uri: &'a str,
-            headers: &'a [(&'a str, &'a str)],
-        ) -> Self::IntoRequestFuture<'a> {
-            async move { ClientConnection::initiate_request(self, method.into(), uri, headers).await }
+            uri: &str,
+            headers: &[(&str, &str)],
+        ) -> Result<(), Self::Error> {
+            ClientConnection::initiate_request(self, method.into(), uri, headers).await
         }
 
         fn is_request_initiated(&self) -> bool {
             ClientConnection::is_request_initiated(self)
         }
 
-        fn initiate_response(&mut self) -> Self::IntoResponseFuture<'_> {
-            async move { ClientConnection::initiate_response(self).await }
+        async fn initiate_response(&mut self) -> Result<(), Self::Error> {
+            ClientConnection::initiate_response(self).await
         }
 
         fn is_response_initiated(&self) -> bool {

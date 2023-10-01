@@ -2,8 +2,8 @@ use core::fmt::{self, Debug, Display, Write as _};
 use core::future::Future;
 use core::mem;
 
-use embedded_io::asynch::{Read, Write};
-use embedded_io::Io;
+use embedded_io::ErrorType;
+use embedded_io_async::{Read, Write};
 
 use log::{info, warn};
 
@@ -11,6 +11,7 @@ use crate::asynch::http::{
     send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, RequestHeaders,
     SendBody,
 };
+use crate::asynch::io::map_write_err;
 
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
@@ -170,7 +171,10 @@ where
 
             self.complete_request(Some(500), Some("Internal Error"), &headers)
                 .await?;
-            self.response_mut()?.write_all(err_str.as_bytes()).await?;
+            self.response_mut()?
+                .write_all(err_str.as_bytes())
+                .await
+                .map_err(map_write_err)?;
 
             Ok(())
         } else {
@@ -222,9 +226,9 @@ where
     }
 }
 
-impl<'b, const N: usize, T> Io for ServerConnection<'b, N, T>
+impl<'b, const N: usize, T> ErrorType for ServerConnection<'b, N, T>
 where
-    T: Io,
+    T: ErrorType,
 {
     type Error = Error<T::Error>;
 }
@@ -435,12 +439,9 @@ where
 
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
-    use core::future::Future;
-
-    use embedded_io::asynch::{Read, Write};
+    use embedded_io_async::{Read, Write};
 
     use embedded_svc::http::server::asynch::{Connection, Headers, Query};
-    use embedded_svc::io::EmbIo;
     use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
     use crate::asynch::http::Method;
@@ -479,43 +480,6 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize, T> embedded_svc::io::asynch::Read for ServerConnection<'b, N, T>
-    where
-        T: Read + Write,
-    {
-        type ReadFuture<'a>
-        = impl Future<Output = Result<usize, Self::Error>> + 'a
-        where
-            Self: 'a;
-
-        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-            async move { Read::read(self, buf).await }
-        }
-    }
-
-    impl<'b, const N: usize, T> embedded_svc::io::asynch::Write for ServerConnection<'b, N, T>
-    where
-        T: Read + Write,
-    {
-        type WriteFuture<'a>
-        = impl Future<Output = Result<usize, Self::Error>> + 'a
-        where
-            Self: 'a;
-
-        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-            async move { Write::write(self, buf).await }
-        }
-
-        type FlushFuture<'a>
-        = impl Future<Output = Result<(), Self::Error>> + 'a
-        where
-            Self: 'a;
-
-        fn flush(&mut self) -> Self::FlushFuture<'_> {
-            async move { Write::flush(self).await }
-        }
-    }
-
     impl<'b, const N: usize, T> Connection for ServerConnection<'b, N, T>
     where
         T: Read + Write + 'b,
@@ -526,10 +490,7 @@ mod embedded_svc_compat {
 
         type RawConnectionError = T::Error;
 
-        type RawConnection = EmbIo<T>;
-
-        type IntoResponseFuture<'a>
-        = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
+        type RawConnection = T;
 
         fn split(&mut self) -> (&Self::Headers, &mut Self::Read) {
             ServerConnection::split(self)
@@ -539,13 +500,13 @@ mod embedded_svc_compat {
         //     ServerConnection::headers(self)
         // }
 
-        fn initiate_response<'a>(
-            &'a mut self,
+        async fn initiate_response(
+            &mut self,
             status: u16,
-            message: Option<&'a str>,
-            headers: &'a [(&'a str, &'a str)],
-        ) -> Self::IntoResponseFuture<'a> {
-            async move { ServerConnection::initiate_response(self, status, message, headers).await }
+            message: Option<&str>,
+            headers: &[(&str, &str)],
+        ) -> Result<(), Self::Error> {
+            ServerConnection::initiate_response(self, status, message, headers).await
         }
 
         fn is_response_initiated(&self) -> bool {
