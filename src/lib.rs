@@ -1,4 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![allow(stable_features)]
 #![feature(cfg_version)]
 #![cfg_attr(feature = "nightly", feature(type_alias_impl_trait))]
 #![cfg_attr(
