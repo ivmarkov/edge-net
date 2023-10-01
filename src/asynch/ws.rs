@@ -574,10 +574,9 @@ use super::io::map_write_err;
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
     use core::convert::{TryFrom, TryInto};
-    use core::future::Future;
 
     use embedded_io_async::{Read, Write};
-    use embedded_svc::io::Io;
+    use embedded_svc::io::ErrorType as IoErrorType;
     use embedded_svc::ws::asynch::Sender;
     use embedded_svc::ws::ErrorType;
     use embedded_svc::ws::{asynch::Receiver, FrameType};
@@ -625,7 +624,7 @@ mod embedded_svc_compat {
 
     impl<T, M> ErrorType for WsConnection<T, M>
     where
-        T: Io,
+        T: IoErrorType,
     {
         type Error = Error<T::Error>;
     }
@@ -634,15 +633,13 @@ mod embedded_svc_compat {
     where
         T: Read,
     {
-        type ReceiveFuture<'a> = impl Future<Output = Result<(FrameType, usize), Self::Error>> + 'a
-        where Self: 'a;
-
-        fn recv<'a>(&'a mut self, frame_data_buf: &'a mut [u8]) -> Self::ReceiveFuture<'a> {
-            async move {
-                super::recv(&mut self.0, frame_data_buf)
-                    .await
-                    .map(|(frame_type, payload_len)| (frame_type.into(), payload_len))
-            }
+        async fn recv(
+            &mut self,
+            frame_data_buf: &mut [u8],
+        ) -> Result<(FrameType, usize), Self::Error> {
+            super::recv(&mut self.0, frame_data_buf)
+                .await
+                .map(|(frame_type, payload_len)| (frame_type.into(), payload_len))
         }
     }
 
@@ -651,23 +648,18 @@ mod embedded_svc_compat {
         T: Write,
         M: Fn() -> Option<u32>,
     {
-        type SendFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a
-        where Self: 'a;
-
-        fn send<'a>(
-            &'a mut self,
+        async fn send(
+            &mut self,
             frame_type: FrameType,
-            frame_data: &'a [u8],
-        ) -> Self::SendFuture<'a> {
-            async move {
-                super::send(
-                    &mut self.0,
-                    frame_type.try_into().unwrap(),
-                    (self.1)(),
-                    frame_data,
-                )
-                .await
-            }
+            frame_data: &[u8],
+        ) -> Result<(), Self::Error> {
+            super::send(
+                &mut self.0,
+                frame_type.try_into().unwrap(),
+                (self.1)(),
+                frame_data,
+            )
+            .await
         }
     }
 }
