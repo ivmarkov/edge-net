@@ -12,6 +12,9 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 rust-version = "1.67"
 
+[patch.crates-io]
+embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
+
 [features]
 default = ["std"]
 
