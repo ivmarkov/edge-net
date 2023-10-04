@@ -90,7 +90,6 @@ where
         write
             .write_all(&buf[0..size_read])
             .await
-            .map_err(map_write_err)
             .map_err(CopyError::Write)?;
 
         copied += size_read as u64;
@@ -100,11 +99,4 @@ where
     progress(copied, len);
 
     Ok(copied)
-}
-
-pub(crate) fn map_write_err<W>(e: embedded_io::WriteAllError<W>) -> W {
-    match e {
-        embedded_io::WriteAllError::WriteZero => panic!("write() returned Ok(0)"),
-        embedded_io::WriteAllError::Other(e) => e,
-    }
 }

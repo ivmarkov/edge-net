@@ -282,7 +282,6 @@ impl FrameHeader {
         write
             .write_all(&header_buf[..header_len])
             .await
-            .map_err(map_write_err)
             .map_err(Error::Io)
     }
 
@@ -324,11 +323,7 @@ impl FrameHeader {
         } else if payload.is_empty() {
             Ok(())
         } else if self.mask_key.is_none() {
-            write
-                .write_all(payload)
-                .await
-                .map_err(map_write_err)
-                .map_err(Error::Io)
+            write.write_all(payload).await.map_err(Error::Io)
         } else {
             let mut buf = [0_u8; 64];
 
@@ -341,11 +336,7 @@ impl FrameHeader {
 
                 self.mask(&mut buf, offset);
 
-                write
-                    .write_all(&buf)
-                    .await
-                    .map_err(map_write_err)
-                    .map_err(Error::Io)?;
+                write.write_all(&buf).await.map_err(Error::Io)?;
 
                 offset += len;
             }
@@ -568,8 +559,6 @@ pub mod http {
 
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
-
-use super::io::map_write_err;
 
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {

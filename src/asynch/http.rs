@@ -12,7 +12,6 @@ use log::trace;
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
 
-use super::io::map_write_err;
 use super::ws::http::UpgradeError;
 
 pub mod client;
@@ -295,26 +294,10 @@ where
             body = BodyType::from_header(name, unsafe { str::from_utf8_unchecked(value) });
         }
 
-        output
-            .write_all(name.as_bytes())
-            .await
-            .map_err(map_write_err)
-            .map_err(Error::Io)?;
-        output
-            .write_all(b": ")
-            .await
-            .map_err(map_write_err)
-            .map_err(Error::Io)?;
-        output
-            .write_all(value)
-            .await
-            .map_err(map_write_err)
-            .map_err(Error::Io)?;
-        output
-            .write_all(b"\r\n")
-            .await
-            .map_err(map_write_err)
-            .map_err(Error::Io)?;
+        output.write_all(name.as_bytes()).await.map_err(Error::Io)?;
+        output.write_all(b": ").await.map_err(Error::Io)?;
+        output.write_all(value).await.map_err(Error::Io)?;
+        output.write_all(b"\r\n").await.map_err(Error::Io)?;
     }
 
     Ok(body)
@@ -324,11 +307,7 @@ pub async fn send_headers_end<W>(mut output: W) -> Result<(), Error<W::Error>>
 where
     W: Write,
 {
-    output
-        .write_all(b"\r\n")
-        .await
-        .map_err(map_write_err)
-        .map_err(Error::Io)
+    output.write_all(b"\r\n").await.map_err(Error::Io)
 }
 
 #[derive(Debug)]
@@ -1150,11 +1129,7 @@ impl<W> ChunkedWrite<W> {
     where
         W: Write,
     {
-        self.output
-            .write_all(b"\r\n")
-            .await
-            .map_err(map_write_err)
-            .map_err(Error::Io)
+        self.output.write_all(b"\r\n").await.map_err(Error::Io)
     }
 
     pub fn release(self) -> W {
@@ -1180,18 +1155,12 @@ where
             self.output
                 .write_all(len_str.as_bytes())
                 .await
-                .map_err(map_write_err)
                 .map_err(Error::Io)?;
 
-            self.output
-                .write_all(buf)
-                .await
-                .map_err(map_write_err)
-                .map_err(Error::Io)?;
+            self.output.write_all(buf).await.map_err(Error::Io)?;
             self.output
                 .write_all("\r\n".as_bytes())
                 .await
-                .map_err(map_write_err)
                 .map_err(Error::Io)?;
 
             Ok(buf.len())
@@ -1420,27 +1389,18 @@ where
     let mut written = false;
 
     if !request {
-        output
-            .write_all(b"HTTP/1.1")
-            .await
-            .map_err(map_write_err)
-            .map_err(Error::Io)?;
+        output.write_all(b"HTTP/1.1").await.map_err(Error::Io)?;
         written = true;
     }
 
     if let Some(token) = token {
         if written {
-            output
-                .write_all(b" ")
-                .await
-                .map_err(map_write_err)
-                .map_err(Error::Io)?;
+            output.write_all(b" ").await.map_err(Error::Io)?;
         }
 
         output
             .write_all(token.as_bytes())
             .await
-            .map_err(map_write_err)
             .map_err(Error::Io)?;
 
         written = true;
@@ -1448,17 +1408,12 @@ where
 
     if let Some(extra) = extra {
         if written {
-            output
-                .write_all(b" ")
-                .await
-                .map_err(map_write_err)
-                .map_err(Error::Io)?;
+            output.write_all(b" ").await.map_err(Error::Io)?;
         }
 
         output
             .write_all(extra.as_bytes())
             .await
-            .map_err(map_write_err)
             .map_err(Error::Io)?;
 
         written = true;
@@ -1466,25 +1421,13 @@ where
 
     if request {
         if written {
-            output
-                .write_all(b" ")
-                .await
-                .map_err(map_write_err)
-                .map_err(Error::Io)?;
+            output.write_all(b" ").await.map_err(Error::Io)?;
         }
 
-        output
-            .write_all(b"HTTP/1.1")
-            .await
-            .map_err(map_write_err)
-            .map_err(Error::Io)?;
+        output.write_all(b"HTTP/1.1").await.map_err(Error::Io)?;
     }
 
-    output
-        .write_all(b"\r\n")
-        .await
-        .map_err(map_write_err)
-        .map_err(Error::Io)?;
+    output.write_all(b"\r\n").await.map_err(Error::Io)?;
 
     Ok(())
 }

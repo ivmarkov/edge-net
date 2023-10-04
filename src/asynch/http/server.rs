@@ -11,7 +11,6 @@ use crate::asynch::http::{
     send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, RequestHeaders,
     SendBody,
 };
-use crate::asynch::io::map_write_err;
 
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
@@ -171,10 +170,7 @@ where
 
             self.complete_request(Some(500), Some("Internal Error"), &headers)
                 .await?;
-            self.response_mut()?
-                .write_all(err_str.as_bytes())
-                .await
-                .map_err(map_write_err)?;
+            self.response_mut()?.write_all(err_str.as_bytes()).await?;
 
             Ok(())
         } else {
