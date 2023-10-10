@@ -71,7 +71,7 @@ mod embedded_svc_compat {
 
     impl<U> Unblocker for UnblockerCompat<U>
     where
-        U: embedded_svc::executor::asynch::Unblocker,
+        U: embedded_svc::utils::asyncify::Unblocker,
     {
         type UnblockFuture<'a, F, T> = impl Future<Output = T> + Send
         where Self: 'a, F: Send + 'a, T: Send + 'a;
@@ -85,7 +85,7 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<U> embedded_svc::executor::asynch::Unblocker for UnblockerCompat<U>
+    impl<U> embedded_svc::utils::asyncify::Unblocker for UnblockerCompat<U>
     where
         U: Unblocker,
     {

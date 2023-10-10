@@ -6,7 +6,6 @@ pub use embedded_svc_compat::*;
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
     use core::fmt::{Debug, Display};
-    use core::future::Future;
     use core::marker::PhantomData;
 
     use embedded_svc::mqtt::client::asynch::{
@@ -61,48 +60,30 @@ mod embedded_svc_compat {
     }
 
     impl Client for MqttClient {
-        type SubscribeFuture<'a>
-        = impl Future<Output = Result<MessageId, Self::Error>> + Send + 'a
-        where Self: 'a;
+        async fn subscribe(&mut self, topic: &str, qos: QoS) -> Result<MessageId, Self::Error> {
+            self.0.subscribe(topic, to_qos(qos)).await?;
 
-        type UnsubscribeFuture<'a>
-        = impl Future<Output = Result<MessageId, Self::Error>> + Send + 'a
-        where Self: 'a;
-
-        fn subscribe<'a>(&'a mut self, topic: &'a str, qos: QoS) -> Self::SubscribeFuture<'a> {
-            async move {
-                self.0.subscribe(topic, to_qos(qos)).await?;
-
-                Ok(0)
-            }
+            Ok(0)
         }
 
-        fn unsubscribe<'a>(&'a mut self, topic: &'a str) -> Self::UnsubscribeFuture<'a> {
-            async move {
-                self.0.unsubscribe(topic).await?;
+        async fn unsubscribe(&mut self, topic: &str) -> Result<MessageId, Self::Error> {
+            self.0.unsubscribe(topic).await?;
 
-                Ok(0)
-            }
+            Ok(0)
         }
     }
 
     impl Publish for MqttClient {
-        type PublishFuture<'a>
-        = impl Future<Output = Result<MessageId, Self::Error>> + Send + 'a
-        where Self: 'a;
-
-        fn publish<'a>(
-            &'a mut self,
-            topic: &'a str,
+        async fn publish(
+            &mut self,
+            topic: &str,
             qos: embedded_svc::mqtt::client::QoS,
             retain: bool,
-            payload: &'a [u8],
-        ) -> Self::PublishFuture<'a> {
-            async move {
-                self.0.publish(topic, to_qos(qos), retain, payload).await?;
+            payload: &[u8],
+        ) -> Result<MessageId, Self::Error> {
+            self.0.publish(topic, to_qos(qos), retain, payload).await?;
 
-                Ok(0)
-            }
+            Ok(0)
         }
     }
 
@@ -149,48 +130,42 @@ mod embedded_svc_compat {
         F: FnMut(&MessageRef) -> Option<M> + Send,
         M: Send,
     {
-        type Message = M;
+        type Message<'a> = M where Self: 'a;
 
-        type NextFuture<'a>
-        = impl Future<Output = Option<Result<Event<Self::Message>, Self::Error>>> + Send + 'a
-        where Self: 'a;
+        async fn next(&mut self) -> Option<Result<Event<Self::Message<'_>>, Self::Error>> {
+            loop {
+                let event = self.0.poll().await;
+                trace!("Got event: {:?}", event);
 
-        fn next(&mut self) -> Self::NextFuture<'_> {
-            async move {
-                loop {
-                    let event = self.0.poll().await;
-                    trace!("Got event: {:?}", event);
+                match event {
+                    Ok(event) => {
+                        let event = match event {
+                            rumqttc::Event::Incoming(incoming) => match incoming {
+                                rumqttc::Packet::Connect(_) => Some(Event::BeforeConnect),
+                                rumqttc::Packet::ConnAck(_) => Some(Event::Connected(true)),
+                                rumqttc::Packet::Disconnect => Some(Event::Disconnected),
+                                rumqttc::Packet::PubAck(PubAck { pkid, .. }) => {
+                                    Some(Event::Published(pkid as _))
+                                }
+                                rumqttc::Packet::SubAck(SubAck { pkid, .. }) => {
+                                    Some(Event::Subscribed(pkid as _))
+                                }
+                                rumqttc::Packet::UnsubAck(UnsubAck { pkid, .. }) => {
+                                    Some(Event::Unsubscribed(pkid as _))
+                                }
+                                rumqttc::Packet::Publish(publish) => {
+                                    (self.1)(&MessageRef(&publish)).map(Event::Received)
+                                }
+                                _ => None,
+                            },
+                            rumqttc::Event::Outgoing(_) => None,
+                        };
 
-                    match event {
-                        Ok(event) => {
-                            let event = match event {
-                                rumqttc::Event::Incoming(incoming) => match incoming {
-                                    rumqttc::Packet::Connect(_) => Some(Event::BeforeConnect),
-                                    rumqttc::Packet::ConnAck(_) => Some(Event::Connected(true)),
-                                    rumqttc::Packet::Disconnect => Some(Event::Disconnected),
-                                    rumqttc::Packet::PubAck(PubAck { pkid, .. }) => {
-                                        Some(Event::Published(pkid as _))
-                                    }
-                                    rumqttc::Packet::SubAck(SubAck { pkid, .. }) => {
-                                        Some(Event::Subscribed(pkid as _))
-                                    }
-                                    rumqttc::Packet::UnsubAck(UnsubAck { pkid, .. }) => {
-                                        Some(Event::Unsubscribed(pkid as _))
-                                    }
-                                    rumqttc::Packet::Publish(publish) => {
-                                        (self.1)(&MessageRef(&publish)).map(Event::Received)
-                                    }
-                                    _ => None,
-                                },
-                                rumqttc::Event::Outgoing(_) => None,
-                            };
-
-                            if let Some(event) = event {
-                                return Some(Ok(event));
-                            }
+                        if let Some(event) = event {
+                            return Some(Ok(event));
                         }
-                        Err(err) => return Some(Err(MqttError::ConnectionError(err))),
                     }
+                    Err(err) => return Some(Err(MqttError::ConnectionError(err))),
                 }
             }
         }
