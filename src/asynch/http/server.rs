@@ -260,7 +260,6 @@ pub struct RequestState<'b, const N: usize, T> {
 
 pub type ResponseState<T> = SendBody<T>;
 
-#[cfg(version("1.67"))]
 pub trait Handler<'b, const N: usize, T> {
     async fn handle<'a>(
         &'a self,
@@ -268,24 +267,6 @@ pub trait Handler<'b, const N: usize, T> {
         method: Method,
         connection: &'a mut ServerConnection<'b, N, T>,
     ) -> Result<(), HandlerError>;
-}
-
-// Does not typecheck with latest nightly 1.67
-// See https://github.com/rust-lang/rust/issues/104691
-#[cfg(not(version("1.67")))]
-pub trait Handler<'b, const N: usize, T> {
-    type HandleFuture<'a>: Future<Output = Result<(), HandlerError>>
-    where
-        Self: 'a,
-        'b: 'a,
-        T: 'a;
-
-    fn handle<'a>(
-        &'a self,
-        path: &'a str,
-        method: Method,
-        connection: &'a mut ServerConnection<'b, N, T>,
-    ) -> Self::HandleFuture<'a>;
 }
 
 pub async fn handle_connection<const N: usize, const B: usize, T, H>(

@@ -2,15 +2,14 @@
 name = "edge-net"
 version = "0.3.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
-edition = "2018"
-resolver = "2"
+edition = "2021"
 categories = ["embedded", "hardware-support"]
 keywords = ["embedded", "svc", "network"]
 description = "no_std and no-alloc async implementations of various network protocols."
 repository = "https://github.com/ivmarkov/edge-net"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.67"
+rust-version = "1.70"
 
 [patch.crates-io]
 embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }

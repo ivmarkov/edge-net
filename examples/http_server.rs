@@ -84,7 +84,6 @@ impl SimpleHandler {
     }
 }
 
-#[cfg(version("1.67"))]
 impl<'b, const N: usize, T> Handler<'b, N, T> for SimpleHandler
 where
     T: Read + Write,
@@ -96,23 +95,5 @@ where
         connection: &'a mut ServerConnection<'b, N, T>,
     ) -> Result<(), HandlerError> {
         SimpleHandler::handle(self, path, method, connection).await
-    }
-}
-
-#[cfg(not(version("1.67")))]
-impl<'b, const N: usize, T> Handler<'b, N, T> for SimpleHandler
-where
-    T: Read + Write,
-{
-    type HandleFuture<'a> = impl core::future::Future<Output = Result<(), HandlerError>> + 'a
-    where Self: 'a, 'b: 'a, T: 'a;
-
-    fn handle<'a>(
-        &'a self,
-        path: &'a str,
-        method: Method,
-        connection: &'a mut ServerConnection<'b, N, T>,
-    ) -> Self::HandleFuture<'a> {
-        SimpleHandler::handle(self, path, method, connection)
     }
 }
