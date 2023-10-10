@@ -16,29 +16,47 @@ mod unblocker {
     use core::future::Future;
 
     pub trait Unblocker {
-        type UnblockFuture<T>: Future<Output = T> + Send
+        type UnblockFuture<'a, F, T>: Future<Output = T> + Send
         where
-            T: Send;
+            Self: 'a,
+            F: Send + 'a,
+            T: Send + 'a;
 
-        fn unblock<F, T>(&self, f: F) -> Self::UnblockFuture<T>
+        fn unblock<'a, F, T>(&'a self, f: F) -> Self::UnblockFuture<'a, F, T>
         where
-            F: FnOnce() -> T + Send + 'static,
-            T: Send + 'static;
+            F: FnOnce() -> T + Send + 'a,
+            T: Send + 'a;
     }
 
     impl<U> Unblocker for &U
     where
         U: Unblocker,
     {
-        type UnblockFuture<T>
-        = U::UnblockFuture<T> where T: Send;
+        type UnblockFuture<'a, F, T>
+        = U::UnblockFuture<'a, F, T> where Self: 'a, F: Send + 'a, T: Send + 'a;
 
-        fn unblock<F, T>(&self, f: F) -> Self::UnblockFuture<T>
+        fn unblock<'a, F, T>(&'a self, f: F) -> Self::UnblockFuture<'a, F, T>
         where
-            F: FnOnce() -> T + Send + 'static,
-            T: Send + 'static,
+            F: FnOnce() -> T + Send + 'a,
+            T: Send + 'a,
         {
             (*self).unblock(f)
+        }
+    }
+
+    impl<U> Unblocker for &mut U
+    where
+        U: Unblocker,
+    {
+        type UnblockFuture<'a, F, T>
+        = U::UnblockFuture<'a, F, T> where Self: 'a, F: Send + 'a, T: Send + 'a;
+
+        fn unblock<'a, F, T>(&'a self, f: F) -> Self::UnblockFuture<'a, F, T>
+        where
+            F: FnOnce() -> T + Send + 'a,
+            T: Send + 'a,
+        {
+            (**self).unblock(f)
         }
     }
 }
@@ -55,13 +73,13 @@ mod embedded_svc_compat {
     where
         U: embedded_svc::executor::asynch::Unblocker,
     {
-        type UnblockFuture<T> = impl Future<Output = T> + Send
-        where T: Send;
+        type UnblockFuture<'a, F, T> = impl Future<Output = T> + Send
+        where Self: 'a, F: Send + 'a, T: Send + 'a;
 
-        fn unblock<F, T>(&self, f: F) -> Self::UnblockFuture<T>
+        fn unblock<'a, F, T>(&'a self, f: F) -> Self::UnblockFuture<'a, F, T>
         where
-            F: FnOnce() -> T + Send + 'static,
-            T: Send + 'static,
+            F: FnOnce() -> T + Send + 'a,
+            T: Send + 'a,
         {
             self.0.unblock(f)
         }
@@ -71,13 +89,13 @@ mod embedded_svc_compat {
     where
         U: Unblocker,
     {
-        type UnblockFuture<T> = impl Future<Output = T> + Send
-        where T: Send;
+        type UnblockFuture<'a, F, T> = impl Future<Output = T> + Send
+        where Self: 'a, F: Send + 'a, T: Send + 'a;
 
-        fn unblock<F, T>(&self, f: F) -> Self::UnblockFuture<T>
+        fn unblock<'a, F, T>(&'a self, f: F) -> Self::UnblockFuture<'a, F, T>
         where
-            F: FnOnce() -> T + Send + 'static,
-            T: Send + 'static,
+            F: FnOnce() -> T + Send + 'a,
+            T: Send + 'a,
         {
             self.0.unblock(f)
         }
