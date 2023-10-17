@@ -1,6 +1,6 @@
 [package]
 name = "edge-net"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
 categories = ["embedded", "hardware-support"]
@@ -9,10 +9,7 @@ description = "no_std and no-alloc async implementations of various network prot
 repository = "https://github.com/ivmarkov/edge-net"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.70"
-
-[patch.crates-io]
-embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
+rust-version = "1.71"
 
 [features]
 default = ["std"]
@@ -28,7 +25,7 @@ embedded-io-async = { version = "0.6", default-features = false, optional = true
 heapless = { version = "0.7", default-features = false }
 httparse = { version = "1.7", default-features = false }
 embassy-futures = "0.1"
-embassy-sync = { version = "0.2", default-features = false }
+embassy-sync = { version = "0.3", default-features = false }
 no-std-net = { version = "0.6", default-features = false }
 log = { version = "0.4", default-features = false }
 base64 = { version = "0.13", default-features = false }
@@ -37,7 +34,7 @@ embedded-nal-async = "0.6"
 domain = { version = "0.7", default-features = false, optional = true }
 futures-lite = { version = "1", default-features = false, optional = true }
 async-io = { version = "1", default-features = false, optional = true }
-embedded-svc = { version = "0.25", default-features = false, optional = true, features = ["embedded-io-async"] }
+embedded-svc = { version = "0.26", default-features = false, optional = true, features = ["embedded-io-async"] }
 rumqttc = { version = "0.19", optional = true }
 
 [dev-dependencies]
