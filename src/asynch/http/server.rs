@@ -367,7 +367,7 @@ where
                     loop {
                         warn!("Handler {}: Waiting for connection", handler_id);
 
-                        let io = channel.recv().await;
+                        let io = channel.receive().await;
                         warn!("Handler {}: Got connection request", handler_id);
 
                         let err = handle_connection::<N, B, _, _>(io, handler_id, handler).await;
