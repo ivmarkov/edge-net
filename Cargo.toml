@@ -33,7 +33,7 @@ sha1_smol = { version = "1", default-features = false }
 embedded-nal-async = "0.6"
 domain = { version = "0.7", default-features = false, optional = true }
 futures-lite = { version = "1", default-features = false, optional = true }
-async-io = { version = "1", default-features = false, optional = true }
+async-io = { version = "2", default-features = false, optional = true }
 embedded-svc = { version = "0.26", default-features = false, optional = true, features = ["embedded-io-async"] }
 rumqttc = { version = "0.19", optional = true }
 
