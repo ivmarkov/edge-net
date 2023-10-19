@@ -39,7 +39,6 @@ rumqttc = { version = "0.19", optional = true }
 
 [dev-dependencies]
 anyhow = "1"
-smol = "1"
 simple_logger="2.2"
 
 [[example]]

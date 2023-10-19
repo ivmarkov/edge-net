@@ -1,10 +1,11 @@
+use async_io::block_on;
 use embedded_io_async::{Read, Write};
 use embedded_nal_async::TcpConnect;
 
 use edge_net::asynch::stdnal::StdTcpConnect;
 
 fn main() {
-    smol::block_on(read()).unwrap();
+    block_on(read()).unwrap();
 }
 
 async fn read() -> anyhow::Result<()> {

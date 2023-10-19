@@ -1,8 +1,9 @@
-#![feature(cfg_version)]
+#![allow(stable_features)]
 #![feature(async_fn_in_trait)]
 
 use core::future::pending;
 
+use async_io::block_on;
 use log::LevelFilter;
 
 use edge_net::asynch::{
@@ -24,7 +25,7 @@ fn main() {
         .init()
         .unwrap();
 
-    smol::block_on(accept());
+    block_on(accept());
 }
 
 pub async fn accept() {
@@ -32,7 +33,7 @@ pub async fn accept() {
 
     run::<StdRawMutex, _>(
         binder
-            .listen("0.0.0.0:8080".parse().unwrap())
+            .listen("0.0.0.0:8181".parse().unwrap())
             .await
             .unwrap(),
     )

@@ -1,5 +1,6 @@
 use std::error::Error;
 
+use async_io::block_on;
 use embedded_io_async::Read;
 use embedded_nal_async::TcpConnect;
 
@@ -10,7 +11,7 @@ use edge_net::asynch::stdnal::StdTcpConnect;
 fn main() {
     simple_logger::SimpleLogger::new().env().init().unwrap();
 
-    smol::block_on(read()).unwrap();
+    block_on(read()).unwrap();
 }
 
 async fn read() -> anyhow::Result<()> {
@@ -22,7 +23,7 @@ async fn read() -> anyhow::Result<()> {
     let mut connection = ClientConnection::<1024, _>::new(
         &mut buf,
         &connector,
-        "34.227.213.82:80".parse().unwrap(), /*httpbin.org*/
+        "44.194.147.17:80".parse().unwrap(), /*httpbin.org*/
     );
 
     for uri in ["/ip", "/headers"] {
