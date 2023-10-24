@@ -9,6 +9,7 @@ use httparse::{Header, Status, EMPTY_HEADER};
 
 use log::trace;
 
+#[allow(unused_imports)]
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
 

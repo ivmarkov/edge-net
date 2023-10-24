@@ -9,6 +9,7 @@ use crate::asynch::http::{
 };
 use embedded_nal_async::TcpConnect;
 
+#[allow(unused_imports)]
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
 

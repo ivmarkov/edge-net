@@ -12,6 +12,7 @@ use crate::asynch::http::{
     SendBody,
 };
 
+#[allow(unused_imports)]
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
 
