@@ -10,6 +10,7 @@
 pub mod asynch;
 #[cfg(feature = "domain")]
 pub mod captive;
+pub mod dhcp;
 #[cfg(feature = "domain")]
 pub mod mdns;
 #[cfg(feature = "std")]
