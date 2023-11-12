@@ -12,6 +12,7 @@ Working:
 * WS client
 * MQTT client (just a slim wrapper around `rumqttc`, so currently needs STD)
 * DNS Captive Portal
+* MDNS responder
 
 Needs bugfixing:
 * HTTP / WS server
