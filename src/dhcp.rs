@@ -292,7 +292,7 @@ impl<'a> Options<'a> {
     }
 
     #[inline(always)]
-    pub fn buf() -> [DhcpOption<'a>; 8] {
+    pub const fn buf() -> [DhcpOption<'a>; 8] {
         [DhcpOption::Message(""); 8]
     }
 
