@@ -66,7 +66,7 @@ pub mod client {
             }
         }
 
-        pub async fn configure<U: UdpStack>(
+        pub async fn discover<U: UdpStack>(
             &mut self,
             udp: &mut U,
             buf: &mut [u8],
