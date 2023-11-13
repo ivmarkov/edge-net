@@ -1,14 +1,16 @@
 use std::io;
-use std::net::{self, TcpStream, ToSocketAddrs};
+use std::net::{self, TcpStream, ToSocketAddrs, UdpSocket};
 
 use async_io::Async;
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 
 use embedded_io::ErrorType;
 use embedded_io_async::{Read, Write};
-use no_std_net::SocketAddr;
+use no_std_net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 
-use embedded_nal_async::{AddrType, Dns, IpAddr, TcpConnect};
+use embedded_nal_async::{
+    AddrType, ConnectedUdp, Dns, IpAddr, TcpConnect, UdpStack, UnconnectedUdp,
+};
 
 use super::tcp::{TcpAccept, TcpListen, TcpSplittableConnection};
 
@@ -29,7 +31,7 @@ impl TcpConnect for StdTcpConnect {
     where
         Self: 'm,
     {
-        let connection = Async::<TcpStream>::connect(to_std_addr(remote)?).await?;
+        let connection = Async::<TcpStream>::connect(to_std_addr(remote)).await?;
 
         Ok(StdTcpConnection(connection))
     }
@@ -50,7 +52,7 @@ impl TcpListen for StdTcpListen {
     = StdTcpAccept where Self: 'm;
 
     async fn listen(&self, remote: SocketAddr) -> Result<Self::Acceptor<'_>, Self::Error> {
-        Async::<net::TcpListener>::bind(to_std_addr(remote)?).map(StdTcpAccept)
+        Async::<net::TcpListener>::bind(to_std_addr(remote)).map(StdTcpAccept)
     }
 }
 
@@ -124,6 +126,117 @@ impl<'r> Write for StdTcpConnectionRef<'r> {
     }
 }
 
+pub struct StdUdpStack(());
+
+impl StdUdpStack {
+    pub const fn new() -> Self {
+        Self(())
+    }
+}
+
+impl UdpStack for StdUdpStack {
+    type Error = io::Error;
+
+    type Connected = StdUdpSocket;
+
+    type UniquelyBound = StdUdpSocket;
+
+    type MultiplyBound = StdUdpSocket;
+
+    async fn connect_from(
+        &self,
+        local: SocketAddr,
+        remote: SocketAddr,
+    ) -> Result<(SocketAddr, Self::Connected), Self::Error> {
+        let socket = Async::<UdpSocket>::bind(to_std_addr(local))?;
+
+        socket.as_ref().connect(to_std_addr(remote))?;
+
+        Ok((
+            to_nal_addr(socket.as_ref().local_addr()?),
+            StdUdpSocket(socket),
+        ))
+    }
+
+    async fn bind_single(
+        &self,
+        local: SocketAddr,
+    ) -> Result<(SocketAddr, Self::UniquelyBound), Self::Error> {
+        let socket = Async::<UdpSocket>::bind(to_std_addr(local))?;
+
+        Ok((
+            to_nal_addr(socket.as_ref().local_addr()?),
+            StdUdpSocket(socket),
+        ))
+    }
+
+    async fn bind_multiple(&self, _local: SocketAddr) -> Result<Self::MultiplyBound, Self::Error> {
+        unimplemented!()
+    }
+}
+
+pub struct StdUdpSocket(Async<UdpSocket>);
+
+impl ConnectedUdp for StdUdpSocket {
+    type Error = io::Error;
+
+    async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error> {
+        let mut offset = 0;
+
+        loop {
+            offset += self.0.send(&data[offset..]).await?;
+
+            if offset == 0 {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        self.0.recv(buffer).await
+    }
+}
+
+impl UnconnectedUdp for StdUdpSocket {
+    type Error = io::Error;
+
+    async fn send(
+        &mut self,
+        local: SocketAddr,
+        remote: SocketAddr,
+        data: &[u8],
+    ) -> Result<(), Self::Error> {
+        assert!(local == to_nal_addr(self.0.as_ref().local_addr()?));
+
+        let mut offset = 0;
+
+        loop {
+            offset += self.0.send_to(data, to_std_addr(remote)).await?;
+
+            if offset == 0 {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn receive_into(
+        &mut self,
+        buffer: &mut [u8],
+    ) -> Result<(usize, SocketAddr, SocketAddr), Self::Error> {
+        let (len, addr) = self.0.recv_from(buffer).await?;
+
+        Ok((
+            len,
+            to_nal_addr(self.0.as_ref().local_addr()?),
+            to_nal_addr(addr),
+        ))
+    }
+}
+
 pub struct StdDns<U>(U);
 
 impl<U> StdDns<U> {
@@ -192,9 +305,31 @@ fn dns_lookup_host(host: &str, addr_type: AddrType) -> Result<IpAddr, io::Error>
         .ok_or_else(|| io::ErrorKind::AddrNotAvailable.into())
 }
 
-fn to_std_addr(addr: SocketAddr) -> std::io::Result<std::net::SocketAddr> {
-    format!("{}:{}", addr.ip(), addr.port())
-        .to_socket_addrs()?
-        .next()
-        .ok_or_else(|| std::io::ErrorKind::AddrNotAvailable.into())
+fn to_std_addr(addr: SocketAddr) -> std::net::SocketAddr {
+    match addr {
+        SocketAddr::V4(addr) => net::SocketAddr::V4(net::SocketAddrV4::new(
+            addr.ip().octets().into(),
+            addr.port(),
+        )),
+        SocketAddr::V6(addr) => net::SocketAddr::V6(net::SocketAddrV6::new(
+            addr.ip().octets().into(),
+            addr.port(),
+            addr.flowinfo(),
+            addr.scope_id(),
+        )),
+    }
+}
+
+fn to_nal_addr(addr: std::net::SocketAddr) -> SocketAddr {
+    match addr {
+        net::SocketAddr::V4(addr) => {
+            SocketAddr::V4(SocketAddrV4::new(addr.ip().octets().into(), addr.port()))
+        }
+        net::SocketAddr::V6(addr) => SocketAddr::V6(SocketAddrV6::new(
+            addr.ip().octets().into(),
+            addr.port(),
+            addr.flowinfo(),
+            addr.scope_id(),
+        )),
+    }
 }

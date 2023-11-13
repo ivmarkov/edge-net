@@ -26,8 +26,10 @@ heapless = { version = "0.7", default-features = false }
 httparse = { version = "1.7", default-features = false }
 num_enum = { version = "0.7", default-features = false }
 embassy-futures = "0.1"
-embassy-sync = { version = "0.3", default-features = false }
+embassy-time = "0.1"
+embassy-sync = "0.3"
 no-std-net = { version = "0.6", default-features = false }
+rand_core = "0.6"
 log = { version = "0.4", default-features = false }
 base64 = { version = "0.13", default-features = false }
 sha1_smol = { version = "1", default-features = false }

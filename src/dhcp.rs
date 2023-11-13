@@ -10,6 +10,7 @@ pub enum Error {
     DataUnderflow,
     InvalidUtf8Str(Utf8Error),
     InvalidMessageType,
+    MissingCookie,
     InvalidHlen,
     BufferOverflow,
 }
@@ -83,6 +84,62 @@ impl<'a> Packet<'a> {
     const END: u8 = 255;
     const PAD: u8 = 0;
 
+    const ZERO: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
+
+    pub fn new_request(
+        mac: [u8; 6],
+        xid: u32,
+        secs: u16,
+        our_ip: Option<Ipv4Addr>,
+        options: Options<'a>,
+    ) -> Self {
+        Self {
+            reply: false,
+            hops: 0,
+            xid,
+            secs,
+            broadcast: our_ip.is_none(),
+            ciaddr: our_ip.unwrap_or(Self::ZERO),
+            yiaddr: our_ip.unwrap_or(Self::ZERO),
+            siaddr: Self::ZERO,
+            giaddr: Self::ZERO,
+            chaddr: mac,
+            options,
+        }
+    }
+
+    pub fn new_reply<'b>(&self, ip: Option<Ipv4Addr>, options: Options<'b>) -> Packet<'b> {
+        Packet {
+            reply: true,
+            hops: 0,
+            xid: self.xid,
+            secs: 0,
+            broadcast: self.broadcast,
+            ciaddr: ip.unwrap_or(Self::ZERO),
+            yiaddr: ip.unwrap_or(Self::ZERO),
+            siaddr: Self::ZERO,
+            giaddr: Self::ZERO,
+            chaddr: self.chaddr,
+            options,
+        }
+    }
+
+    pub fn parse_reply(&self, mac: &[u8; 6], xid: u32) -> Option<(MessageType, Settings)> {
+        if self.chaddr == *mac && self.xid == xid && self.reply {
+            let mt = self.options.iter().find_map(|option| {
+                if let DhcpOption::MessageType(mt) = option {
+                    Some(mt)
+                } else {
+                    None
+                }
+            });
+
+            mt.map(|mt| (mt, self.into()))
+        } else {
+            None
+        }
+    }
+
     /// Parses Packet from byte array
     pub fn decode(data: &'a [u8]) -> Result<Self, Error> {
         let mut bytes = BytesIn::new(data);
@@ -112,7 +169,7 @@ impl<'a> Packet<'a> {
                 bytes.slice(202)?;
 
                 if bytes.arr()? != Self::COOKIE {
-                    todo!()
+                    Err(Error::MissingCookie)?;
                 }
 
                 Options(OptionsInner::decode(bytes.remaining())?)
@@ -159,12 +216,195 @@ impl<'a> Packet<'a> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Settings {
+    pub ip: Ipv4Addr,
+    pub server_ip: Option<Ipv4Addr>,
+    pub lease_time_secs: Option<u32>,
+    pub gateway: Option<Ipv4Addr>,
+    pub subnet: Option<Ipv4Addr>,
+    pub dns1: Option<Ipv4Addr>,
+    pub dns2: Option<Ipv4Addr>,
+}
+
+impl From<&Packet<'_>> for Settings {
+    fn from(packet: &Packet) -> Self {
+        Self {
+            ip: packet.yiaddr,
+            server_ip: packet.options.iter().find_map(|option| {
+                if let DhcpOption::ServerIdentifier(ip) = option {
+                    Some(ip)
+                } else {
+                    None
+                }
+            }),
+            lease_time_secs: packet.options.iter().find_map(|option| {
+                if let DhcpOption::IpAddressLeaseTime(lease_time_secs) = option {
+                    Some(lease_time_secs)
+                } else {
+                    None
+                }
+            }),
+            gateway: packet.options.iter().find_map(|option| {
+                if let DhcpOption::Router(ips) = option {
+                    ips.iter().next()
+                } else {
+                    None
+                }
+            }),
+            subnet: packet.options.iter().find_map(|option| {
+                if let DhcpOption::SubnetMask(subnet) = option {
+                    Some(subnet)
+                } else {
+                    None
+                }
+            }),
+            dns1: packet.options.iter().find_map(|option| {
+                if let DhcpOption::DomainNameServer(ips) = option {
+                    ips.iter().next()
+                } else {
+                    None
+                }
+            }),
+            dns2: packet.options.iter().find_map(|option| {
+                if let DhcpOption::DomainNameServer(ips) = option {
+                    ips.iter().nth(1)
+                } else {
+                    None
+                }
+            }),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Options<'a>(OptionsInner<'a>);
 
 impl<'a> Options<'a> {
+    const REQUEST_PARAMS: &'static [u8] = &[
+        DhcpOption::CODE_ROUTER,
+        DhcpOption::CODE_SUBNET,
+        DhcpOption::CODE_DNS,
+    ];
+
     pub const fn new(options: &'a [DhcpOption<'a>]) -> Self {
         Self(OptionsInner::DataSlice(options))
+    }
+
+    #[inline(always)]
+    pub fn buf() -> [DhcpOption<'a>; 8] {
+        [DhcpOption::Message(""); 8]
+    }
+
+    pub fn discover(requested_ip: Option<Ipv4Addr>, buf: &'a mut [DhcpOption<'a>]) -> Self {
+        buf[0] = DhcpOption::MessageType(MessageType::Discover);
+
+        let mut offset = 1;
+
+        if let Some(requested_ip) = requested_ip {
+            buf[1] = DhcpOption::RequestedIpAddress(requested_ip);
+            offset += 1;
+        }
+
+        Self::new(&buf[..offset])
+    }
+
+    pub fn request(ip: Ipv4Addr, buf: &'a mut [DhcpOption<'a>]) -> Self {
+        buf[0] = DhcpOption::MessageType(MessageType::Request);
+        buf[1] = DhcpOption::RequestedIpAddress(ip);
+        buf[2] = DhcpOption::ParameterRequestList(Self::REQUEST_PARAMS);
+
+        Self::new(&buf[..3])
+    }
+
+    pub fn release(buf: &'a mut [DhcpOption<'a>]) -> Self {
+        buf[0] = DhcpOption::MessageType(MessageType::Release);
+
+        Self::new(&buf[..1])
+    }
+
+    pub fn decline(buf: &'a mut [DhcpOption<'a>]) -> Self {
+        buf[0] = DhcpOption::MessageType(MessageType::Decline);
+
+        Self::new(&buf[..1])
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn reply<'b>(
+        &self,
+        mt: MessageType,
+        server_ip: Ipv4Addr,
+        lease_duration_secs: u32,
+        gateways: &'b [Ipv4Addr],
+        subnet: Option<Ipv4Addr>,
+        dns: &'b [Ipv4Addr],
+        buf: &'b mut [DhcpOption<'b>],
+    ) -> Options<'b> {
+        let requested = self.iter().find_map(|option| {
+            if let DhcpOption::ParameterRequestList(requested) = option {
+                Some(requested)
+            } else {
+                None
+            }
+        });
+
+        Options::internal_reply(
+            requested,
+            mt,
+            server_ip,
+            lease_duration_secs,
+            gateways,
+            subnet,
+            dns,
+            buf,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn internal_reply(
+        requested: Option<&[u8]>,
+        mt: MessageType,
+        server_ip: Ipv4Addr,
+        lease_duration_secs: u32,
+        gateways: &'a [Ipv4Addr],
+        subnet: Option<Ipv4Addr>,
+        dns: &'a [Ipv4Addr],
+        buf: &'a mut [DhcpOption<'a>],
+    ) -> Self {
+        buf[0] = DhcpOption::MessageType(mt);
+        buf[1] = DhcpOption::ServerIdentifier(server_ip);
+        buf[2] = DhcpOption::IpAddressLeaseTime(lease_duration_secs);
+
+        let mut offset = 3;
+
+        if !matches!(mt, MessageType::Nak) {
+            if let Some(requested) = requested {
+                for code in requested {
+                    if !buf[0..offset].iter().any(|option| option.code() == *code) {
+                        let option = match *code {
+                            DhcpOption::CODE_ROUTER => (!gateways.is_empty())
+                                .then_some(DhcpOption::Router(Ipv4Addrs::new(gateways))),
+                            DhcpOption::CODE_DNS => {
+                                (!dns.is_empty()).then_some(DhcpOption::Router(Ipv4Addrs::new(dns)))
+                            }
+                            DhcpOption::CODE_SUBNET => subnet.map(DhcpOption::SubnetMask),
+                            _ => None,
+                        };
+
+                        if let Some(option) = option {
+                            buf[offset] = option;
+                            offset += 1;
+                        }
+                    }
+
+                    if offset == buf.len() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Self::new(&buf[..offset])
     }
 
     pub fn iter(&self) -> impl Iterator<Item = DhcpOption<'a>> + 'a {
@@ -219,9 +459,9 @@ impl<'a> OptionsInner<'a> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum DhcpOption<'a> {
-    DhcpMessageType(MessageType),
+    MessageType(MessageType),
     ServerIdentifier(Ipv4Addr),
     ParameterRequestList(&'a [u8]),
     RequestedIpAddress(Ipv4Addr),
@@ -235,6 +475,10 @@ pub enum DhcpOption<'a> {
 }
 
 impl<'a> DhcpOption<'a> {
+    pub const CODE_ROUTER: u8 = DhcpOption::Router(Ipv4Addrs::new(&[])).code();
+    pub const CODE_DNS: u8 = DhcpOption::DomainNameServer(Ipv4Addrs::new(&[])).code();
+    pub const CODE_SUBNET: u8 = DhcpOption::SubnetMask(Ipv4Addr::new(0, 0, 0, 0)).code();
+
     fn decode<'o>(bytes: &mut BytesIn<'o>) -> Result<Option<DhcpOption<'o>>, Error> {
         let code = bytes.byte()?;
         if code == Packet::END {
@@ -244,7 +488,7 @@ impl<'a> DhcpOption<'a> {
             let mut bytes = BytesIn::new(bytes.slice(len)?);
 
             let option = match code {
-                DHCP_MESSAGE_TYPE => DhcpOption::DhcpMessageType(
+                DHCP_MESSAGE_TYPE => DhcpOption::MessageType(
                     TryFromPrimitive::try_from_primitive(bytes.byte()?)
                         .map_err(|_| Error::InvalidMessageType)?,
                 ),
@@ -287,9 +531,9 @@ impl<'a> DhcpOption<'a> {
         })
     }
 
-    fn code(&self) -> u8 {
+    pub const fn code(&self) -> u8 {
         match self {
-            Self::DhcpMessageType(_) => DHCP_MESSAGE_TYPE,
+            Self::MessageType(_) => DHCP_MESSAGE_TYPE,
             Self::ServerIdentifier(_) => SERVER_IDENTIFIER,
             Self::ParameterRequestList(_) => PARAMETER_REQUEST_LIST,
             Self::RequestedIpAddress(_) => REQUESTED_IP_ADDRESS,
@@ -305,9 +549,9 @@ impl<'a> DhcpOption<'a> {
 
     fn data(&self, mut f: impl FnMut(&[u8]) -> Result<(), Error>) -> Result<(), Error> {
         match self {
-            Self::DhcpMessageType(mtype) => f(&[*mtype as _]),
+            Self::MessageType(mtype) => f(&[*mtype as _]),
             Self::ServerIdentifier(addr) => f(&addr.octets()),
-            Self::ParameterRequestList(prl) => f(*prl),
+            Self::ParameterRequestList(prl) => f(prl),
             Self::RequestedIpAddress(addr) => f(&addr.octets()),
             Self::HostName(name) => f(name.as_bytes()),
             Self::Router(addrs) | Self::DomainNameServer(addrs) => {
@@ -325,7 +569,7 @@ impl<'a> DhcpOption<'a> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Ipv4Addrs<'a>(Ipv4AddrsInner<'a>);
 
 impl<'a> Ipv4Addrs<'a> {
@@ -338,7 +582,7 @@ impl<'a> Ipv4Addrs<'a> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum Ipv4AddrsInner<'a> {
     ByteSlice(&'a [u8]),
     DataSlice(&'a [Ipv4Addr]),
@@ -426,13 +670,7 @@ impl<'a> BytesIn<'a> {
     }
 
     pub fn remaining_arr<const N: usize>(&mut self) -> Result<[u8; N], Error> {
-        let arr = self.arr::<N>()?;
-
-        if self.is_empty() {
-            Ok(arr)
-        } else {
-            Err(Error::BufferOverflow) // TODO
-        }
+        self.arr::<N>()
     }
 }
 
@@ -466,213 +704,16 @@ impl<'a> BytesOut<'a> {
     }
 }
 
-///////////////////////////////
+// DHCP Options
+const SUBNET_MASK: u8 = 1;
+const ROUTER: u8 = 3;
+const DOMAIN_NAME_SERVER: u8 = 6;
+const HOST_NAME: u8 = 12;
 
-// // DHCP Options;
-pub const SUBNET_MASK: u8 = 1;
-// pub const TIME_OFFSET: u8 = 2;
-pub const ROUTER: u8 = 3;
-// pub const TIME_SERVER: u8 = 4;
-// pub const NAME_SERVER: u8 = 5;
-pub const DOMAIN_NAME_SERVER: u8 = 6;
-// pub const LOG_SERVER: u8 = 7;
-// pub const COOKIE_SERVER: u8 = 8;
-// pub const LPR_SERVER: u8 = 9;
-// pub const IMPRESS_SERVER: u8 = 10;
-// pub const RESOURCE_LOCATION_SERVER: u8 = 11;
-pub const HOST_NAME: u8 = 12;
-// pub const BOOT_FILE_SIZE: u8 = 13;
-// pub const MERIT_DUMP_FILE: u8 = 14;
-// pub const DOMAIN_NAME: u8 = 15;
-// pub const SWAP_SERVER: u8 = 16;
-// pub const ROOT_PATH: u8 = 17;
-// pub const EXTENSIONS_PATH: u8 = 18;
-
-// // IP LAYER PARAMETERS PER HOST;
-// pub const IP_FORWARDING_ENABLE_DISABLE: u8 = 19;
-// pub const NON_LOCAL_SOURCE_ROUTING_ENABLE_DISABLE: u8 = 20;
-// pub const POLICY_FILTER: u8 = 21;
-// pub const MAXIMUM_DATAGRAM_REASSEMBLY_SIZE: u8 = 22;
-// pub const DEFAULT_IP_TIME_TO_LIVE: u8 = 23;
-// pub const PATH_MTU_AGING_TIMEOUT: u8 = 24;
-// pub const PATH_MTU_PLATEAU_TABLE: u8 = 25;
-
-// // IP LAYER PARAMETERS PER INTERFACE;
-// pub const INTERFACE_MTU: u8 = 26;
-// pub const ALL_SUBNETS_ARE_LOCAL: u8 = 27;
-// pub const BROADCAST_ADDRESS: u8 = 28;
-// pub const PERFORM_MASK_DISCOVERY: u8 = 29;
-// pub const MASK_SUPPLIER: u8 = 30;
-// pub const PERFORM_ROUTER_DISCOVERY: u8 = 31;
-// pub const ROUTER_SOLICITATION_ADDRESS: u8 = 32;
-// pub const STATIC_ROUTE: u8 = 33;
-
-// // LINK LAYER PARAMETERS PER INTERFACE;
-// pub const TRAILER_ENCAPSULATION: u8 = 34;
-// pub const ARP_CACHE_TIMEOUT: u8 = 35;
-// pub const ETHERNET_ENCAPSULATION: u8 = 36;
-
-// // TCP PARAMETERS;
-// pub const TCP_DEFAULT_TTL: u8 = 37;
-// pub const TCP_KEEPALIVE_INTERVAL: u8 = 38;
-// pub const TCP_KEEPALIVE_GARBAGE: u8 = 39;
-
-// // APPLICATION AND SERVICE PARAMETERS;
-// pub const NETWORK_INFORMATION_SERVICE_DOMAIN: u8 = 40;
-// pub const NETWORK_INFORMATION_SERVERS: u8 = 41;
-// pub const NETWORK_TIME_PROTOCOL_SERVERS: u8 = 42;
-// pub const VENDOR_SPECIFIC_INFORMATION: u8 = 43;
-// pub const NETBIOS_OVER_TCPIP_NAME_SERVER: u8 = 44;
-// pub const NETBIOS_OVER_TCPIP_DATAGRAM_DISTRIBUTION_SERVER: u8 = 45;
-// pub const NETBIOS_OVER_TCPIP_NODE_TYPE: u8 = 46;
-// pub const NETBIOS_OVER_TCPIP_SCOPE: u8 = 47;
-// pub const XWINDOW_SYSTEM_FONT_SERVER: u8 = 48;
-// pub const XWINDOW_SYSTEM_DISPLAY_MANAGER: u8 = 49;
-// pub const NETWORK_INFORMATION_SERVICEPLUS_DOMAIN: u8 = 64;
-// pub const NETWORK_INFORMATION_SERVICEPLUS_SERVERS: u8 = 65;
-// pub const MOBILE_IP_HOME_AGENT: u8 = 68;
-// pub const SIMPLE_MAIL_TRANSPORT_PROTOCOL: u8 = 69;
-// pub const POST_OFFICE_PROTOCOL_SERVER: u8 = 70;
-// pub const NETWORK_NEWS_TRANSPORT_PROTOCOL: u8 = 71;
-// pub const DEFAULT_WORLD_WIDE_WEB_SERVER: u8 = 72;
-// pub const DEFAULT_FINGER_SERVER: u8 = 73;
-// pub const DEFAULT_INTERNET_RELAY_CHAT_SERVER: u8 = 74;
-// pub const STREETTALK_SERVER: u8 = 75;
-// pub const STREETTALK_DIRECTORY_ASSISTANCE: u8 = 76;
-
-// pub const RELAY_AGENT_INFORMATION: u8 = 82;
-
-// // DHCP EXTENSIONS
-pub const REQUESTED_IP_ADDRESS: u8 = 50;
-pub const IP_ADDRESS_LEASE_TIME: u8 = 51;
-// pub const OVERLOAD: u8 = 52;
-pub const DHCP_MESSAGE_TYPE: u8 = 53;
-pub const SERVER_IDENTIFIER: u8 = 54;
-pub const PARAMETER_REQUEST_LIST: u8 = 55;
-pub const MESSAGE: u8 = 56;
-// pub const MAXIMUM_DHCP_MESSAGE_SIZE: u8 = 57;
-// pub const RENEWAL_TIME_VALUE: u8 = 58;
-// pub const REBINDING_TIME_VALUE: u8 = 59;
-// pub const VENDOR_CLASS_IDENTIFIER: u8 = 60;
-// pub const CLIENT_IDENTIFIER: u8 = 61;
-
-// pub const TFTP_SERVER_NAME: u8 = 66;
-// pub const BOOTFILE_NAME: u8 = 67;
-
-// pub const USER_CLASS: u8 = 77;
-
-// pub const CLIENT_ARCHITECTURE: u8 = 93;
-
-// pub const TZ_POSIX_STRING: u8 = 100;
-// pub const TZ_DATABASE_STRING: u8 = 101;
-
-// pub const CLASSLESS_ROUTE_FORMAT: u8 = 121;
-
-// /// Returns title of DHCP Option code, if known.
-// pub fn title(code: u8) -> Option<&'static str> {
-//     Some(match code {
-//         SUBNET_MASK => "Subnet Mask",
-
-//         TIME_OFFSET => "Time Offset",
-//         ROUTER => "Router",
-//         TIME_SERVER => "Time Server",
-//         NAME_SERVER => "Name Server",
-//         DOMAIN_NAME_SERVER => "Domain Name Server",
-//         LOG_SERVER => "Log Server",
-//         COOKIE_SERVER => "Cookie Server",
-//         LPR_SERVER => "LPR Server",
-//         IMPRESS_SERVER => "Impress Server",
-//         RESOURCE_LOCATION_SERVER => "Resource Location Server",
-//         HOST_NAME => "Host Name",
-//         BOOT_FILE_SIZE => "Boot File Size",
-//         MERIT_DUMP_FILE => "Merit Dump File",
-//         DOMAIN_NAME => "Domain Name",
-//         SWAP_SERVER => "Swap Server",
-//         ROOT_PATH => "Root Path",
-//         EXTENSIONS_PATH => "Extensions Path",
-
-//         // IP LAYER PARAMETERS PER HOST",
-//         IP_FORWARDING_ENABLE_DISABLE => "IP Forwarding Enable/Disable",
-//         NON_LOCAL_SOURCE_ROUTING_ENABLE_DISABLE => "Non-Local Source Routing Enable/Disable",
-//         POLICY_FILTER => "Policy Filter",
-//         MAXIMUM_DATAGRAM_REASSEMBLY_SIZE => "Maximum Datagram Reassembly Size",
-//         DEFAULT_IP_TIME_TO_LIVE => "Default IP Time-to-live",
-//         PATH_MTU_AGING_TIMEOUT => "Path MTU Aging Timeout",
-//         PATH_MTU_PLATEAU_TABLE => "Path MTU Plateau Table",
-
-//         // IP LAYER PARAMETERS PER INTERFACE",
-//         INTERFACE_MTU => "Interface MTU",
-//         ALL_SUBNETS_ARE_LOCAL => "All Subnets are Local",
-//         BROADCAST_ADDRESS => "Broadcast Address",
-//         PERFORM_MASK_DISCOVERY => "Perform Mask Discovery",
-//         MASK_SUPPLIER => "Mask Supplier",
-//         PERFORM_ROUTER_DISCOVERY => "Perform Router Discovery",
-//         ROUTER_SOLICITATION_ADDRESS => "Router Solicitation Address",
-//         STATIC_ROUTE => "Static Route",
-
-//         // LINK LAYER PARAMETERS PER INTERFACE",
-//         TRAILER_ENCAPSULATION => "Trailer Encapsulation",
-//         ARP_CACHE_TIMEOUT => "ARP Cache Timeout",
-//         ETHERNET_ENCAPSULATION => "Ethernet Encapsulation",
-
-//         // TCP PARAMETERS",
-//         TCP_DEFAULT_TTL => "TCP Default TTL",
-//         TCP_KEEPALIVE_INTERVAL => "TCP Keepalive Interval",
-//         TCP_KEEPALIVE_GARBAGE => "TCP Keepalive Garbage",
-
-//         // APPLICATION AND SERVICE PARAMETERS",
-//         NETWORK_INFORMATION_SERVICE_DOMAIN => "Network Information Service Domain",
-//         NETWORK_INFORMATION_SERVERS => "Network Information Servers",
-//         NETWORK_TIME_PROTOCOL_SERVERS => "Network Time Protocol Servers",
-//         VENDOR_SPECIFIC_INFORMATION => "Vendor Specific Information",
-//         NETBIOS_OVER_TCPIP_NAME_SERVER => "NetBIOS over TCP/IP Name Server",
-//         NETBIOS_OVER_TCPIP_DATAGRAM_DISTRIBUTION_SERVER => {
-//             "NetBIOS over TCP/IP Datagram Distribution Server"
-//         }
-//         NETBIOS_OVER_TCPIP_NODE_TYPE => "NetBIOS over TCP/IP Node Type",
-//         NETBIOS_OVER_TCPIP_SCOPE => "NetBIOS over TCP/IP Scope",
-//         XWINDOW_SYSTEM_FONT_SERVER => "X Window System Font Server",
-//         XWINDOW_SYSTEM_DISPLAY_MANAGER => "X Window System Display Manager",
-//         NETWORK_INFORMATION_SERVICEPLUS_DOMAIN => "Network Information Service+ Domain",
-//         NETWORK_INFORMATION_SERVICEPLUS_SERVERS => "Network Information Service+ Servers",
-//         MOBILE_IP_HOME_AGENT => "Mobile IP Home Agent",
-//         SIMPLE_MAIL_TRANSPORT_PROTOCOL => "Simple Mail Transport Protocol (SMTP) Server",
-//         POST_OFFICE_PROTOCOL_SERVER => "Post Office Protocol (POP3) Server",
-//         NETWORK_NEWS_TRANSPORT_PROTOCOL => "Network News Transport Protocol (NNTP) Server",
-//         DEFAULT_WORLD_WIDE_WEB_SERVER => "Default World Wide Web (WWW) Server",
-//         DEFAULT_FINGER_SERVER => "Default Finger Server",
-//         DEFAULT_INTERNET_RELAY_CHAT_SERVER => "Default Internet Relay Chat (IRC) Server",
-//         STREETTALK_SERVER => "StreetTalk Server",
-//         STREETTALK_DIRECTORY_ASSISTANCE => "StreetTalk Directory Assistance (STDA) Server",
-
-//         RELAY_AGENT_INFORMATION => "Relay Agent Information",
-
-//         // DHCP EXTENSIONS
-//         REQUESTED_IP_ADDRESS => "Requested IP Address",
-//         IP_ADDRESS_LEASE_TIME => "IP Address Lease Time",
-//         OVERLOAD => "Overload",
-//         DHCP_MESSAGE_TYPE => "DHCP Message Type",
-//         SERVER_IDENTIFIER => "Server Identifier",
-//         PARAMETER_REQUEST_LIST => "Parameter Request List",
-//         MESSAGE => "Message",
-//         MAXIMUM_DHCP_MESSAGE_SIZE => "Maximum DHCP Message Size",
-//         RENEWAL_TIME_VALUE => "Renewal (T1) Time Value",
-//         REBINDING_TIME_VALUE => "Rebinding (T2) Time Value",
-//         VENDOR_CLASS_IDENTIFIER => "Vendor class identifier",
-//         CLIENT_IDENTIFIER => "Client-identifier",
-
-//         // Find below
-//         TFTP_SERVER_NAME => "TFTP server name",
-//         BOOTFILE_NAME => "Bootfile name",
-
-//         USER_CLASS => "User Class",
-
-//         CLIENT_ARCHITECTURE => "Client Architecture",
-
-//         TZ_POSIX_STRING => "TZ-POSIX String",
-//         TZ_DATABASE_STRING => "TZ-Database String",
-//         CLASSLESS_ROUTE_FORMAT => "Classless Route Format",
-
-//         _ => return None,
-//     })
-// }
+// DHCP Extensions
+const REQUESTED_IP_ADDRESS: u8 = 50;
+const IP_ADDRESS_LEASE_TIME: u8 = 51;
+const DHCP_MESSAGE_TYPE: u8 = 53;
+const SERVER_IDENTIFIER: u8 = 54;
+const PARAMETER_REQUEST_LIST: u8 = 55;
+const MESSAGE: u8 = 56;

@@ -1,3 +1,4 @@
+pub mod dhcp;
 pub mod http;
 pub mod io;
 #[cfg(all(feature = "std", feature = "rumqttc"))]
