@@ -6,7 +6,7 @@ use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 
 use embedded_io::ErrorType;
 use embedded_io_async::{Read, Write};
-use no_std_net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+use no_std_net::{Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use embedded_nal_async::{
     AddrType, ConnectedUdp, Dns, IpAddr, TcpConnect, UdpStack, UnconnectedUdp,
@@ -305,7 +305,7 @@ fn dns_lookup_host(host: &str, addr_type: AddrType) -> Result<IpAddr, io::Error>
         .ok_or_else(|| io::ErrorKind::AddrNotAvailable.into())
 }
 
-fn to_std_addr(addr: SocketAddr) -> std::net::SocketAddr {
+pub fn to_std_addr(addr: SocketAddr) -> std::net::SocketAddr {
     match addr {
         SocketAddr::V4(addr) => net::SocketAddr::V4(net::SocketAddrV4::new(
             addr.ip().octets().into(),
@@ -320,7 +320,7 @@ fn to_std_addr(addr: SocketAddr) -> std::net::SocketAddr {
     }
 }
 
-fn to_nal_addr(addr: std::net::SocketAddr) -> SocketAddr {
+pub fn to_nal_addr(addr: std::net::SocketAddr) -> SocketAddr {
     match addr {
         net::SocketAddr::V4(addr) => {
             SocketAddr::V4(SocketAddrV4::new(addr.ip().octets().into(), addr.port()))
@@ -332,4 +332,12 @@ fn to_nal_addr(addr: std::net::SocketAddr) -> SocketAddr {
             addr.scope_id(),
         )),
     }
+}
+
+pub fn to_std_ipv4_addr(addr: Ipv4Addr) -> std::net::Ipv4Addr {
+    addr.octets().into()
+}
+
+pub fn to_nal_ipv4_addr(addr: std::net::Ipv4Addr) -> Ipv4Addr {
+    addr.octets().into()
 }

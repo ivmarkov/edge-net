@@ -243,7 +243,7 @@ pub mod server {
         pub dns2: Option<Ipv4Addr>,
         pub range_start: Ipv4Addr,
         pub range_end: Ipv4Addr,
-        pub lease_duration: Duration,
+        pub lease_duration_secs: u32,
     }
 
     struct Lease {
@@ -271,7 +271,7 @@ pub mod server {
                 dns: conf.dns1.iter().chain(conf.dns2.iter()).cloned().collect(),
                 range_start: conf.range_start,
                 range_end: conf.range_end,
-                lease_duration: conf.lease_duration,
+                lease_duration: Duration::from_secs(conf.lease_duration_secs as _),
                 leases: heapless::LinearMap::new(),
             }
         }
