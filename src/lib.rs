@@ -1,17 +1,23 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(stable_features)]
-#![allow(unknown_lints)]
-#![cfg_attr(feature = "nightly", feature(async_fn_in_trait))]
-#![cfg_attr(feature = "nightly", allow(async_fn_in_trait))]
-#![cfg_attr(feature = "nightly", feature(impl_trait_projections))]
-#![cfg_attr(feature = "nightly", feature(impl_trait_in_assoc_type))]
+#![cfg_attr(feature = "nightly", feature(impl_trait_in_assoc_type))] // Used in Unblocker
+
+// Re-export enabled sub-crates
+#[cfg(feature = "edge-captive")]
+pub use edge_captive as captive;
+#[cfg(feature = "edge-dhcp")]
+pub use edge_dhcp as dhcp;
+#[cfg(feature = "edge-http")]
+pub use edge_http as http;
+#[cfg(feature = "edge-mdns")]
+pub use edge_mdns as mdns;
+#[cfg(feature = "edge-mqtt")]
+pub use edge_mqtt as mqtt;
+#[cfg(feature = "edge-ws")]
+pub use edge_ws as ws;
 
 #[cfg(feature = "nightly")]
 pub mod asynch;
-#[cfg(feature = "domain")]
-pub mod captive;
-pub mod dhcp;
-#[cfg(feature = "domain")]
-pub mod mdns;
+
 #[cfg(feature = "std")]
-pub mod std_mutex;
+pub mod std;

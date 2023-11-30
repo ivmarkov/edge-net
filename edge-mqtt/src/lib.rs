@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 pub use rumqttc::*;
 
 #[cfg(feature = "embedded-svc")]

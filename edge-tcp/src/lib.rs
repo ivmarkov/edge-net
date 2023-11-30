@@ -1,5 +1,12 @@
-use core::fmt::Debug;
+#![no_std]
+#![allow(stable_features)]
+#![allow(unknown_lints)]
+#![feature(async_fn_in_trait)]
+#![allow(async_fn_in_trait)]
+#![feature(impl_trait_projections)]
+#![feature(impl_trait_in_assoc_type)]
 
+use core::fmt::Debug;
 use no_std_net::SocketAddr;
 
 pub trait TcpSplittableConnection {
