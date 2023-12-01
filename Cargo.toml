@@ -14,7 +14,7 @@ rust-version = "1.71"
 [features]
 default = ["std"]
 
-std = ["alloc", "embedded-io/std", "embassy-sync/std", "embedded-svc?/std", "async-io", "futures-lite/std", "httparse/std", "domain?/std"]
+std = ["alloc", "embedded-io/std", "embassy-sync/std", "embedded-svc?/std", "async-io", "libc", "futures-lite/std", "httparse/std", "domain?/std"]
 alloc = ["embedded-io/alloc", "embedded-svc?/alloc", "embedded-io-async?/alloc", ]
 nightly = ["embedded-io-async", "embassy-sync/nightly", "embedded-svc?/nightly"]
 embassy-util = [] # Just for backward compat. To be removed in future
@@ -37,6 +37,7 @@ embedded-nal-async = "0.6"
 domain = { version = "0.7", default-features = false, optional = true }
 futures-lite = { version = "1", default-features = false, optional = true }
 async-io = { version = "2", default-features = false, optional = true }
+libc = { version = "0.2", default-features = false, optional = true }
 embedded-svc = { version = "0.26", default-features = false, optional = true, features = ["embedded-io-async"] }
 rumqttc = { version = "0.19", optional = true }
 

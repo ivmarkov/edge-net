@@ -20,8 +20,9 @@ pub mod client {
     use embassy_futures::select::{select, Either};
     use embassy_time::{Duration, Instant, Timer};
 
-    use embedded_nal_async::{ConnectedUdp, IpAddr, Ipv4Addr, SocketAddr, UdpStack};
+    use embedded_nal_async::Ipv4Addr;
 
+    use log::warn;
     use rand_core::RngCore;
 
     use self::dhcp::{MessageType, Options, Packet};
@@ -29,9 +30,29 @@ pub mod client {
     pub use super::*;
     pub use crate::dhcp::Settings;
 
+    use crate::dhcp::raw_ip::{Ipv4PacketHeader, UdpPacketHeader};
+
+    // TODO: Ideally should go to `embedded-nal-async`
+    pub trait RawSocket {
+        type Error: Debug;
+
+        async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error>;
+        async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error>;
+    }
+
+    // TODO: Ideally should go to `embedded-nal-async`
+    pub trait RawStack {
+        type Error: Debug;
+
+        type Socket: RawSocket<Error = Self::Error>;
+
+        async fn connect(&self, interface: Option<u32>) -> Result<Self::Socket, Self::Error>;
+    }
+
     #[derive(Clone, Debug)]
     pub struct Configuration {
         pub mac: [u8; 6],
+        pub interface: Option<u32>,
         pub retries: usize,
         pub timeout: Duration,
     }
@@ -40,6 +61,7 @@ pub mod client {
         pub const fn new(mac: [u8; 6]) -> Self {
             Self {
                 mac,
+                interface: None,
                 retries: 10,
                 timeout: Duration::from_secs(10),
             }
@@ -49,6 +71,7 @@ pub mod client {
     pub struct Client<R> {
         rng: R,
         mac: [u8; 6],
+        interface: Option<u32>,
         retries: usize,
         timeout: Duration,
     }
@@ -61,12 +84,13 @@ pub mod client {
             Self {
                 rng,
                 mac: conf.mac,
+                interface: conf.interface.and_then(|s| s.try_into().ok()),
                 retries: conf.retries,
                 timeout: conf.timeout,
             }
         }
 
-        pub async fn discover<U: UdpStack>(
+        pub async fn discover<U: RawStack>(
             &mut self,
             udp: &mut U,
             buf: &mut [u8],
@@ -90,7 +114,7 @@ pub mod client {
                 .await
         }
 
-        pub async fn request<U: UdpStack>(
+        pub async fn request<U: RawStack>(
             &mut self,
             udp: &mut U,
             buf: &mut [u8],
@@ -118,7 +142,7 @@ pub mod client {
             }
         }
 
-        pub async fn release<U: UdpStack>(
+        pub async fn release<U: RawStack>(
             &mut self,
             udp: &mut U,
             buf: &mut [u8],
@@ -140,7 +164,7 @@ pub mod client {
             Ok(())
         }
 
-        pub async fn decline<U: UdpStack>(
+        pub async fn decline<U: RawStack>(
             &mut self,
             udp: &mut U,
             buf: &mut [u8],
@@ -162,7 +186,7 @@ pub mod client {
             Ok(())
         }
 
-        async fn send<U: UdpStack>(
+        async fn send<U: RawStack>(
             &mut self,
             udp: &mut U,
             buf: &mut [u8],
@@ -171,20 +195,21 @@ pub mod client {
             options: Options<'_>,
             expected_message_types: &[MessageType],
         ) -> Result<Option<(MessageType, Settings)>, Error<U::Error>> {
+            const PROTO_UDP: u8 = 17;
             const BROADCAST: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 255);
+
+            if buf.len() < Ipv4PacketHeader::MIN_SIZE + UdpPacketHeader::SIZE {
+                Err(Error::Format(dhcp::Error::BufferOverflow))?;
+            }
 
             let start = Instant::now();
 
             let xid = self.rng.next_u32();
 
             for _ in 0..self.retries {
-                let (_, mut socket) = udp
-                    .connect_from(
-                        SocketAddr::new(IpAddr::V4(server_ip.unwrap_or(BROADCAST)), 66),
-                        SocketAddr::new(IpAddr::V4(our_ip.unwrap_or(BROADCAST)), 67),
-                    )
-                    .await
-                    .map_err(Error::Io)?;
+                let server_ip = server_ip.unwrap_or(BROADCAST);
+
+                let mut socket: U::Socket = udp.connect(self.interface).await.map_err(Error::Io)?;
 
                 let request = Packet::new_request(
                     self.mac,
@@ -194,10 +219,62 @@ pub mod client {
                     options.clone(),
                 );
 
-                let data = request.encode(buf)?;
-                socket.send(data).await.map_err(Error::Io)?;
+                let ip_packet_len = {
+                    let (ip_hdr_buf, ip_data_buf) = buf.split_at_mut(Ipv4PacketHeader::MIN_SIZE);
+
+                    let ip_data_len = {
+                        let (udp_hdr_buf, udp_data_buf) =
+                            ip_data_buf.split_at_mut(UdpPacketHeader::SIZE);
+
+                        let data_len = request.encode(udp_data_buf)?.len();
+
+                        warn!("DHCP packet encoded");
+
+                        let mut udp_hdr = UdpPacketHeader::new(68, 67);
+                        udp_hdr.len = UdpPacketHeader::SIZE as u16 + data_len as u16;
+
+                        let l = udp_hdr.encode(udp_hdr_buf)?.len() + data_len;
+
+                        warn!("UDP packet hdr encoded");
+
+                        l
+                    };
+
+                    let mut ip_hdr = Ipv4PacketHeader::new(
+                        our_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
+                        server_ip,
+                        PROTO_UDP,
+                    );
+
+                    let checksum = UdpPacketHeader::checksum(&ip_data_buf[..ip_data_len], &ip_hdr);
+                    UdpPacketHeader::inject_checksum(&mut ip_data_buf[..ip_data_len], checksum);
+
+                    warn!("UDP packet checksum computed & injected");
+
+                    ip_hdr.len = ip_hdr.hlen as u16 + ip_data_len as u16;
+
+                    let l = ip_hdr.encode(ip_hdr_buf)?.len() + ip_data_len;
+
+                    warn!("IP packet hdr encoded");
+
+                    let checksum = Ipv4PacketHeader::checksum(ip_hdr_buf);
+                    Ipv4PacketHeader::inject_checksum(ip_hdr_buf, checksum);
+
+                    warn!("IP packet checksum computed & injected");
+
+                    l
+                };
+
+                socket
+                    .send(&buf[..ip_packet_len])
+                    .await
+                    .map_err(Error::Io)?;
+
+                warn!("IP packet sent");
 
                 if !expected_message_types.is_empty() {
+                    warn!("Awaiting response packet");
+
                     loop {
                         let timer = Timer::after(self.timeout);
 
@@ -206,11 +283,47 @@ pub mod client {
                             Either::Second(_) => break,
                         };
 
-                        let reply = Packet::decode(&buf[..len])?;
+                        let data = &buf[..len];
 
-                        if let Some((mt, settings)) = reply.parse_reply(&self.mac, xid) {
-                            if expected_message_types.iter().any(|emt| mt == *emt) {
-                                return Ok(Some((mt, settings)));
+                        warn!("Got packet");
+
+                        let ip_hdr = Ipv4PacketHeader::decode(data)?;
+
+                        warn!("IP header decoded");
+
+                        if ip_hdr.version == 4 && ip_hdr.p == 17 {
+                            // UDP on top of IPv4
+
+                            warn!("IP packet is for us");
+
+                            // TODO: Validate ipv4 header checksum
+
+                            let (udp_hdr, udp_data) =
+                                &data[ip_hdr.hlen as usize..].split_at(UdpPacketHeader::SIZE);
+
+                            let udp_hdr = UdpPacketHeader::decode(udp_hdr)?;
+
+                            warn!(
+                                "UDP header decoded, src={}, dst={}",
+                                udp_hdr.src, udp_hdr.dst
+                            );
+
+                            if udp_hdr.src == 67 && udp_hdr.dst == 68 {
+                                // Reply from a DHCP server, on our port
+
+                                warn!("UDP packet is for us");
+
+                                // TODO: Validate UDP header checksum
+
+                                let reply = Packet::decode(udp_data)?;
+
+                                warn!("DHCP packet decoded");
+
+                                if let Some((mt, settings)) = reply.parse_reply(&self.mac, xid) {
+                                    if expected_message_types.iter().any(|emt| mt == *emt) {
+                                        return Ok(Some((mt, settings)));
+                                    }
+                                }
                             }
                         }
                     }
