@@ -127,14 +127,17 @@ impl<'a> Packet<'a> {
         }
     }
 
-    pub fn parse_reply(&self, mac: &[u8; 6], xid: u32) -> Option<(MessageType, Settings)> {
+    pub fn is_for_us(&self, mac: &[u8; 6], xid: u32) -> bool {
         const MAC_TRAILING_ZEROS: [u8; 10] = [0; 10];
 
-        if self.chaddr[0..6] == *mac
+        self.chaddr[0..6] == *mac
             && self.chaddr[6..16] == MAC_TRAILING_ZEROS
             && self.xid == xid
             && self.reply
-        {
+    }
+
+    pub fn settings(&self) -> Option<(MessageType, Settings)> {
+        if self.reply {
             let mt = self.options.iter().find_map(|option| {
                 if let DhcpOption::MessageType(mt) = option {
                     Some(mt)

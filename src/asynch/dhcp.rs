@@ -18,7 +18,10 @@ pub mod client {
     use core::fmt::Debug;
 
     use embassy_futures::select::{select, Either};
-    use embassy_time::{Duration, Instant, Timer};
+    use embassy_time::{Duration, Timer};
+
+    use embedded_io::ErrorType;
+    use embedded_io_async::{Read, Write};
 
     use embedded_nal_async::Ipv4Addr;
 
@@ -34,10 +37,39 @@ pub mod client {
 
     // TODO: Ideally should go to `embedded-nal-async`
     pub trait RawSocket {
-        type Error: Debug;
+        type Error: Debug + embedded_io_async::Error;
 
         async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error>;
         async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error>;
+    }
+
+    pub struct IO<T>(pub T);
+
+    impl<T> ErrorType for IO<T>
+    where
+        T: RawSocket,
+    {
+        type Error = T::Error;
+    }
+
+    impl<T> Read for IO<T>
+    where
+        T: RawSocket,
+    {
+        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+            self.0.receive_into(buf).await
+        }
+    }
+
+    impl<T> Write for IO<T>
+    where
+        T: RawSocket,
+    {
+        async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+            self.0.send(buf).await?;
+
+            Ok(buf.len())
+        }
     }
 
     // TODO: Ideally should go to `embedded-nal-async`
@@ -52,8 +84,8 @@ pub mod client {
     #[derive(Clone, Debug)]
     pub struct Configuration {
         pub mac: [u8; 6],
-        pub interface: Option<u32>,
-        pub retries: usize,
+        pub client_port: Option<u16>,
+        pub server_port: u16,
         pub timeout: Duration,
     }
 
@@ -61,263 +93,269 @@ pub mod client {
         pub const fn new(mac: [u8; 6]) -> Self {
             Self {
                 mac,
-                interface: None,
-                retries: 10,
+                client_port: Some(68),
+                server_port: 67,
                 timeout: Duration::from_secs(10),
             }
         }
     }
 
-    pub struct Client<R> {
-        rng: R,
+    pub struct Client<T> {
+        rng: T,
         mac: [u8; 6],
-        interface: Option<u32>,
-        retries: usize,
+        client_port: Option<u16>,
+        server_port: u16,
         timeout: Duration,
     }
 
-    impl<R> Client<R>
+    impl<T> Client<T>
     where
-        R: RngCore,
+        T: RngCore,
     {
-        pub fn new(rng: R, conf: &Configuration) -> Self {
+        pub fn new(rng: T, conf: &Configuration) -> Self {
             warn!("Starting DHCP client with configuration {conf:?}");
 
             Self {
                 rng,
                 mac: conf.mac,
-                interface: conf.interface.and_then(|s| s.try_into().ok()),
-                retries: conf.retries,
+                client_port: conf.client_port,
+                server_port: conf.server_port,
                 timeout: conf.timeout,
             }
         }
 
-        pub async fn discover<U: RawStack>(
+        pub async fn discover<W: Write>(
             &mut self,
-            udp: &mut U,
+            write: W,
             buf: &mut [u8],
+            secs: u16,
             ip: Option<Ipv4Addr>,
-        ) -> Result<Settings, Error<U::Error>> {
+        ) -> Result<u32, Error<W::Error>> {
             let mut opt_buf = Options::buf();
 
-            let (_, settings) = self
-                .send(
-                    udp,
-                    buf,
-                    None,
-                    None,
-                    Options::discover(ip, &mut opt_buf),
-                    &[MessageType::Offer],
-                )
-                .await?
-                .unwrap();
-
-            self.request(udp, buf, settings.server_ip.unwrap(), settings.ip)
-                .await
-        }
-
-        pub async fn request<U: RawStack>(
-            &mut self,
-            udp: &mut U,
-            buf: &mut [u8],
-            server_ip: Ipv4Addr,
-            our_ip: Ipv4Addr,
-        ) -> Result<Settings, Error<U::Error>> {
-            let mut opt_buf = Options::buf();
-
-            let (mt, settings) = self
-                .send(
-                    udp,
-                    buf,
-                    Some(server_ip),
-                    Some(our_ip),
-                    Options::request(our_ip, &mut opt_buf),
-                    &[MessageType::Ack, MessageType::Nak],
-                )
-                .await?
-                .unwrap();
-
-            if matches!(mt, MessageType::Ack) {
-                Ok(settings)
-            } else {
-                Err(Error::Nak)
-            }
-        }
-
-        pub async fn release<U: RawStack>(
-            &mut self,
-            udp: &mut U,
-            buf: &mut [u8],
-            server_ip: Ipv4Addr,
-            our_ip: Ipv4Addr,
-        ) -> Result<(), Error<U::Error>> {
-            let mut opt_buf = Options::buf();
+            let xid = self.rng.next_u32();
 
             self.send(
-                udp,
+                write,
                 buf,
+                secs,
+                xid,
+                None,
+                None,
+                Options::discover(ip, &mut opt_buf),
+            )
+            .await?;
+
+            Ok(xid)
+        }
+
+        pub async fn request<W: Write>(
+            &mut self,
+            write: W,
+            buf: &mut [u8],
+            secs: u16,
+            server_ip: Ipv4Addr,
+            our_ip: Ipv4Addr,
+        ) -> Result<u32, Error<W::Error>> {
+            let mut opt_buf = Options::buf();
+
+            let xid = self.rng.next_u32();
+
+            self.send(
+                write,
+                buf,
+                secs,
+                xid,
+                Some(server_ip),
+                None,
+                Options::request(our_ip, &mut opt_buf),
+            )
+            .await?;
+
+            Ok(xid)
+        }
+
+        pub async fn release<W: Write>(
+            &mut self,
+            write: W,
+            buf: &mut [u8],
+            secs: u16,
+            server_ip: Ipv4Addr,
+            our_ip: Ipv4Addr,
+        ) -> Result<(), Error<W::Error>> {
+            let mut opt_buf = Options::buf();
+
+            let xid = self.rng.next_u32();
+
+            self.send(
+                write,
+                buf,
+                secs,
+                xid,
                 Some(server_ip),
                 Some(our_ip),
                 Options::release(&mut opt_buf),
-                &[],
             )
             .await?;
 
             Ok(())
         }
 
-        pub async fn decline<U: RawStack>(
+        pub async fn decline<W: Write>(
             &mut self,
-            udp: &mut U,
+            write: W,
             buf: &mut [u8],
+            secs: u16,
             server_ip: Ipv4Addr,
             our_ip: Ipv4Addr,
-        ) -> Result<(), Error<U::Error>> {
+        ) -> Result<(), Error<W::Error>> {
             let mut opt_buf = Options::buf();
 
+            let xid = self.rng.next_u32();
+
             self.send(
-                udp,
+                write,
                 buf,
+                secs,
+                xid,
                 Some(server_ip),
                 Some(our_ip),
                 Options::decline(&mut opt_buf),
-                &[],
             )
             .await?;
 
             Ok(())
         }
 
-        async fn send<U: RawStack>(
-            &mut self,
-            udp: &mut U,
+        pub async fn wait_reply<'o, R: Read>(
+            &self,
+            read: R,
+            buf: &'o mut [u8],
+            xid: u32,
+            expected_message_types: Option<&[MessageType]>,
+        ) -> Result<Packet<'o>, Error<R::Error>> {
+            self.recv(read, buf, xid, expected_message_types).await
+        }
+
+        async fn send<W: Write>(
+            &self,
+            mut write: W,
             buf: &mut [u8],
+            secs: u16,
+            xid: u32,
             server_ip: Option<Ipv4Addr>,
             our_ip: Option<Ipv4Addr>,
             options: Options<'_>,
-            expected_message_types: &[MessageType],
-        ) -> Result<Option<(MessageType, Settings)>, Error<U::Error>> {
+            //expected_message_types: &[MessageType],
+        ) -> Result<(), Error<W::Error>> {
             if buf.len() < Ipv4PacketHeader::MIN_SIZE + UdpPacketHeader::SIZE {
                 Err(Error::Format(dhcp::Error::BufferOverflow))?;
             }
 
-            let start = Instant::now();
+            let mut ip_hdr = Ipv4PacketHeader::new(
+                our_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
+                server_ip.unwrap_or(Ipv4Addr::BROADCAST),
+                UdpPacketHeader::PROTO,
+            );
 
-            let xid = self.rng.next_u32();
+            let packet = ip_hdr.encode_with_payload(buf, |buf, ip_hdr| {
+                let mut udp_hdr = UdpPacketHeader::new(68, self.server_port);
 
-            for _ in 0..self.retries {
-                let server_ip = server_ip.unwrap_or(Ipv4Addr::BROADCAST);
+                let len = udp_hdr
+                    .encode_with_payload(buf, ip_hdr, |buf| {
+                        let request =
+                            Packet::new_request(self.mac, xid, secs, our_ip, options.clone());
 
-                let mut socket: U::Socket = udp.connect(self.interface).await.map_err(Error::Io)?;
+                        let len = request.encode(buf)?.len();
 
-                let mut ip_hdr = Ipv4PacketHeader::new(
-                    our_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
-                    server_ip,
-                    UdpPacketHeader::PROTO,
-                );
+                        Ok(len)
+                    })?
+                    .len();
 
-                let packet = ip_hdr.encode_with_payload(buf, |buf, ip_hdr| {
-                    let mut udp_hdr = UdpPacketHeader::new(68, 67);
+                Ok(len)
+            })?;
 
-                    let len = udp_hdr
-                        .encode_with_payload(buf, ip_hdr, |buf| {
-                            let request = Packet::new_request(
-                                self.mac,
-                                xid,
-                                (Instant::now() - start).as_secs() as _,
-                                our_ip,
-                                options.clone(),
-                            );
+            warn!("======== SELF DECODING BEFORE SENDING");
 
-                            let len = request.encode(buf)?.len();
+            warn!("Packet: {packet:?}");
 
-                            Ok(len)
-                        })?
-                        .len();
+            let (ip_hdr, ip_payload) = Ipv4PacketHeader::decode_with_payload(packet)?.unwrap();
+            let (_, udp_payload) = UdpPacketHeader::decode_with_payload(ip_payload, &ip_hdr)?;
 
-                    Ok(len)
-                })?;
+            warn!(
+                "We are about to send DHCP payload:\n{:?}",
+                Packet::decode(udp_payload)
+            );
 
-                warn!("======== SELF DECODING BEFORE SENDING");
+            warn!("======== <<< SELF DECODING BEFORE SENDING");
 
-                warn!("Packet: {packet:?}");
+            write.write_all(packet).await.map_err(Error::Io)?;
 
-                let (ip_hdr, ip_payload) = Ipv4PacketHeader::decode_with_payload(packet)?.unwrap();
-                let (_, udp_payload) = UdpPacketHeader::decode_with_payload(ip_payload, &ip_hdr)?;
+            warn!("IP packet sent");
 
-                warn!(
-                    "We are about to send DHCP payload:\n{:?}",
-                    Packet::decode(udp_payload)
-                );
+            Ok(())
+        }
 
-                warn!("======== <<< SELF DECODING BEFORE SENDING");
+        async fn recv<'o, R: Read>(
+            &self,
+            mut read: R,
+            buf: &'o mut [u8],
+            xid: u32,
+            expected_message_types: Option<&[MessageType]>,
+        ) -> Result<Packet<'o>, Error<R::Error>> {
+            warn!("Awaiting response packet");
 
-                socket.send(packet).await.map_err(Error::Io)?;
+            let reply = loop {
+                let timer = Timer::after(self.timeout);
 
-                warn!("IP packet sent");
+                // NLL...
+                let buf = unsafe { (buf as *mut [u8]).as_mut().unwrap() };
 
-                if !expected_message_types.is_empty() {
-                    warn!("Awaiting response packet");
+                let len = match select(read.read(buf), timer).await {
+                    Either::First(result) => result.map_err(Error::Io)?,
+                    Either::Second(_) => Err(Error::Timeout)?,
+                };
 
-                    loop {
-                        let timer = Timer::after(self.timeout);
+                let packet = &buf[..len];
 
-                        let len = match select(socket.receive_into(buf), timer).await {
-                            Either::First(result) => result.map_err(Error::Io)?,
-                            Either::Second(_) => break,
-                        };
+                warn!("Got packet");
 
-                        let packet = &buf[..len];
+                if let Some((ip_hdr, ip_payload)) = Ipv4PacketHeader::decode_with_payload(packet)? {
+                    if ip_hdr.p == UdpPacketHeader::PROTO {
+                        let (udp_hdr, udp_payload) =
+                            UdpPacketHeader::decode_with_payload(ip_payload, &ip_hdr)?;
 
-                        warn!("Got packet");
-
-                        if let Some((ip_hdr, ip_payload)) =
-                            Ipv4PacketHeader::decode_with_payload(packet)?
+                        if udp_hdr.src == self.server_port
+                            && self
+                                .client_port
+                                .map(|port| port == udp_hdr.dst)
+                                .unwrap_or(true)
                         {
-                            if ip_hdr.p == UdpPacketHeader::PROTO {
-                                let (udp_hdr, udp_payload) =
-                                    UdpPacketHeader::decode_with_payload(ip_payload, &ip_hdr)?;
+                            // Reply from a DHCP server, on our port
 
-                                if udp_hdr.src == 67 && udp_hdr.dst == 68 {
-                                    // Reply from a DHCP server, on our port
+                            warn!("!!!!!!!!!!! UDP packet is for us");
 
-                                    warn!("!!!!!!!!!!! UDP packet is for us");
+                            let reply = Packet::decode(udp_payload)?;
 
-                                    let reply = Packet::decode(udp_payload)?;
+                            warn!("DHCP packet decoded:\n{reply:?}");
 
-                                    warn!("DHCP packet decoded:\n{reply:?}");
+                            if reply.is_for_us(&self.mac, xid) {
+                                if let Some(expected_message_types) = expected_message_types {
+                                    let (mt, _) = reply.settings().unwrap();
 
-                                    if let Some((mt, settings)) = reply.parse_reply(&self.mac, xid)
-                                    {
-                                        if expected_message_types.iter().any(|emt| mt == *emt) {
-                                            return Ok(Some((mt, settings)));
-                                        }
+                                    if expected_message_types.iter().any(|emt| mt == *emt) {
+                                        break reply;
                                     }
-                                } else if udp_hdr.src == 68 && udp_hdr.dst == 67 {
-                                    // Reply from a DHCP server, on our port
-
-                                    warn!("!!! UDP packet from another:\n{udp_payload:?}");
-
-                                    let reply = Packet::decode(udp_payload)?;
-
-                                    warn!("DHCP packet decoded:\n{reply:?}");
-
-                                    if let Some((mt, settings)) = reply.parse_reply(&self.mac, xid)
-                                    {
-                                        if expected_message_types.iter().any(|emt| mt == *emt) {
-                                            return Ok(Some((mt, settings)));
-                                        }
-                                    }
+                                } else {
+                                    break reply;
                                 }
                             }
                         }
                     }
-                } else {
-                    return Ok(None);
                 }
-            }
+            };
 
-            Err(Error::Timeout)
+            Ok(reply)
         }
     }
 }

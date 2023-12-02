@@ -238,7 +238,7 @@ impl StdRawStack {
     }
 }
 
-impl RawStack for StdUdpStack {
+impl RawStack for StdRawStack {
     type Error = io::Error;
 
     type Socket = StdRawSocket;
