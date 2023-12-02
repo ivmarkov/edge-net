@@ -81,6 +81,8 @@ pub mod client {
         R: RngCore,
     {
         pub fn new(rng: R, conf: &Configuration) -> Self {
+            warn!("Starting DHCP client with configuration {conf:?}");
+
             Self {
                 rng,
                 mac: conf.mac,
@@ -195,9 +197,6 @@ pub mod client {
             options: Options<'_>,
             expected_message_types: &[MessageType],
         ) -> Result<Option<(MessageType, Settings)>, Error<U::Error>> {
-            const PROTO_UDP: u8 = 17;
-            const BROADCAST: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 255);
-
             if buf.len() < Ipv4PacketHeader::MIN_SIZE + UdpPacketHeader::SIZE {
                 Err(Error::Format(dhcp::Error::BufferOverflow))?;
             }
@@ -207,68 +206,53 @@ pub mod client {
             let xid = self.rng.next_u32();
 
             for _ in 0..self.retries {
-                let server_ip = server_ip.unwrap_or(BROADCAST);
+                let server_ip = server_ip.unwrap_or(Ipv4Addr::BROADCAST);
 
                 let mut socket: U::Socket = udp.connect(self.interface).await.map_err(Error::Io)?;
 
-                let request = Packet::new_request(
-                    self.mac,
-                    xid,
-                    (Instant::now() - start).as_secs() as _,
-                    our_ip,
-                    options.clone(),
+                let mut ip_hdr = Ipv4PacketHeader::new(
+                    our_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
+                    server_ip,
+                    UdpPacketHeader::PROTO,
                 );
 
-                let ip_packet_len = {
-                    let (ip_hdr_buf, ip_data_buf) = buf.split_at_mut(Ipv4PacketHeader::MIN_SIZE);
+                let packet = ip_hdr.encode_with_payload(buf, |buf, ip_hdr| {
+                    let mut udp_hdr = UdpPacketHeader::new(68, 67);
 
-                    let ip_data_len = {
-                        let (udp_hdr_buf, udp_data_buf) =
-                            ip_data_buf.split_at_mut(UdpPacketHeader::SIZE);
+                    let len = udp_hdr
+                        .encode_with_payload(buf, ip_hdr, |buf| {
+                            let request = Packet::new_request(
+                                self.mac,
+                                xid,
+                                (Instant::now() - start).as_secs() as _,
+                                our_ip,
+                                options.clone(),
+                            );
 
-                        let data_len = request.encode(udp_data_buf)?.len();
+                            let len = request.encode(buf)?.len();
 
-                        warn!("DHCP packet encoded");
+                            Ok(len)
+                        })?
+                        .len();
 
-                        let mut udp_hdr = UdpPacketHeader::new(68, 67);
-                        udp_hdr.len = UdpPacketHeader::SIZE as u16 + data_len as u16;
+                    Ok(len)
+                })?;
 
-                        let l = udp_hdr.encode(udp_hdr_buf)?.len() + data_len;
+                warn!("======== SELF DECODING BEFORE SENDING");
 
-                        warn!("UDP packet hdr encoded");
+                warn!("Packet: {packet:?}");
 
-                        l
-                    };
+                let (ip_hdr, ip_payload) = Ipv4PacketHeader::decode_with_payload(packet)?.unwrap();
+                let (_, udp_payload) = UdpPacketHeader::decode_with_payload(ip_payload, &ip_hdr)?;
 
-                    let mut ip_hdr = Ipv4PacketHeader::new(
-                        our_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
-                        server_ip,
-                        PROTO_UDP,
-                    );
+                warn!(
+                    "We are about to send DHCP payload:\n{:?}",
+                    Packet::decode(udp_payload)
+                );
 
-                    let checksum = UdpPacketHeader::checksum(&ip_data_buf[..ip_data_len], &ip_hdr);
-                    UdpPacketHeader::inject_checksum(&mut ip_data_buf[..ip_data_len], checksum);
+                warn!("======== <<< SELF DECODING BEFORE SENDING");
 
-                    warn!("UDP packet checksum computed & injected");
-
-                    ip_hdr.len = ip_hdr.hlen as u16 + ip_data_len as u16;
-
-                    let l = ip_hdr.encode(ip_hdr_buf)?.len() + ip_data_len;
-
-                    warn!("IP packet hdr encoded");
-
-                    let checksum = Ipv4PacketHeader::checksum(ip_hdr_buf);
-                    Ipv4PacketHeader::inject_checksum(ip_hdr_buf, checksum);
-
-                    warn!("IP packet checksum computed & injected");
-
-                    l
-                };
-
-                socket
-                    .send(&buf[..ip_packet_len])
-                    .await
-                    .map_err(Error::Io)?;
+                socket.send(packet).await.map_err(Error::Io)?;
 
                 warn!("IP packet sent");
 
@@ -283,45 +267,46 @@ pub mod client {
                             Either::Second(_) => break,
                         };
 
-                        let data = &buf[..len];
+                        let packet = &buf[..len];
 
                         warn!("Got packet");
 
-                        let ip_hdr = Ipv4PacketHeader::decode(data)?;
+                        if let Some((ip_hdr, ip_payload)) =
+                            Ipv4PacketHeader::decode_with_payload(packet)?
+                        {
+                            if ip_hdr.p == UdpPacketHeader::PROTO {
+                                let (udp_hdr, udp_payload) =
+                                    UdpPacketHeader::decode_with_payload(ip_payload, &ip_hdr)?;
 
-                        warn!("IP header decoded");
+                                if udp_hdr.src == 67 && udp_hdr.dst == 68 {
+                                    // Reply from a DHCP server, on our port
 
-                        if ip_hdr.version == 4 && ip_hdr.p == 17 {
-                            // UDP on top of IPv4
+                                    warn!("!!!!!!!!!!! UDP packet is for us");
 
-                            warn!("IP packet is for us");
+                                    let reply = Packet::decode(udp_payload)?;
 
-                            // TODO: Validate ipv4 header checksum
+                                    warn!("DHCP packet decoded:\n{reply:?}");
 
-                            let (udp_hdr, udp_data) =
-                                &data[ip_hdr.hlen as usize..].split_at(UdpPacketHeader::SIZE);
+                                    if let Some((mt, settings)) = reply.parse_reply(&self.mac, xid)
+                                    {
+                                        if expected_message_types.iter().any(|emt| mt == *emt) {
+                                            return Ok(Some((mt, settings)));
+                                        }
+                                    }
+                                } else if udp_hdr.src == 68 && udp_hdr.dst == 67 {
+                                    // Reply from a DHCP server, on our port
 
-                            let udp_hdr = UdpPacketHeader::decode(udp_hdr)?;
+                                    warn!("!!! UDP packet from another:\n{udp_payload:?}");
 
-                            warn!(
-                                "UDP header decoded, src={}, dst={}",
-                                udp_hdr.src, udp_hdr.dst
-                            );
+                                    let reply = Packet::decode(udp_payload)?;
 
-                            if udp_hdr.src == 67 && udp_hdr.dst == 68 {
-                                // Reply from a DHCP server, on our port
+                                    warn!("DHCP packet decoded:\n{reply:?}");
 
-                                warn!("UDP packet is for us");
-
-                                // TODO: Validate UDP header checksum
-
-                                let reply = Packet::decode(udp_data)?;
-
-                                warn!("DHCP packet decoded");
-
-                                if let Some((mt, settings)) = reply.parse_reply(&self.mac, xid) {
-                                    if expected_message_types.iter().any(|emt| mt == *emt) {
-                                        return Ok(Some((mt, settings)));
+                                    if let Some((mt, settings)) = reply.parse_reply(&self.mac, xid)
+                                    {
+                                        if expected_message_types.iter().any(|emt| mt == *emt) {
+                                            return Ok(Some((mt, settings)));
+                                        }
                                     }
                                 }
                             }
@@ -360,7 +345,7 @@ pub mod server {
     }
 
     struct Lease {
-        mac: [u8; 6],
+        mac: [u8; 16],
         expires: Instant,
     }
 
@@ -544,7 +529,7 @@ pub mod server {
             )
         }
 
-        fn is_available(&self, mac: &[u8; 6], addr: Ipv4Addr) -> bool {
+        fn is_available(&self, mac: &[u8; 16], addr: Ipv4Addr) -> bool {
             let pos: u32 = addr.into();
 
             let start: u32 = self.range_start.into();
@@ -583,19 +568,19 @@ pub mod server {
             }
         }
 
-        fn current_lease(&self, mac: &[u8; 6]) -> Option<Ipv4Addr> {
+        fn current_lease(&self, mac: &[u8; 16]) -> Option<Ipv4Addr> {
             self.leases
                 .iter()
                 .find_map(|(addr, lease)| (lease.mac == *mac).then_some(*addr))
         }
 
-        fn add_lease(&mut self, addr: Ipv4Addr, mac: [u8; 6], expires: Instant) -> bool {
+        fn add_lease(&mut self, addr: Ipv4Addr, mac: [u8; 16], expires: Instant) -> bool {
             self.remove_lease(&mac);
 
             self.leases.insert(addr, Lease { mac, expires }).is_ok()
         }
 
-        fn remove_lease(&mut self, mac: &[u8; 6]) -> bool {
+        fn remove_lease(&mut self, mac: &[u8; 16]) -> bool {
             if let Some(addr) = self.current_lease(mac) {
                 self.leases.remove(&addr);
 

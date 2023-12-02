@@ -198,7 +198,7 @@ impl RawSocket for StdRawSocket {
             sll_hatype: 0,
             sll_pkttype: 0,
             sll_halen: 6,
-            sll_addr: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], // TODO
+            sll_addr: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0], // TODO
         };
 
         let len = self
