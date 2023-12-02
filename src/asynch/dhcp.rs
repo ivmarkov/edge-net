@@ -4,8 +4,6 @@ use crate::dhcp;
 pub enum Error<E> {
     Io(E),
     Format(dhcp::Error),
-    Timeout,
-    Nak,
 }
 
 impl<E> From<dhcp::Error> for Error<E> {
@@ -17,14 +15,14 @@ impl<E> From<dhcp::Error> for Error<E> {
 pub mod client {
     use core::fmt::Debug;
 
-    use embassy_futures::select::{select, Either};
+    use embassy_futures::select::{self, select, Either};
     use embassy_time::{Duration, Instant, Timer};
 
     use embedded_io_async::{Read, Write};
 
     use embedded_nal_async::Ipv4Addr;
 
-    use log::{info, trace};
+    use log::{info, trace, warn};
 
     use rand_core::RngCore;
 
@@ -33,12 +31,14 @@ pub mod client {
     pub use super::*;
     pub use crate::dhcp::Settings;
 
-    use crate::dhcp::raw_ip::{Ipv4PacketHeader, UdpPacketHeader};
+    use crate::{
+        asynch::tcp::{RawSocket, RawStack, IO},
+        dhcp::raw_ip::{Ipv4PacketHeader, UdpPacketHeader},
+    };
 
     #[derive(Clone, Debug)]
     pub struct Configuration {
         pub mac: [u8; 6],
-        pub raw_packets: bool,
         pub client_port: Option<u16>,
         pub server_port: u16,
         pub timeout: Duration,
@@ -48,7 +48,6 @@ pub mod client {
         pub const fn new(mac: [u8; 6]) -> Self {
             Self {
                 mac,
-                raw_packets: true,
                 client_port: Some(68),
                 server_port: 67,
                 timeout: Duration::from_secs(10),
@@ -57,12 +56,11 @@ pub mod client {
     }
 
     pub struct Client<T> {
-        rng: T,
-        mac: [u8; 6],
-        raw_packets: bool,
+        client: dhcp::client::Client<T>,
         client_port: Option<u16>,
         server_port: u16,
         timeout: Duration,
+        settings: Option<(Settings, Instant)>,
     }
 
     impl<T> Client<T>
@@ -70,259 +68,197 @@ pub mod client {
         T: RngCore,
     {
         pub fn new(rng: T, conf: &Configuration) -> Self {
-            info!("Starting DHCP client with configuration {conf:?}");
+            info!("Creating DHCP client with configuration {conf:?}");
 
             Self {
-                rng,
-                mac: conf.mac,
-                raw_packets: conf.raw_packets,
+                client: dhcp::client::Client {
+                    rng,
+                    mac: conf.mac,
+                    raw_packets: None,
+                },
                 client_port: conf.client_port,
                 server_port: conf.server_port,
                 timeout: conf.timeout,
+                settings: None,
             }
         }
 
-        pub async fn discover<W: Write>(
+        pub async fn run<R: RawStack>(
             &mut self,
-            write: W,
+            stack: R,
             buf: &mut [u8],
-            secs: u16,
-            ip: Option<Ipv4Addr>,
-        ) -> Result<u32, Error<W::Error>> {
-            let mut opt_buf = Options::buf();
+        ) -> Result<Option<Settings>, Error<R::Error>> {
+            loop {
+                if let Some((settings, acquired)) = self.settings.as_ref() {
+                    // Keep the lease
+                    let now = Instant::now();
 
-            let xid = self.rng.next_u32();
+                    if now - *acquired
+                        < Duration::from_secs(settings.lease_time_secs.unwrap_or(7200) / 3 as _)
+                    {
+                        info!("Renewing DHCP lease...");
 
-            self.send(
-                write,
-                buf,
-                secs,
-                xid,
-                None,
-                None,
-                Options::discover(ip, &mut opt_buf),
-            )
-            .await?;
+                        if let Some(settings) = self
+                            .request(stack, buf, settings.server_ip.unwrap(), settings.ip)
+                            .await?
+                        {
+                            self.settings = Some((settings, Instant::now()));
+                        } else {
+                            // Lease was not renewed; let the user know
+                            self.settings = None;
 
-            Ok(xid)
-        }
+                            return Ok(None);
+                        }
+                    } else {
+                        Timer::after(Duration::from_secs(60)).await;
+                    }
+                } else {
+                    // Look for offers
+                    let offer = self.discover(stack, buf).await?;
 
-        pub async fn request<W: Write>(
-            &mut self,
-            write: W,
-            buf: &mut [u8],
-            secs: u16,
-            server_ip: Ipv4Addr,
-            our_ip: Ipv4Addr,
-        ) -> Result<u32, Error<W::Error>> {
-            let mut opt_buf = Options::buf();
+                    if let Some(settings) = self
+                        .request(stack, buf, offer.server_ip.unwrap(), offer.ip)
+                        .await?
+                    {
+                        // IP acquired; let the user know
+                        self.settings = Some((settings.clone(), Instant::now()));
 
-            let xid = self.rng.next_u32();
-
-            self.send(
-                write,
-                buf,
-                secs,
-                xid,
-                Some(server_ip),
-                None,
-                Options::request(our_ip, &mut opt_buf),
-            )
-            .await?;
-
-            Ok(xid)
-        }
-
-        pub async fn release<W: Write>(
-            &mut self,
-            write: W,
-            buf: &mut [u8],
-            secs: u16,
-            server_ip: Ipv4Addr,
-            our_ip: Ipv4Addr,
-        ) -> Result<(), Error<W::Error>> {
-            let mut opt_buf = Options::buf();
-
-            let xid = self.rng.next_u32();
-
-            self.send(
-                write,
-                buf,
-                secs,
-                xid,
-                Some(server_ip),
-                Some(our_ip),
-                Options::release(&mut opt_buf),
-            )
-            .await?;
-
-            Ok(())
-        }
-
-        pub async fn decline<W: Write>(
-            &mut self,
-            write: W,
-            buf: &mut [u8],
-            secs: u16,
-            server_ip: Ipv4Addr,
-            our_ip: Ipv4Addr,
-        ) -> Result<(), Error<W::Error>> {
-            let mut opt_buf = Options::buf();
-
-            let xid = self.rng.next_u32();
-
-            self.send(
-                write,
-                buf,
-                secs,
-                xid,
-                Some(server_ip),
-                Some(our_ip),
-                Options::decline(&mut opt_buf),
-            )
-            .await?;
-
-            Ok(())
-        }
-
-        pub async fn wait_reply<'o, R: Read>(
-            &self,
-            read: R,
-            buf: &'o mut [u8],
-            xid: u32,
-            expected_message_types: Option<&[MessageType]>,
-        ) -> Result<Packet<'o>, Error<R::Error>> {
-            self.recv(read, buf, xid, expected_message_types).await
-        }
-
-        async fn send<W: Write>(
-            &self,
-            mut write: W,
-            buf: &mut [u8],
-            secs: u16,
-            xid: u32,
-            server_ip: Option<Ipv4Addr>,
-            our_ip: Option<Ipv4Addr>,
-            options: Options<'_>,
-            //expected_message_types: &[MessageType],
-        ) -> Result<(), Error<W::Error>> {
-            let packet = if self.raw_packets {
-                if buf.len() < Ipv4PacketHeader::MIN_SIZE + UdpPacketHeader::SIZE {
-                    Err(Error::Format(dhcp::Error::BufferOverflow))?;
+                        return Ok(Some(settings));
+                    }
                 }
+            }
+        }
 
-                let mut ip_hdr = Ipv4PacketHeader::new(
-                    our_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
-                    server_ip.unwrap_or(Ipv4Addr::BROADCAST),
-                    UdpPacketHeader::PROTO,
-                );
+        pub async fn release<R: RawStack>(
+            &mut self,
+            stack: R,
+            buf: &mut [u8],
+        ) -> Result<(), Error<R::Error>> {
+            if let Some((settings, _)) = self.settings.as_ref() {
+                let mut socket = stack.connect(Some(*if_id)).await?;
 
-                ip_hdr.encode_with_payload(buf, |buf, ip_hdr| {
-                    let mut udp_hdr = UdpPacketHeader::new(68, self.server_port);
+                let packet =
+                    self.client
+                        .release(&mut buf, 0, settings.server_ip.unwrap(), settings.ip)?;
 
-                    let len = udp_hdr
-                        .encode_with_payload(buf, ip_hdr, |buf| {
-                            let request =
-                                Packet::new_request(self.mac, xid, secs, our_ip, options.clone());
+                socket.send(packet).await?;
+            }
 
-                            let len = request.encode(buf)?.len();
-
-                            Ok(len)
-                        })?
-                        .len();
-
-                    Ok(len)
-                })?
-            } else {
-                let request = Packet::new_request(self.mac, xid, secs, our_ip, options.clone());
-
-                request.encode(buf)?
-            };
-
-            write.write_all(packet).await.map_err(Error::Io)?;
+            self.settings = None;
 
             Ok(())
         }
 
-        async fn recv<'o, R: Read>(
-            &self,
-            mut read: R,
-            buf: &'o mut [u8],
-            xid: u32,
-            expected_message_types: Option<&[MessageType]>,
-        ) -> Result<Packet<'o>, Error<R::Error>> {
-            trace!("Awaiting response packet");
+        async fn discover<R: RawStack>(
+            &mut self,
+            stack: R,
+            buf: &mut [u8],
+        ) -> Result<Settings, Error<R::Error>> {
+            info!("Discovering DHCP servers...");
 
             let start = Instant::now();
-            let mut now = start;
 
-            let reply = loop {
-                let timer = Timer::after(if now < start + self.timeout {
-                    start + self.timeout - now
-                } else {
-                    Duration::from_secs(1)
-                });
+            loop {
+                let mut socket = stack.connect(Some(*if_id)).await?;
 
-                // NLL...
-                let buf = unsafe { (buf as *mut [u8]).as_mut().unwrap() };
+                let (packet, xid) = self.client.discover(
+                    &mut buf,
+                    (Instant::now() - start).as_secs() as _,
+                    None,
+                )?;
 
-                let len = match select(read.read(buf), timer).await {
-                    Either::First(result) => result.map_err(Error::Io)?,
-                    Either::Second(_) => Err(Error::Timeout)?,
-                };
+                socket.send(packet).await?;
 
-                let packet = &buf[..len];
+                let offer_start = Instant::now();
 
-                let decode = |packet| {
-                    let reply = Packet::decode(packet)?;
+                while Instant::now() - offer_start < self.timeout {
+                    let timer = Timer::after(Duration::from_secs(10));
 
-                    info!("DHCP packet decoded:\n{reply:?}");
+                    if let Either::First(result) = select(socket.receive_into(buf), timer) {
+                        let len = result?;
+                        let packet = &buf[..len];
 
-                    if reply.is_for_us(&self.mac, xid) {
-                        if let Some(expected_message_types) = expected_message_types {
-                            let (mt, _) = reply.settings().unwrap();
+                        if let Some(reply) =
+                            self.client.recv(packet, xid, Some(&[MessageType::Offer]))?
+                        {
+                            let settings = reply.settings().unwrap().1;
 
-                            if expected_message_types.iter().any(|emt| mt == *emt) {
-                                return Ok(Some(reply));
-                            }
-                        } else {
-                            return Ok(Some(reply));
+                            info!(
+                                "IP {} offered by DHCP server {}",
+                                settings.ip,
+                                settings.server_ip.unwrap()
+                            );
+                            return Ok(settings);
                         }
-                    }
-
-                    Ok::<_, dhcp::Error>(None)
-                };
-
-                if self.raw_packets {
-                    if let Some((ip_hdr, ip_payload)) =
-                        Ipv4PacketHeader::decode_with_payload(packet)?
-                    {
-                        if ip_hdr.p == UdpPacketHeader::PROTO {
-                            let (udp_hdr, udp_payload) =
-                                UdpPacketHeader::decode_with_payload(ip_payload, &ip_hdr)?;
-
-                            if udp_hdr.src == self.server_port
-                                && self
-                                    .client_port
-                                    .map(|port| port == udp_hdr.dst)
-                                    .unwrap_or(true)
-                            {
-                                if let Some(reply) = decode(udp_payload)? {
-                                    break reply;
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    if let Some(reply) = decode(packet)? {
-                        break reply;
                     }
                 }
 
-                now = Instant::now();
-            };
+                drop(socket);
 
-            Ok(reply)
+                info!("No DHCP offers received, sleeping for a while...");
+
+                Timer::after(Duration::from_secs(10)).await;
+            }
+        }
+
+        async fn request<R: RawStack>(
+            &mut self,
+            stack: R,
+            buf: &mut [u8],
+            server_ip: Ipv4Addr,
+            ip: Ipv4Addr,
+        ) -> Result<Option<Settings>, Error<W::Error>> {
+            for _ in 0..3 {
+                info!("Requesting IP {ip} from DHCP server {server_ip}");
+
+                let mut socket = stack.connect(Some(*if_id)).await?;
+
+                let start = Instant::now();
+
+                let (packet, xid) = self.client.request(
+                    &mut buf,
+                    (Instant::now() - start).as_secs() as _,
+                    server_ip,
+                    ip,
+                )?;
+
+                socket.send(packet).await?;
+
+                let request_start = Instant::now();
+
+                while Instant::now() - request_start < self.timeout {
+                    let timer = Timer::after(Duration::from_secs(10));
+
+                    if let Either::First(result) = select(socket.receive_into(buf), timer) {
+                        let len = result?;
+                        let packet = &buf[..len];
+
+                        if let Some(reply) = self.client.recv(
+                            packet,
+                            xid,
+                            Some(&[MessageType::Ack, MessageType::Nak]),
+                        )? {
+                            let (mt, settings) = reply.settings().unwrap();
+
+                            let settings = if matches!(mt, MessageType::Ack) {
+                                info!("IP {} leased successfully", settings.ip);
+                                Some(settings)
+                            } else {
+                                info!("IP {} not acknowledged", settings.ip);
+                                None
+                            };
+
+                            return Ok(settings);
+                        }
+                    }
+                }
+
+                drop(socket);
+            }
+
+            warn!("IP request was not replied");
+
+            Ok(None)
         }
     }
 }
@@ -331,6 +267,9 @@ pub mod server {
     use core::fmt::Debug;
 
     use embassy_time::{Duration, Instant};
+
+    use embedded_io_async::{Read, Write};
+
     use embedded_nal_async::{IpAddr, Ipv4Addr, SocketAddr, UdpStack, UnconnectedUdp};
 
     use crate::dhcp::{DhcpOption, MessageType, Options, Packet};
@@ -385,7 +324,7 @@ pub mod server {
             buf: &mut [u8],
         ) -> Result<(), Error<U::Error>> {
             let mut socket = udp
-                .bind_multiple(SocketAddr::new(IpAddr::V4(self.ip), 66))
+                .bind_multiple(SocketAddr::new(IpAddr::V4(self.ip), 67))
                 .await
                 .map_err(Error::Io)?;
 
@@ -394,15 +333,22 @@ pub mod server {
             }
         }
 
-        async fn handle<U: UdpStack>(
+        pub async fn read<R: Read>(
             &mut self,
-            socket: &mut U::MultiplyBound,
+            read: R,
             buf: &mut [u8],
-        ) -> Result<(), Error<U::Error>> {
+        ) -> Result<(), Error<R::Error>> {
             let (len, local_addr, remote_addr) =
                 socket.receive_into(buf).await.map_err(Error::Io)?;
+        }
 
-            let request = Packet::decode(&buf[..len])?;
+        pub async fn handle<'o, W: Write>(
+            &mut self,
+            mut write: W,
+            buf: &'o mut [u8],
+            incoming_len: usize,
+        ) -> Result<(), Error<W::Error>> {
+            let request = Packet::decode(&buf[..incoming_len])?;
 
             if !request.reply {
                 let mt = request.options.iter().find_map(|option| {
@@ -501,10 +447,7 @@ pub mod server {
                         if let Some(reply) = reply {
                             let data = reply.encode(buf)?;
 
-                            socket
-                                .send(local_addr, remote_addr, data)
-                                .await
-                                .map_err(Error::Io)?;
+                            write.write_all(data).await.map_err(Error::Io)?;
                         }
                     }
                 }

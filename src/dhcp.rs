@@ -5,6 +5,8 @@ use no_std_net::Ipv4Addr;
 
 use num_enum::TryFromPrimitive;
 
+use self::raw_ip::{Ipv4PacketHeader, UdpPacketHeader};
+
 #[derive(Debug)]
 pub enum Error {
     DataUnderflow,
@@ -230,6 +232,64 @@ impl<'a> Packet<'a> {
         let len = bytes.len();
 
         Ok(&buf[..len])
+    }
+
+    /// Parses the packet from a byte slice that models a raw IP packet
+    /// Useful when working with raw sockets
+    pub fn decode_raw(
+        data: &'a [u8],
+        src_port: Option<u16>,
+        dst_port: Option<u16>,
+    ) -> Result<Option<(Ipv4PacketHeader, UdpPacketHeader, Self)>, Error> {
+        if let Some((ip_hdr, ip_payload)) = Ipv4PacketHeader::decode_with_payload(data)? {
+            if ip_hdr.p == UdpPacketHeader::PROTO {
+                let (udp_hdr, udp_payload) =
+                    UdpPacketHeader::decode_with_payload(ip_payload, &ip_hdr)?;
+
+                if src_port.map(|p| p == udp_hdr.src).unwrap_or(true)
+                    && dst_port.map(|p| p == udp_hdr.dst).unwrap_or(true)
+                {
+                    return Ok(Some((ip_hdr, udp_hdr, Packet::decode(udp_payload)?)));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Encodes the packet into the provided buf slice, together with a UDP and IPv$ headers
+    /// Useful when working with raw sockets
+    pub fn encode_raw<'o>(
+        &self,
+        src_ip: Option<Ipv4Addr>,
+        src_port: u16,
+        dst_ip: Option<Ipv4Addr>,
+        dst_port: u16,
+        buf: &'o mut [u8],
+    ) -> Result<&'o [u8], Error> {
+        if buf.len() < Ipv4PacketHeader::MIN_SIZE + UdpPacketHeader::SIZE {
+            Err(Error::BufferOverflow)?;
+        }
+
+        let mut ip_hdr = Ipv4PacketHeader::new(
+            src_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
+            dst_ip.unwrap_or(Ipv4Addr::BROADCAST),
+            UdpPacketHeader::PROTO,
+        );
+
+        ip_hdr.encode_with_payload(buf, |buf, ip_hdr| {
+            let mut udp_hdr = UdpPacketHeader::new(src_port, dst_port);
+
+            let len = udp_hdr
+                .encode_with_payload(buf, ip_hdr, |buf| {
+                    let len = self.encode(buf)?.len();
+
+                    Ok(len)
+                })?
+                .len();
+
+            Ok(len)
+        })
     }
 }
 
@@ -731,6 +791,415 @@ impl<'a> BytesOut<'a> {
             self.offset += data.len();
 
             Ok(self)
+        }
+    }
+}
+
+pub mod client {
+    use core::fmt::Debug;
+
+    use log::trace;
+
+    use rand_core::RngCore;
+
+    use super::*;
+
+    #[derive(Clone, Debug)]
+    pub struct RawPackets {
+        pub client_port: u16,
+        pub server_port: u16,
+    }
+
+    impl RawPackets {
+        pub const fn new() -> Self {
+            Self {
+                client_port: 68,
+                server_port: 67,
+            }
+        }
+    }
+
+    pub struct Client<T> {
+        pub rng: T,
+        pub mac: [u8; 6],
+        pub raw_packets: Option<RawPackets>,
+    }
+
+    impl<T> Client<T>
+    where
+        T: RngCore,
+    {
+        pub fn discover<'o>(
+            &mut self,
+            buf: &'o mut [u8],
+            secs: u16,
+            ip: Option<Ipv4Addr>,
+        ) -> Result<(&'o [u8], u32), Error> {
+            let mut opt_buf = Options::buf();
+
+            self.send(buf, secs, None, None, Options::discover(ip, &mut opt_buf))
+        }
+
+        pub fn request<'o>(
+            &mut self,
+            buf: &'o mut [u8],
+            secs: u16,
+            server_ip: Ipv4Addr,
+            our_ip: Ipv4Addr,
+        ) -> Result<(&'o [u8], u32), Error> {
+            let mut opt_buf = Options::buf();
+
+            self.send(
+                buf,
+                secs,
+                Some(server_ip),
+                None,
+                Options::request(our_ip, &mut opt_buf),
+            )
+        }
+
+        pub fn release<'o>(
+            &mut self,
+            buf: &'o mut [u8],
+            secs: u16,
+            server_ip: Ipv4Addr,
+            our_ip: Ipv4Addr,
+        ) -> Result<&'o [u8], Error> {
+            let mut opt_buf = Options::buf();
+
+            self.send(
+                buf,
+                secs,
+                Some(server_ip),
+                Some(our_ip),
+                Options::release(&mut opt_buf),
+            )
+            .map(|r| r.0)
+        }
+
+        pub fn decline<'o>(
+            &mut self,
+            buf: &'o mut [u8],
+            secs: u16,
+            server_ip: Ipv4Addr,
+            our_ip: Ipv4Addr,
+        ) -> Result<&'o [u8], Error> {
+            let mut opt_buf = Options::buf();
+
+            self.send(
+                buf,
+                secs,
+                Some(server_ip),
+                Some(our_ip),
+                Options::decline(&mut opt_buf),
+            )
+            .map(|r| r.0)
+        }
+
+        pub fn send<'o>(
+            &mut self,
+            buf: &'o mut [u8],
+            secs: u16,
+            server_ip: Option<Ipv4Addr>,
+            our_ip: Option<Ipv4Addr>,
+            options: Options<'_>,
+        ) -> Result<(&'o [u8], u32), Error> {
+            let xid = self.rng.next_u32();
+
+            let request = Packet::new_request(self.mac, xid, secs, our_ip, options.clone());
+
+            let data = if let Some(raw_packets_conf) = self.raw_packets.as_ref() {
+                request.encode_raw(
+                    our_ip,
+                    raw_packets_conf.client_port,
+                    server_ip,
+                    raw_packets_conf.server_port,
+                    buf,
+                )?
+            } else {
+                request.encode(buf)?
+            };
+
+            Ok((data, xid))
+        }
+
+        pub fn recv<'o>(
+            &self,
+            data: &'o [u8],
+            xid: u32,
+            expected_message_types: Option<&[MessageType]>,
+        ) -> Result<Option<Packet<'o>>, Error> {
+            let reply = if let Some(raw_packets_conf) = self.raw_packets.as_ref() {
+                Packet::decode_raw(
+                    data,
+                    Some(raw_packets_conf.server_port),
+                    Some(raw_packets_conf.client_port),
+                )?
+                .map(|r| r.2)
+            } else {
+                Some(Packet::decode(data)?)
+            };
+
+            trace!("DHCP packet decoded:\n{reply:?}");
+
+            Ok(reply.and_then(|reply| {
+                if reply.is_for_us(&self.mac, xid) {
+                    if let Some(expected_message_types) = expected_message_types {
+                        let (mt, _) = reply.settings().unwrap();
+
+                        if expected_message_types.iter().any(|emt| mt == *emt) {
+                            return Some(reply);
+                        }
+                    } else {
+                        return Some(reply);
+                    }
+                }
+
+                None
+            }))
+        }
+    }
+}
+
+pub mod server {
+    use core::fmt::Debug;
+
+    use embassy_time::{Duration, Instant};
+
+    use super::*;
+
+    pub use super::client::RawPackets;
+
+    #[derive(Clone, Debug)]
+    pub struct Lease {
+        mac: [u8; 16],
+        expires: Instant,
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct Server<const N: usize> {
+        pub ip: Ipv4Addr,
+        pub raw_packets_udp_port: Option<u16>,
+        pub gateways: heapless::Vec<Ipv4Addr, 1>,
+        pub subnet: Option<Ipv4Addr>,
+        pub dns: heapless::Vec<Ipv4Addr, 2>,
+        pub range_start: Ipv4Addr,
+        pub range_end: Ipv4Addr,
+        pub lease_duration: Duration,
+        pub leases: heapless::LinearMap<Ipv4Addr, Lease, N>,
+    }
+
+    impl<const N: usize> Server<N> {
+        pub fn handle<'o>(
+            &mut self,
+            buf: &'o mut [u8],
+            incoming_len: usize,
+        ) -> Result<Option<&'o [u8]>, Error> {
+            let request = if let Some(port) = self.raw_packets_udp_port {
+                Packet::decode_raw(&buf[..incoming_len], None, Some(port))?
+                    .map(|(ip_hdr, udp_hdr, request)| (Some((ip_hdr, udp_hdr)), request))
+            } else {
+                Some((None, Packet::decode(&buf[..incoming_len])?))
+            };
+
+            if let Some((raw_hdrs, request)) = request {
+                if !request.reply {
+                    let mt = request.options.iter().find_map(|option| {
+                        if let DhcpOption::MessageType(mt) = option {
+                            Some(mt)
+                        } else {
+                            None
+                        }
+                    });
+
+                    if let Some(mt) = mt {
+                        let server_identifier = request.options.iter().find_map(|option| {
+                            if let DhcpOption::ServerIdentifier(ip) = option {
+                                Some(ip)
+                            } else {
+                                None
+                            }
+                        });
+
+                        if server_identifier == Some(self.ip)
+                            || server_identifier.is_none() && matches!(mt, MessageType::Discover)
+                        {
+                            let mut opt_buf = Options::buf();
+
+                            let reply = match mt {
+                                MessageType::Discover => {
+                                    let requested_ip = request.options.iter().find_map(|option| {
+                                        if let DhcpOption::RequestedIpAddress(ip) = option {
+                                            Some(ip)
+                                        } else {
+                                            None
+                                        }
+                                    });
+
+                                    let ip = requested_ip
+                                        .and_then(|ip| {
+                                            self.is_available(&request.chaddr, ip).then_some(ip)
+                                        })
+                                        .or_else(|| self.current_lease(&request.chaddr))
+                                        .or_else(|| self.available());
+
+                                    ip.map(|ip| {
+                                        self.reply_to(
+                                            &request,
+                                            MessageType::Offer,
+                                            Some(ip),
+                                            &mut opt_buf,
+                                        )
+                                    })
+                                }
+                                MessageType::Request => {
+                                    let ip = request
+                                        .options
+                                        .iter()
+                                        .find_map(|option| {
+                                            if let DhcpOption::RequestedIpAddress(ip) = option {
+                                                Some(ip)
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .unwrap_or(request.ciaddr);
+
+                                    Some(
+                                        if self.is_available(&request.chaddr, ip)
+                                            && self.add_lease(
+                                                ip,
+                                                request.chaddr,
+                                                Instant::now() + self.lease_duration,
+                                            )
+                                        {
+                                            self.reply_to(
+                                                &request,
+                                                MessageType::Ack,
+                                                Some(ip),
+                                                &mut opt_buf,
+                                            )
+                                        } else {
+                                            self.reply_to(
+                                                &request,
+                                                MessageType::Nak,
+                                                None,
+                                                &mut opt_buf,
+                                            )
+                                        },
+                                    )
+                                }
+                                MessageType::Decline | MessageType::Release => {
+                                    self.remove_lease(&request.chaddr);
+
+                                    None
+                                }
+                                _ => None,
+                            };
+
+                            if let Some(reply) = reply {
+                                let packet = if let Some((ip_hdr, udp_hdr)) = raw_hdrs {
+                                    reply.encode_raw(
+                                        Some(self.ip),
+                                        udp_hdr.dst,
+                                        Some(ip_hdr.src),
+                                        udp_hdr.src,
+                                        buf,
+                                    )?
+                                } else {
+                                    reply.encode(buf)?
+                                };
+
+                                return Ok(Some(packet));
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(None)
+        }
+
+        fn reply_to<'a>(
+            &'a self,
+            request: &Packet<'_>,
+            mt: MessageType,
+            ip: Option<Ipv4Addr>,
+            buf: &'a mut [DhcpOption<'a>],
+        ) -> Packet<'a> {
+            request.new_reply(
+                ip,
+                request.options.reply(
+                    mt,
+                    self.ip,
+                    self.lease_duration.as_secs() as _,
+                    &self.gateways,
+                    self.subnet,
+                    &self.dns,
+                    buf,
+                ),
+            )
+        }
+
+        fn is_available(&self, mac: &[u8; 16], addr: Ipv4Addr) -> bool {
+            let pos: u32 = addr.into();
+
+            let start: u32 = self.range_start.into();
+            let end: u32 = self.range_end.into();
+
+            pos >= start
+                && pos <= end
+                && match self.leases.get(&addr) {
+                    Some(lease) => lease.mac == *mac || Instant::now() > lease.expires,
+                    None => true,
+                }
+        }
+
+        fn available(&mut self) -> Option<Ipv4Addr> {
+            let start: u32 = self.range_start.into();
+            let end: u32 = self.range_end.into();
+
+            for pos in start..end + 1 {
+                let addr = pos.into();
+
+                if !self.leases.contains_key(&addr) {
+                    return Some(addr);
+                }
+            }
+
+            if let Some(addr) = self
+                .leases
+                .iter()
+                .find_map(|(addr, lease)| (Instant::now() > lease.expires).then_some(*addr))
+            {
+                self.leases.remove(&addr);
+
+                Some(addr)
+            } else {
+                None
+            }
+        }
+
+        fn current_lease(&self, mac: &[u8; 16]) -> Option<Ipv4Addr> {
+            self.leases
+                .iter()
+                .find_map(|(addr, lease)| (lease.mac == *mac).then_some(*addr))
+        }
+
+        fn add_lease(&mut self, addr: Ipv4Addr, mac: [u8; 16], expires: Instant) -> bool {
+            self.remove_lease(&mac);
+
+            self.leases.insert(addr, Lease { mac, expires }).is_ok()
+        }
+
+        fn remove_lease(&mut self, mac: &[u8; 16]) -> bool {
+            if let Some(addr) = self.current_lease(mac) {
+                self.leases.remove(&addr);
+
+                true
+            } else {
+                false
+            }
         }
     }
 }
