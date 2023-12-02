@@ -754,7 +754,8 @@ const MESSAGE: u8 = 56;
 // Useful in the context of DHCP, as it operates in terms of raw sockets (particuarly the client) so (dis)assembling
 // IP & UDP packets "by hand" is necessary.
 pub mod raw_ip {
-    use log::warn;
+    use log::trace;
+
     use no_std_net::Ipv4Addr;
 
     use super::{BytesIn, BytesOut, Error};
@@ -822,8 +823,6 @@ pub mod raw_ip {
         pub fn encode<'o>(&self, buf: &'o mut [u8]) -> Result<&'o [u8], Error> {
             let mut bytes = BytesOut::new(buf);
 
-            warn!("About to encode IP HDR: {self:?}");
-
             bytes
                 .byte(
                     (self.version << 4) | (self.hlen / 4 + (if self.hlen % 4 > 0 { 1 } else { 0 })),
@@ -875,8 +874,6 @@ pub mod raw_ip {
 
             Self::inject_checksum(hdr_buf, checksum);
 
-            warn!("IP_HDR: {hdr_buf:?}, checksum: {checksum}");
-
             Ok(&buf[..len])
         }
 
@@ -893,7 +890,7 @@ pub mod raw_ip {
 
                 let checksum = Self::checksum(&packet[..len]); // TODO: Error if invalid
 
-                warn!("IP header decoded, total_size={}, src={}, dst={}, hlen={}, size={}, checksum={}, ours={}", packet.len(), hdr.src, hdr.dst, hdr.hlen, hdr.len, hdr.sum, checksum);
+                trace!("IP header decoded, total_size={}, src={}, dst={}, hlen={}, size={}, checksum={}, ours={}", packet.len(), hdr.src, hdr.dst, hdr.hlen, hdr.len, hdr.sum, checksum);
 
                 let packet = &packet[..len];
                 let hdr_len = hdr.hlen as usize;
@@ -1020,9 +1017,13 @@ pub mod raw_ip {
 
             let checksum = Self::checksum(&packet[..len], ip_hdr);
 
-            warn!(
+            trace!(
                 "UDP header decoded, src={}, dst={}, size={}, checksum={}, ours={}",
-                hdr.src, hdr.dst, hdr.len, hdr.sum, checksum
+                hdr.src,
+                hdr.dst,
+                hdr.len,
+                hdr.sum,
+                checksum
             );
 
             let packet = &packet[..len];

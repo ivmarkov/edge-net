@@ -18,14 +18,14 @@ pub mod client {
     use core::fmt::Debug;
 
     use embassy_futures::select::{select, Either};
-    use embassy_time::{Duration, Timer};
+    use embassy_time::{Duration, Instant, Timer};
 
-    use embedded_io::ErrorType;
     use embedded_io_async::{Read, Write};
 
     use embedded_nal_async::Ipv4Addr;
 
-    use log::warn;
+    use log::{info, trace};
+
     use rand_core::RngCore;
 
     use self::dhcp::{MessageType, Options, Packet};
@@ -35,55 +35,10 @@ pub mod client {
 
     use crate::dhcp::raw_ip::{Ipv4PacketHeader, UdpPacketHeader};
 
-    // TODO: Ideally should go to `embedded-nal-async`
-    pub trait RawSocket {
-        type Error: Debug + embedded_io_async::Error;
-
-        async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error>;
-        async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error>;
-    }
-
-    pub struct IO<T>(pub T);
-
-    impl<T> ErrorType for IO<T>
-    where
-        T: RawSocket,
-    {
-        type Error = T::Error;
-    }
-
-    impl<T> Read for IO<T>
-    where
-        T: RawSocket,
-    {
-        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-            self.0.receive_into(buf).await
-        }
-    }
-
-    impl<T> Write for IO<T>
-    where
-        T: RawSocket,
-    {
-        async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-            self.0.send(buf).await?;
-
-            Ok(buf.len())
-        }
-    }
-
-    // TODO: Ideally should go to `embedded-nal-async`
-    pub trait RawStack {
-        type Error: Debug;
-
-        type Socket: RawSocket<Error = Self::Error>;
-
-        async fn connect(&self, interface: Option<u32>) -> Result<Self::Socket, Self::Error>;
-    }
-
     #[derive(Clone, Debug)]
     pub struct Configuration {
         pub mac: [u8; 6],
+        pub raw_packets: bool,
         pub client_port: Option<u16>,
         pub server_port: u16,
         pub timeout: Duration,
@@ -93,6 +48,7 @@ pub mod client {
         pub const fn new(mac: [u8; 6]) -> Self {
             Self {
                 mac,
+                raw_packets: true,
                 client_port: Some(68),
                 server_port: 67,
                 timeout: Duration::from_secs(10),
@@ -103,6 +59,7 @@ pub mod client {
     pub struct Client<T> {
         rng: T,
         mac: [u8; 6],
+        raw_packets: bool,
         client_port: Option<u16>,
         server_port: u16,
         timeout: Duration,
@@ -113,11 +70,12 @@ pub mod client {
         T: RngCore,
     {
         pub fn new(rng: T, conf: &Configuration) -> Self {
-            warn!("Starting DHCP client with configuration {conf:?}");
+            info!("Starting DHCP client with configuration {conf:?}");
 
             Self {
                 rng,
                 mac: conf.mac,
+                raw_packets: conf.raw_packets,
                 client_port: conf.client_port,
                 server_port: conf.server_port,
                 timeout: conf.timeout,
@@ -248,50 +206,40 @@ pub mod client {
             options: Options<'_>,
             //expected_message_types: &[MessageType],
         ) -> Result<(), Error<W::Error>> {
-            if buf.len() < Ipv4PacketHeader::MIN_SIZE + UdpPacketHeader::SIZE {
-                Err(Error::Format(dhcp::Error::BufferOverflow))?;
-            }
+            let packet = if self.raw_packets {
+                if buf.len() < Ipv4PacketHeader::MIN_SIZE + UdpPacketHeader::SIZE {
+                    Err(Error::Format(dhcp::Error::BufferOverflow))?;
+                }
 
-            let mut ip_hdr = Ipv4PacketHeader::new(
-                our_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
-                server_ip.unwrap_or(Ipv4Addr::BROADCAST),
-                UdpPacketHeader::PROTO,
-            );
+                let mut ip_hdr = Ipv4PacketHeader::new(
+                    our_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
+                    server_ip.unwrap_or(Ipv4Addr::BROADCAST),
+                    UdpPacketHeader::PROTO,
+                );
 
-            let packet = ip_hdr.encode_with_payload(buf, |buf, ip_hdr| {
-                let mut udp_hdr = UdpPacketHeader::new(68, self.server_port);
+                ip_hdr.encode_with_payload(buf, |buf, ip_hdr| {
+                    let mut udp_hdr = UdpPacketHeader::new(68, self.server_port);
 
-                let len = udp_hdr
-                    .encode_with_payload(buf, ip_hdr, |buf| {
-                        let request =
-                            Packet::new_request(self.mac, xid, secs, our_ip, options.clone());
+                    let len = udp_hdr
+                        .encode_with_payload(buf, ip_hdr, |buf| {
+                            let request =
+                                Packet::new_request(self.mac, xid, secs, our_ip, options.clone());
 
-                        let len = request.encode(buf)?.len();
+                            let len = request.encode(buf)?.len();
 
-                        Ok(len)
-                    })?
-                    .len();
+                            Ok(len)
+                        })?
+                        .len();
 
-                Ok(len)
-            })?;
+                    Ok(len)
+                })?
+            } else {
+                let request = Packet::new_request(self.mac, xid, secs, our_ip, options.clone());
 
-            warn!("======== SELF DECODING BEFORE SENDING");
-
-            warn!("Packet: {packet:?}");
-
-            let (ip_hdr, ip_payload) = Ipv4PacketHeader::decode_with_payload(packet)?.unwrap();
-            let (_, udp_payload) = UdpPacketHeader::decode_with_payload(ip_payload, &ip_hdr)?;
-
-            warn!(
-                "We are about to send DHCP payload:\n{:?}",
-                Packet::decode(udp_payload)
-            );
-
-            warn!("======== <<< SELF DECODING BEFORE SENDING");
+                request.encode(buf)?
+            };
 
             write.write_all(packet).await.map_err(Error::Io)?;
-
-            warn!("IP packet sent");
 
             Ok(())
         }
@@ -303,10 +251,17 @@ pub mod client {
             xid: u32,
             expected_message_types: Option<&[MessageType]>,
         ) -> Result<Packet<'o>, Error<R::Error>> {
-            warn!("Awaiting response packet");
+            trace!("Awaiting response packet");
+
+            let start = Instant::now();
+            let mut now = start;
 
             let reply = loop {
-                let timer = Timer::after(self.timeout);
+                let timer = Timer::after(if now < start + self.timeout {
+                    start + self.timeout - now
+                } else {
+                    Duration::from_secs(1)
+                });
 
                 // NLL...
                 let buf = unsafe { (buf as *mut [u8]).as_mut().unwrap() };
@@ -318,41 +273,53 @@ pub mod client {
 
                 let packet = &buf[..len];
 
-                warn!("Got packet");
+                let decode = |packet| {
+                    let reply = Packet::decode(packet)?;
 
-                if let Some((ip_hdr, ip_payload)) = Ipv4PacketHeader::decode_with_payload(packet)? {
-                    if ip_hdr.p == UdpPacketHeader::PROTO {
-                        let (udp_hdr, udp_payload) =
-                            UdpPacketHeader::decode_with_payload(ip_payload, &ip_hdr)?;
+                    info!("DHCP packet decoded:\n{reply:?}");
 
-                        if udp_hdr.src == self.server_port
-                            && self
-                                .client_port
-                                .map(|port| port == udp_hdr.dst)
-                                .unwrap_or(true)
-                        {
-                            // Reply from a DHCP server, on our port
+                    if reply.is_for_us(&self.mac, xid) {
+                        if let Some(expected_message_types) = expected_message_types {
+                            let (mt, _) = reply.settings().unwrap();
 
-                            warn!("!!!!!!!!!!! UDP packet is for us");
+                            if expected_message_types.iter().any(|emt| mt == *emt) {
+                                return Ok(Some(reply));
+                            }
+                        } else {
+                            return Ok(Some(reply));
+                        }
+                    }
 
-                            let reply = Packet::decode(udp_payload)?;
+                    Ok::<_, dhcp::Error>(None)
+                };
 
-                            warn!("DHCP packet decoded:\n{reply:?}");
+                if self.raw_packets {
+                    if let Some((ip_hdr, ip_payload)) =
+                        Ipv4PacketHeader::decode_with_payload(packet)?
+                    {
+                        if ip_hdr.p == UdpPacketHeader::PROTO {
+                            let (udp_hdr, udp_payload) =
+                                UdpPacketHeader::decode_with_payload(ip_payload, &ip_hdr)?;
 
-                            if reply.is_for_us(&self.mac, xid) {
-                                if let Some(expected_message_types) = expected_message_types {
-                                    let (mt, _) = reply.settings().unwrap();
-
-                                    if expected_message_types.iter().any(|emt| mt == *emt) {
-                                        break reply;
-                                    }
-                                } else {
+                            if udp_hdr.src == self.server_port
+                                && self
+                                    .client_port
+                                    .map(|port| port == udp_hdr.dst)
+                                    .unwrap_or(true)
+                            {
+                                if let Some(reply) = decode(udp_payload)? {
                                     break reply;
                                 }
                             }
                         }
                     }
+                } else {
+                    if let Some(reply) = decode(packet)? {
+                        break reply;
+                    }
                 }
+
+                now = Instant::now();
             };
 
             Ok(reply)

@@ -13,8 +13,7 @@ use embedded_nal_async::{
     AddrType, ConnectedUdp, Dns, IpAddr, TcpConnect, UdpStack, UnconnectedUdp,
 };
 
-use super::dhcp::client::{RawSocket, RawStack};
-use super::tcp::{TcpAccept, TcpListen, TcpSplittableConnection};
+use super::tcp::{RawSocket, RawStack, TcpAccept, TcpListen, TcpSplittableConnection};
 
 pub struct StdTcpConnect(());
 
