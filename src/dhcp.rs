@@ -813,7 +813,7 @@ pub mod client {
     /// automatically prefixed/unprefixed with the IP and UDP header, which allows this client to be used with a raw sockets' transport layer.
     ///
     /// Note that it is unlikely that a non-raw socket transport would actually even work, due to the peculiarities of the
-    /// DHCP protocol, where a lot of UDP packets are send (and often broasdcasted_) by the client before the client actually has an assigned IP.
+    /// DHCP protocol, where a lot of UDP packets are send (and often broadcasted) by the client before the client actually has an assigned IP.
     pub struct Client<T> {
         pub rng: T,
         pub mac: [u8; 6],
