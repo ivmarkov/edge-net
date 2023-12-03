@@ -176,8 +176,26 @@ impl UdpStack for StdUdpStack {
     }
 }
 
-fn cvt(res: isize) -> io::Result<isize> {
-    if res == -1 {
+fn cvt<T>(res: T) -> io::Result<T>
+where
+    T: Into<i64> + Copy,
+{
+    let ires: i64 = res.into();
+
+    if ires == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(res)
+    }
+}
+
+fn cvti<T>(res: T) -> io::Result<T>
+where
+    T: Into<isize> + Copy,
+{
+    let ires: isize = res.into();
+
+    if ires == -1 {
         Err(io::Error::last_os_error())
     } else {
         Ok(res)
@@ -205,7 +223,7 @@ impl RawSocket for StdRawSocket {
             .write_with(|io| {
                 let len = core::cmp::min(data.len(), u16::MAX as usize);
 
-                let ret = cvt(unsafe {
+                let ret = cvti(unsafe {
                     libc::sendto(
                         io.as_fd().as_raw_fd(),
                         data.as_ptr() as *const _,
@@ -263,15 +281,13 @@ impl RawStack for StdRawStack {
             sll_addr: Default::default(),
         };
 
-        let res = unsafe {
+        cvt(unsafe {
             libc::bind(
                 socket,
                 &sockaddr as *const _ as *const _,
                 core::mem::size_of::<libc::sockaddr_ll>() as _,
             )
-        };
-
-        assert_eq!(res, 0);
+        })?;
 
         // unsafe {
         //     libc::setsockopt(socket, libc::SOL_PACKET, libc::PACKET_AUXDATA, &1_u32 as *const _ as *const _, 4);
