@@ -1,5 +1,6 @@
 use std::io;
 use std::net::{self, TcpStream, ToSocketAddrs, UdpSocket};
+use std::os::fd::{AsFd, AsRawFd};
 
 use async_io::Async;
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
@@ -12,7 +13,7 @@ use embedded_nal_async::{
     AddrType, ConnectedUdp, Dns, IpAddr, TcpConnect, UdpStack, UnconnectedUdp,
 };
 
-use super::tcp::{TcpAccept, TcpListen, TcpSplittableConnection};
+use super::tcp::{RawSocket, RawStack, TcpAccept, TcpListen, TcpSplittableConnection};
 
 pub struct StdTcpConnect(());
 
@@ -172,6 +173,143 @@ impl UdpStack for StdUdpStack {
 
     async fn bind_multiple(&self, _local: SocketAddr) -> Result<Self::MultiplyBound, Self::Error> {
         unimplemented!()
+    }
+}
+
+fn cvt(res: isize) -> io::Result<isize> {
+    if res == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(res)
+    }
+}
+
+pub struct StdRawSocket(Async<std::net::UdpSocket>, u32);
+
+impl RawSocket for StdRawSocket {
+    type Error = io::Error;
+
+    async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error> {
+        let sockaddr = libc::sockaddr_ll {
+            sll_family: libc::AF_PACKET as _,
+            sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
+            sll_ifindex: self.1 as _,
+            sll_hatype: 0,
+            sll_pkttype: 0,
+            sll_halen: 6,
+            sll_addr: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0], // TODO
+        };
+
+        let len = self
+            .0
+            .write_with(|io| {
+                let len = core::cmp::min(data.len(), u16::MAX as usize);
+
+                let ret = cvt(unsafe {
+                    libc::sendto(
+                        io.as_fd().as_raw_fd(),
+                        data.as_ptr() as *const _,
+                        len,
+                        libc::MSG_NOSIGNAL,
+                        &sockaddr as *const _ as *const _,
+                        core::mem::size_of::<libc::sockaddr_ll>() as _,
+                    )
+                })?;
+                Ok(ret as usize)
+            })
+            .await?;
+
+        assert_eq!(len, data.len());
+
+        Ok(())
+    }
+
+    async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        self.0.recv(buffer).await
+    }
+}
+
+pub struct StdRawStack(());
+
+impl StdRawStack {
+    pub const fn new() -> Self {
+        Self(())
+    }
+}
+
+impl RawStack for StdRawStack {
+    type Error = io::Error;
+
+    type Socket = StdRawSocket;
+
+    async fn connect(&self, interface: Option<u32>) -> Result<Self::Socket, Self::Error> {
+        let socket = unsafe {
+            libc::socket(
+                libc::PF_PACKET,
+                libc::SOCK_DGRAM,
+                (libc::ETH_P_IP as u16).to_be() as _,
+            )
+        };
+
+        assert!(socket >= 0);
+
+        let sockaddr = libc::sockaddr_ll {
+            sll_family: libc::AF_PACKET as _,
+            sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
+            sll_ifindex: interface.unwrap_or(0) as _,
+            sll_hatype: 0,
+            sll_pkttype: 0,
+            sll_halen: 0,
+            sll_addr: Default::default(),
+        };
+
+        let res = unsafe {
+            libc::bind(
+                socket,
+                &sockaddr as *const _ as *const _,
+                core::mem::size_of::<libc::sockaddr_ll>() as _,
+            )
+        };
+
+        assert_eq!(res, 0);
+
+        // unsafe {
+        //     libc::setsockopt(socket, libc::SOL_PACKET, libc::PACKET_AUXDATA, &1_u32 as *const _ as *const _, 4);
+        // }
+
+        #[cfg(any(unix, target_os = "wasi"))] // TODO
+        let socket = {
+            use std::os::fd::FromRawFd;
+
+            unsafe { std::net::UdpSocket::from_raw_fd(socket) }
+        };
+
+        Ok(StdRawSocket(
+            Async::new(socket)?,
+            interface.unwrap_or(0) as _,
+        ))
+
+        // warn!("Before connect");
+        // let (addr, socket) = self.connect_from(local, remote).await?;
+        // warn!("After connect");
+
+        // socket.0.as_ref().set_broadcast(broadcast)?;
+        // warn!("After broadcast");
+
+        // if let Some(interface) = interface {
+        //     let mut i: libc::ip;
+
+        //     let mut if_req: libc::ifreq = unsafe { core::mem::transmute([0u8; core::mem::size_of::<libc::ifreq>()]) };
+        //     let ifr_name: &mut [_] = &mut if_req.ifr_name;
+        //     let ifr_name: &mut [u8] = unsafe { core::mem::transmute(ifr_name) };
+
+        //     let len = core::cmp::min(interface.len(), ifr_name.len());
+        //     ifr_name[..len].copy_from_slice(&interface.as_bytes()[..len]);
+
+        //     unsafe { libc::setsockopt(socket.0.as_ref().as_fd().as_raw_fd(), libc::SOL_SOCKET, libc::SO_BINDTODEVICE, &if_req as *const _ as *const core::ffi::c_void, core::mem::size_of::<libc::ifreq>() as _); }
+        // }
+
+        // Ok((addr, socket))
     }
 }
 
