@@ -1,7 +1,6 @@
 use core::fmt::Debug;
 
-use embedded_nal_async::{UdpStack, UnconnectedUdp};
-use no_std_net::SocketAddr;
+use embedded_nal_async::{SocketAddr, SocketAddrV4, UdpStack, UnconnectedUdp};
 
 use crate::dhcp;
 
@@ -29,12 +28,61 @@ pub trait SocketFactory {
     async fn connect(&self) -> Result<Self::Socket, Self::Error>;
 }
 
+impl<T> SocketFactory for &T
+where
+    T: SocketFactory,
+{
+    type Error = T::Error;
+
+    type Socket = T::Socket;
+
+    fn raw_ports(&self) -> (Option<u16>, Option<u16>) {
+        (*self).raw_ports()
+    }
+
+    async fn connect(&self) -> Result<Self::Socket, Self::Error> {
+        (*self).connect().await
+    }
+}
+
+impl<T> SocketFactory for &mut T
+where
+    T: SocketFactory,
+{
+    type Error = T::Error;
+
+    type Socket = T::Socket;
+
+    fn raw_ports(&self) -> (Option<u16>, Option<u16>) {
+        (**self).raw_ports()
+    }
+
+    async fn connect(&self) -> Result<Self::Socket, Self::Error> {
+        (**self).connect().await
+    }
+}
+
 pub trait Socket {
     type Error: Debug;
 
     async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error>;
     async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error>;
 }
+
+// impl<T> Socket for &mut T
+// where
+//     T: Socket,
+// {
+//     type Error = T::Error;
+
+//     async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error> {
+//         (**self).send(data).await
+//     }
+
+//     async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+//         (**self).recv(buf).await
+//     }
+// }
 
 pub struct RawSocketFactory<R> {
     stack: R,
@@ -102,14 +150,14 @@ where
 /// DHCP client *has* to run via raw sockets
 pub struct UdpServerSocketFactory<U> {
     stack: U,
-    local: SocketAddr,
+    local: SocketAddrV4,
 }
 
 impl<U> UdpServerSocketFactory<U>
 where
     U: UdpStack,
 {
-    pub const fn new(stack: U, local: SocketAddr) -> Self {
+    pub const fn new(stack: U, local: SocketAddrV4) -> Self {
         Self { stack, local }
     }
 }
@@ -127,7 +175,7 @@ where
     }
 
     async fn connect(&self) -> Result<Self::Socket, Self::Error> {
-        let (local, socket) = self.stack.bind_single(self.local).await?;
+        let (local, socket) = self.stack.bind_single(SocketAddr::V4(self.local)).await?;
 
         Ok(UdpServerSocket {
             socket,
