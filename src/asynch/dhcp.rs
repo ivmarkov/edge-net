@@ -279,7 +279,7 @@ pub mod client {
                     let now = Instant::now();
 
                     if now - *acquired
-                        < Duration::from_secs(settings.lease_time_secs.unwrap_or(7200) as u64 / 3)
+                        >= Duration::from_secs(settings.lease_time_secs.unwrap_or(7200) as u64 / 3)
                     {
                         info!("Renewing DHCP lease...");
 
@@ -364,7 +364,7 @@ pub mod client {
                 let offer_start = Instant::now();
 
                 while Instant::now() - offer_start < self.timeout {
-                    let timer = Timer::after(Duration::from_secs(10));
+                    let timer = Timer::after(Duration::from_secs(3));
 
                     if let Either::First(result) = select(socket.recv(buf), timer).await {
                         let len = result.map_err(Error::Io)?;
@@ -393,7 +393,7 @@ pub mod client {
 
                 info!("No DHCP offers received, sleeping for a while...");
 
-                Timer::after(Duration::from_secs(10)).await;
+                Timer::after(Duration::from_secs(3)).await;
             }
         }
 
