@@ -15,6 +15,7 @@ pub enum Error {
     MissingCookie,
     InvalidHlen,
     BufferOverflow,
+    InvalidPacket,
 }
 
 ///
@@ -1349,9 +1350,13 @@ pub mod raw_ip {
                     Err(Error::DataUnderflow)?;
                 }
 
-                let checksum = Self::checksum(&packet[..len]); // TODO: Error if invalid
+                let checksum = Self::checksum(&packet[..len]);
 
                 trace!("IP header decoded, total_size={}, src={}, dst={}, hlen={}, size={}, checksum={}, ours={}", packet.len(), hdr.src, hdr.dst, hdr.hlen, hdr.len, hdr.sum, checksum);
+
+                if checksum != hdr.sum {
+                    Err(Error::InvalidPacket)?;
+                }
 
                 let packet = &packet[..len];
                 let hdr_len = hdr.hlen as usize;
@@ -1486,6 +1491,10 @@ pub mod raw_ip {
                 hdr.sum,
                 checksum
             );
+
+            if checksum != hdr.sum {
+                Err(Error::InvalidPacket)?;
+            }
 
             let packet = &packet[..len];
 
