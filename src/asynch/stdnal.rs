@@ -7,6 +7,7 @@ use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 
 use embedded_io::ErrorType;
 use embedded_io_async::{Read, Write};
+use log::warn;
 use no_std_net::{Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use embedded_nal_async::{
@@ -164,6 +165,8 @@ impl UdpStack for StdUdpStack {
         local: SocketAddr,
     ) -> Result<(SocketAddr, Self::UniquelyBound), Self::Error> {
         let socket = Async::<UdpSocket>::bind(to_std_addr(local))?;
+
+        socket.as_ref().set_broadcast(true)?;
 
         Ok((
             to_nal_addr(socket.as_ref().local_addr()?),
@@ -359,10 +362,14 @@ impl UnconnectedUdp for StdUdpSocket {
     async fn send(
         &mut self,
         local: SocketAddr,
-        remote: SocketAddr,
+        mut remote: SocketAddr,
         data: &[u8],
     ) -> Result<(), Self::Error> {
         assert!(local == to_nal_addr(self.0.as_ref().local_addr()?));
+
+        remote = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, 68));
+
+        warn!("Send to: {remote}");
 
         let mut offset = 0;
 
@@ -382,6 +389,8 @@ impl UnconnectedUdp for StdUdpSocket {
         buffer: &mut [u8],
     ) -> Result<(usize, SocketAddr, SocketAddr), Self::Error> {
         let (len, addr) = self.0.recv_from(buffer).await?;
+
+        warn!("Received from: {addr}");
 
         Ok((
             len,

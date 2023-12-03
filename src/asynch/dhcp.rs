@@ -87,8 +87,8 @@ pub trait Socket {
 pub struct RawSocketFactory<R> {
     stack: R,
     interface: Option<u32>,
-    client_port: Option<u16>,
-    server_port: Option<u16>,
+    local_port: Option<u16>,
+    remote_port: Option<u16>,
 }
 
 impl<R> RawSocketFactory<R>
@@ -98,18 +98,18 @@ where
     pub const fn new(
         stack: R,
         interface: Option<u32>,
-        client_port: Option<u16>,
-        server_port: Option<u16>,
+        local_port: Option<u16>,
+        remote_port: Option<u16>,
     ) -> Self {
-        if client_port.is_none() && server_port.is_none() {
-            panic!("Either the client, or the sererver port, or both should be specified");
+        if local_port.is_none() && remote_port.is_none() {
+            panic!("Either the local, or the remote port, or both should be specified");
         }
 
         Self {
             stack,
             interface,
-            client_port,
-            server_port,
+            local_port,
+            remote_port,
         }
     }
 }
@@ -123,7 +123,7 @@ where
     type Socket = R::Socket;
 
     fn raw_ports(&self) -> (Option<u16>, Option<u16>) {
-        (self.client_port, self.server_port)
+        (self.local_port, self.remote_port)
     }
 
     async fn connect(&self) -> Result<Self::Socket, Self::Error> {
@@ -501,6 +501,8 @@ pub mod server {
 
     use embedded_nal_async::Ipv4Addr;
 
+    use log::info;
+
     pub use super::*;
 
     #[derive(Clone, Debug)]
@@ -525,6 +527,8 @@ pub mod server {
 
     impl<const N: usize> Server<N> {
         pub fn new(conf: &Configuration) -> Self {
+            info!("Creating DHCP server with configuration {conf:?}");
+
             Self {
                 server: dhcp::server::Server {
                     ip: conf.ip,
@@ -555,7 +559,7 @@ pub mod server {
 
                 if let Some(reply) = self
                     .server
-                    .handle_bootp_request(f.raw_ports().1, buf, len)?
+                    .handle_bootp_request(f.raw_ports().0, buf, len)?
                 {
                     socket.send(reply).await.map_err(Error::Io)?;
                 }

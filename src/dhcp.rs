@@ -462,9 +462,8 @@ impl<'a> Options<'a> {
                         let option = match *code {
                             DhcpOption::CODE_ROUTER => (!gateways.is_empty())
                                 .then_some(DhcpOption::Router(Ipv4Addrs::new(gateways))),
-                            DhcpOption::CODE_DNS => {
-                                (!dns.is_empty()).then_some(DhcpOption::Router(Ipv4Addrs::new(dns)))
-                            }
+                            DhcpOption::CODE_DNS => (!dns.is_empty())
+                                .then_some(DhcpOption::DomainNameServer(Ipv4Addrs::new(dns))),
                             DhcpOption::CODE_SUBNET => subnet.map(DhcpOption::SubnetMask),
                             _ => None,
                         };
@@ -959,6 +958,8 @@ pub mod server {
 
     use embassy_time::{Duration, Instant};
 
+    use log::{info, trace};
+
     use super::*;
 
     #[derive(Clone, Debug)]
@@ -1000,6 +1001,8 @@ pub mod server {
             };
 
             if let Some((raw_hdrs, request)) = request {
+                trace!("Got packet {request:?}");
+
                 if !request.reply {
                     let mt = request.options.iter().find_map(|option| {
                         if let DhcpOption::MessageType(mt) = option {
@@ -1021,6 +1024,8 @@ pub mod server {
                         if server_identifier == Some(self.ip)
                             || server_identifier.is_none() && matches!(mt, MessageType::Discover)
                         {
+                            info!("Packet is for us, will process, message type {mt:?}");
+
                             let mut opt_buf = Options::buf();
 
                             let reply = match mt {
@@ -1124,7 +1129,7 @@ pub mod server {
             ip: Option<Ipv4Addr>,
             buf: &'a mut [DhcpOption<'a>],
         ) -> Packet<'a> {
-            request.new_reply(
+            let reply = request.new_reply(
                 ip,
                 request.options.reply(
                     mt,
@@ -1135,7 +1140,11 @@ pub mod server {
                     &self.dns,
                     buf,
                 ),
-            )
+            );
+
+            info!("Reply: {reply:?}");
+
+            reply
         }
 
         fn is_available(&self, mac: &[u8; 16], addr: Ipv4Addr) -> bool {
