@@ -255,7 +255,7 @@ pub mod client {
     /// negotiating initial IP, and then keeping the lease of that IP up to date.
     ///
     /// Note that it is unlikely that a non-raw socket factory would actually even work, due to the peculiarities of the
-    /// DHCP protocol, where a lot of UDP packets are send (and often broasdcasted_) by the client before the client actually has an assigned IP.
+    /// DHCP protocol, where a lot of UDP packets are send (and often broadcasted) by the client before the client actually has an assigned IP.
     pub struct Client<T> {
         rng: T,
         mac: [u8; 6],
