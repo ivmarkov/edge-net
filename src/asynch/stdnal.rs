@@ -281,7 +281,7 @@ impl RawStack for StdRawStack {
         let socket = {
             use std::os::fd::FromRawFd;
 
-            unsafe { std::net::UdpSocket::from_raw_fd(socket.into()) }
+            unsafe { std::net::UdpSocket::from_raw_fd(socket) }
         };
 
         Ok(StdRawSocket(

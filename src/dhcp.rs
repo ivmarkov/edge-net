@@ -796,33 +796,15 @@ impl<'a> BytesOut<'a> {
 }
 
 pub mod client {
-    use core::fmt::Debug;
-
     use log::trace;
 
     use rand_core::RngCore;
 
     use super::*;
 
-    #[derive(Clone, Debug)]
-    pub struct RawPackets {
-        pub client_port: u16,
-        pub server_port: u16,
-    }
-
-    impl RawPackets {
-        pub const fn new() -> Self {
-            Self {
-                client_port: 68,
-                server_port: 67,
-            }
-        }
-    }
-
     pub struct Client<T> {
         pub rng: T,
         pub mac: [u8; 6],
-        pub raw_packets: Option<RawPackets>,
     }
 
     impl<T> Client<T>
@@ -832,17 +814,29 @@ pub mod client {
         pub fn discover<'o>(
             &mut self,
             buf: &'o mut [u8],
+            rp_udp_client_port: Option<u16>,
+            rp_udp_server_port: Option<u16>,
             secs: u16,
             ip: Option<Ipv4Addr>,
         ) -> Result<(&'o [u8], u32), Error> {
             let mut opt_buf = Options::buf();
 
-            self.send(buf, secs, None, None, Options::discover(ip, &mut opt_buf))
+            self.send(
+                buf,
+                rp_udp_client_port,
+                rp_udp_server_port,
+                secs,
+                None,
+                None,
+                Options::discover(ip, &mut opt_buf),
+            )
         }
 
         pub fn request<'o>(
             &mut self,
             buf: &'o mut [u8],
+            rp_udp_client_port: Option<u16>,
+            rp_udp_server_port: Option<u16>,
             secs: u16,
             server_ip: Ipv4Addr,
             our_ip: Ipv4Addr,
@@ -851,6 +845,8 @@ pub mod client {
 
             self.send(
                 buf,
+                rp_udp_client_port,
+                rp_udp_server_port,
                 secs,
                 Some(server_ip),
                 None,
@@ -861,6 +857,8 @@ pub mod client {
         pub fn release<'o>(
             &mut self,
             buf: &'o mut [u8],
+            rp_udp_client_port: Option<u16>,
+            rp_udp_server_port: Option<u16>,
             secs: u16,
             server_ip: Ipv4Addr,
             our_ip: Ipv4Addr,
@@ -869,6 +867,8 @@ pub mod client {
 
             self.send(
                 buf,
+                rp_udp_client_port,
+                rp_udp_server_port,
                 secs,
                 Some(server_ip),
                 Some(our_ip),
@@ -880,6 +880,8 @@ pub mod client {
         pub fn decline<'o>(
             &mut self,
             buf: &'o mut [u8],
+            rp_udp_client_port: Option<u16>,
+            rp_udp_server_port: Option<u16>,
             secs: u16,
             server_ip: Ipv4Addr,
             our_ip: Ipv4Addr,
@@ -888,6 +890,8 @@ pub mod client {
 
             self.send(
                 buf,
+                rp_udp_client_port,
+                rp_udp_server_port,
                 secs,
                 Some(server_ip),
                 Some(our_ip),
@@ -896,9 +900,12 @@ pub mod client {
             .map(|r| r.0)
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn send<'o>(
             &mut self,
             buf: &'o mut [u8],
+            rp_udp_client_port: Option<u16>,
+            rp_udp_server_port: Option<u16>,
             secs: u16,
             server_ip: Option<Ipv4Addr>,
             our_ip: Option<Ipv4Addr>,
@@ -908,12 +915,12 @@ pub mod client {
 
             let request = Packet::new_request(self.mac, xid, secs, our_ip, options.clone());
 
-            let data = if let Some(raw_packets_conf) = self.raw_packets.as_ref() {
+            let data = if rp_udp_server_port.is_some() || rp_udp_client_port.is_some() {
                 request.encode_raw(
                     our_ip,
-                    raw_packets_conf.client_port,
+                    rp_udp_client_port.unwrap_or(68),
                     server_ip,
-                    raw_packets_conf.server_port,
+                    rp_udp_server_port.unwrap_or(67),
                     buf,
                 )?
             } else {
@@ -926,16 +933,13 @@ pub mod client {
         pub fn recv<'o>(
             &self,
             data: &'o [u8],
+            rp_udp_client_port: Option<u16>,
+            rp_udp_server_port: Option<u16>,
             xid: u32,
             expected_message_types: Option<&[MessageType]>,
         ) -> Result<Option<Packet<'o>>, Error> {
-            let reply = if let Some(raw_packets_conf) = self.raw_packets.as_ref() {
-                Packet::decode_raw(
-                    data,
-                    Some(raw_packets_conf.server_port),
-                    Some(raw_packets_conf.client_port),
-                )?
-                .map(|r| r.2)
+            let reply = if rp_udp_server_port.is_some() || rp_udp_client_port.is_some() {
+                Packet::decode_raw(data, rp_udp_server_port, rp_udp_client_port)?.map(|r| r.2)
             } else {
                 Some(Packet::decode(data)?)
             };
@@ -968,8 +972,6 @@ pub mod server {
 
     use super::*;
 
-    pub use super::client::RawPackets;
-
     #[derive(Clone, Debug)]
     pub struct Lease {
         mac: [u8; 16],
@@ -979,7 +981,6 @@ pub mod server {
     #[derive(Clone, Debug)]
     pub struct Server<const N: usize> {
         pub ip: Ipv4Addr,
-        pub raw_packets_udp_port: Option<u16>,
         pub gateways: heapless::Vec<Ipv4Addr, 1>,
         pub subnet: Option<Ipv4Addr>,
         pub dns: heapless::Vec<Ipv4Addr, 2>,
@@ -992,10 +993,11 @@ pub mod server {
     impl<const N: usize> Server<N> {
         pub fn handle<'o>(
             &mut self,
+            rp_udp_server_port: Option<u16>,
             buf: &'o mut [u8],
             incoming_len: usize,
         ) -> Result<Option<&'o [u8]>, Error> {
-            let request = if let Some(port) = self.raw_packets_udp_port {
+            let request = if let Some(port) = rp_udp_server_port {
                 Packet::decode_raw(&buf[..incoming_len], None, Some(port))?
                     .map(|(ip_hdr, udp_hdr, request)| (Some((ip_hdr, udp_hdr)), request))
             } else {
@@ -1334,9 +1336,7 @@ pub mod raw_ip {
             let min_hdr_len = self.encode(hdr_buf)?.len();
             assert_eq!(min_hdr_len, Self::MIN_SIZE);
 
-            for i in Self::MIN_SIZE..hdr_len {
-                hdr_buf[i] = 0;
-            }
+            hdr_buf[Self::MIN_SIZE..hdr_len].fill(0);
 
             let checksum = Self::checksum(hdr_buf);
             self.sum = checksum;
@@ -1346,9 +1346,7 @@ pub mod raw_ip {
             Ok(&buf[..len])
         }
 
-        pub fn decode_with_payload<'o>(
-            packet: &'o [u8],
-        ) -> Result<Option<(Self, &'o [u8])>, Error> {
+        pub fn decode_with_payload(packet: &[u8]) -> Result<Option<(Self, &[u8])>, Error> {
             let hdr = Self::decode(packet)?;
             if hdr.version == 4 {
                 // IPv4
