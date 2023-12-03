@@ -290,7 +290,7 @@ pub mod client {
         /// In both cases, user is expected to call `run` again, so that the IP lease is kept up to date / a new lease is re-negotiated
         ///
         /// Note that dropping this future is also safe in that it won't remove the current lease, so the user can renew
-        /// the operation of the server by just calling `run` later on. Of course, if the future is not polled, the client
+        /// the operation of the client by just calling `run` later on. Of course, if the future is not polled, the client
         /// would be unable - during that time - to check for lease timeout and the lease might not be renewed on time.
         ///
         /// But in any case, if the lease is expired or the DHCP server does not acknowledge the lease renewal, the client will
