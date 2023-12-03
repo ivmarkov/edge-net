@@ -248,8 +248,17 @@ pub mod client {
         }
     }
 
+    /// A simple asynchronous DHCP client.
+    ///
+    /// The client takes a socket factory (either operating on raw sockets or UDP datagrams) and
+    /// then takes care of the all the negotiations with the DHCP server, as in discovering servers,
+    /// negotiating initial IP, and then keeping the lease of that IP up to date.
+    ///
+    /// Note that it is unlikely that a non-raw socket factory would actually even work, due to the peculiarities of the
+    /// DHCP protocol, where a lot of UDP packets are send (and often broasdcasted_) by the client before the client actually has an assigned IP.
     pub struct Client<T> {
-        client: dhcp::client::Client<T>,
+        rng: T,
+        mac: [u8; 6],
         timeout: Duration,
         settings: Option<(Settings, Instant)>,
     }
@@ -262,12 +271,30 @@ pub mod client {
             info!("Creating DHCP client with configuration {conf:?}");
 
             Self {
-                client: dhcp::client::Client { rng, mac: conf.mac },
+                rng,
+                mac: conf.mac,
                 timeout: conf.timeout,
                 settings: None,
             }
         }
 
+        /// Runs the DHCP client with the supplied socket factory, and takes care of
+        /// all aspects of negotiating an IP with the first DHCP server that replies to the discovery requests.
+        ///
+        /// From the POV of the user, this method will return only in two cases, which are exactly the cases where the user is expected to take an action:
+        /// - When an initial/new IP lease was negotiated; in that case, `Some(Settings)` is returned, and the user should assign the returned IP settings
+        ///   to the network interface using platform-specific means
+        /// - When the IP lease was lost; in that case, `None` is returned, and the user should de-assign all IP settings from the network interface using
+        ///   platform-specific means
+        ///
+        /// In both cases, user is expected to call `run` again, so that the IP lease is kept up to date / a new lease is re-negotiated
+        ///
+        /// Note that dropping this future is also safe in that it won't remove the current lease, so the user can renew
+        /// the operation of the server by just calling `run` later on. Of course, if the future is not polled, the client
+        /// would be unable - during that time - to check for lease timeout and the lease might not be renewed on time.
+        ///
+        /// But in any case, if the lease is expired or the DHCP server does not acknowledge the lease renewal, the client will
+        /// automatically restart the DHCP servers' discovery from the very beginning.
         pub async fn run<F: SocketFactory>(
             &mut self,
             mut f: F,
@@ -314,18 +341,20 @@ pub mod client {
             }
         }
 
+        /// This method allows the user to inform the DHCP server that the currently leased IP (if any) is no longer used
+        /// by the client.
+        ///
+        /// Useful when the program runnuing the DHCP client is about to exit.
         pub async fn release<F: SocketFactory>(
             &mut self,
             f: F,
             buf: &mut [u8],
         ) -> Result<(), Error<F::Error>> {
-            if let Some((settings, _)) = self.settings.as_ref() {
+            if let Some((settings, _)) = self.settings.as_ref().cloned() {
                 let mut socket = f.connect().await.map_err(Error::Io)?;
 
-                let packet = self.client.release(
+                let packet = self.client(&f).encode_release(
                     buf,
-                    f.raw_ports().0,
-                    f.raw_ports().1,
                     0,
                     settings.server_ip.unwrap(),
                     settings.ip,
@@ -346,37 +375,31 @@ pub mod client {
         ) -> Result<Settings, Error<F::Error>> {
             info!("Discovering DHCP servers...");
 
+            let timeout = self.timeout;
+            let mut client = self.client(&f);
+
             let start = Instant::now();
 
             loop {
                 let mut socket = f.connect().await.map_err(Error::Io)?;
 
-                let (packet, xid) = self.client.discover(
-                    buf,
-                    f.raw_ports().0,
-                    f.raw_ports().1,
-                    (Instant::now() - start).as_secs() as _,
-                    None,
-                )?;
+                let (packet, xid) =
+                    client.encode_discover(buf, (Instant::now() - start).as_secs() as _, None)?;
 
                 socket.send(packet).await.map_err(Error::Io)?;
 
                 let offer_start = Instant::now();
 
-                while Instant::now() - offer_start < self.timeout {
+                while Instant::now() - offer_start < timeout {
                     let timer = Timer::after(Duration::from_secs(3));
 
                     if let Either::First(result) = select(socket.recv(buf), timer).await {
                         let len = result.map_err(Error::Io)?;
                         let packet = &buf[..len];
 
-                        if let Some(reply) = self.client.recv(
-                            packet,
-                            f.raw_ports().0,
-                            f.raw_ports().1,
-                            xid,
-                            Some(&[MessageType::Offer]),
-                        )? {
+                        if let Some(reply) =
+                            client.decode_bootp_reply(packet, xid, Some(&[MessageType::Offer]))?
+                        {
                             let settings = reply.settings().unwrap().1;
 
                             info!(
@@ -404,6 +427,9 @@ pub mod client {
             server_ip: Ipv4Addr,
             ip: Ipv4Addr,
         ) -> Result<Option<Settings>, Error<F::Error>> {
+            let timeout = self.timeout;
+            let mut client = self.client(&f);
+
             for _ in 0..3 {
                 info!("Requesting IP {ip} from DHCP server {server_ip}");
 
@@ -411,10 +437,8 @@ pub mod client {
 
                 let start = Instant::now();
 
-                let (packet, xid) = self.client.request(
+                let (packet, xid) = client.encode_request(
                     buf,
-                    f.raw_ports().0,
-                    f.raw_ports().1,
                     (Instant::now() - start).as_secs() as _,
                     server_ip,
                     ip,
@@ -424,17 +448,15 @@ pub mod client {
 
                 let request_start = Instant::now();
 
-                while Instant::now() - request_start < self.timeout {
+                while Instant::now() - request_start < timeout {
                     let timer = Timer::after(Duration::from_secs(10));
 
                     if let Either::First(result) = select(socket.recv(buf), timer).await {
                         let len = result.map_err(Error::Io)?;
                         let packet = &buf[..len];
 
-                        if let Some(reply) = self.client.recv(
+                        if let Some(reply) = client.decode_bootp_reply(
                             packet,
-                            f.raw_ports().0,
-                            f.raw_ports().1,
                             xid,
                             Some(&[MessageType::Ack, MessageType::Nak]),
                         )? {
@@ -460,6 +482,15 @@ pub mod client {
 
             Ok(None)
         }
+
+        fn client<F: SocketFactory>(&mut self, f: F) -> dhcp::client::Client<&mut T> {
+            dhcp::client::Client {
+                rng: &mut self.rng,
+                mac: self.mac,
+                rp_udp_client_port: f.raw_ports().0,
+                rp_udp_server_port: f.raw_ports().1,
+            }
+        }
     }
 }
 
@@ -484,8 +515,12 @@ pub mod server {
         pub lease_duration_secs: u32,
     }
 
+    /// A simple asynchronous DHCP server.
+    ///
+    /// The client takes a socket factory (either operating on raw sockets or UDP datagrams) and
+    /// then processes all incoming BOOTP requests, by updating its internal simple database of leases, and issuing replies.
     pub struct Server<const N: usize> {
-        server: dhcp::server::Server<N>,
+        pub server: dhcp::server::Server<N>,
     }
 
     impl<const N: usize> Server<N> {
@@ -504,6 +539,10 @@ pub mod server {
             }
         }
 
+        /// Runs the DHCP server wth the supplied socket factory, processing incoming DHCP requests.
+        ///
+        /// Note that dropping this future is safe in that it won't remove the internal leases' database,
+        /// so users are free to drop the future in case they would like to take a snapshot of the leases or inspect them otherwise.
         pub async fn run<F: SocketFactory>(
             &mut self,
             f: F,
@@ -514,7 +553,10 @@ pub mod server {
             loop {
                 let len = socket.recv(buf).await.map_err(Error::Io)?;
 
-                if let Some(reply) = self.server.handle(f.raw_ports().1, buf, len)? {
+                if let Some(reply) = self
+                    .server
+                    .handle_bootp_request(f.raw_ports().1, buf, len)?
+                {
                     socket.send(reply).await.map_err(Error::Io)?;
                 }
             }

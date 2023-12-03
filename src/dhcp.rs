@@ -802,51 +802,50 @@ pub mod client {
 
     use super::*;
 
+    /// A simple DHCP client.
+    /// The client is unaware of the IP/UDP transport layer and operates purely in terms of packets
+    /// represented as Rust slices.
+    ///
+    /// As such, the client can generate all BOOTP requests and parse BOOTP replies.
+    ///
+    /// The client supports both raw IP as well as regular UDP payloads, where the raw payloads are
+    /// automatically prefixed/unprefixed with the IP and UDP header, which allows this client to be used with a raw sockets' transport layer.
+    ///
+    /// Note that it is unlikely that a non-raw socket transport would actually even work, due to the peculiarities of the
+    /// DHCP protocol, where a lot of UDP packets are send (and often broasdcasted_) by the client before the client actually has an assigned IP.
     pub struct Client<T> {
         pub rng: T,
         pub mac: [u8; 6],
+        pub rp_udp_client_port: Option<u16>,
+        pub rp_udp_server_port: Option<u16>,
     }
 
     impl<T> Client<T>
     where
         T: RngCore,
     {
-        pub fn discover<'o>(
+        pub fn encode_discover<'o>(
             &mut self,
             buf: &'o mut [u8],
-            rp_udp_client_port: Option<u16>,
-            rp_udp_server_port: Option<u16>,
             secs: u16,
             ip: Option<Ipv4Addr>,
         ) -> Result<(&'o [u8], u32), Error> {
             let mut opt_buf = Options::buf();
 
-            self.send(
-                buf,
-                rp_udp_client_port,
-                rp_udp_server_port,
-                secs,
-                None,
-                None,
-                Options::discover(ip, &mut opt_buf),
-            )
+            self.encode_bootp_request(buf, secs, None, None, Options::discover(ip, &mut opt_buf))
         }
 
-        pub fn request<'o>(
+        pub fn encode_request<'o>(
             &mut self,
             buf: &'o mut [u8],
-            rp_udp_client_port: Option<u16>,
-            rp_udp_server_port: Option<u16>,
             secs: u16,
             server_ip: Ipv4Addr,
             our_ip: Ipv4Addr,
         ) -> Result<(&'o [u8], u32), Error> {
             let mut opt_buf = Options::buf();
 
-            self.send(
+            self.encode_bootp_request(
                 buf,
-                rp_udp_client_port,
-                rp_udp_server_port,
                 secs,
                 Some(server_ip),
                 None,
@@ -854,21 +853,17 @@ pub mod client {
             )
         }
 
-        pub fn release<'o>(
+        pub fn encode_release<'o>(
             &mut self,
             buf: &'o mut [u8],
-            rp_udp_client_port: Option<u16>,
-            rp_udp_server_port: Option<u16>,
             secs: u16,
             server_ip: Ipv4Addr,
             our_ip: Ipv4Addr,
         ) -> Result<&'o [u8], Error> {
             let mut opt_buf = Options::buf();
 
-            self.send(
+            self.encode_bootp_request(
                 buf,
-                rp_udp_client_port,
-                rp_udp_server_port,
                 secs,
                 Some(server_ip),
                 Some(our_ip),
@@ -877,21 +872,17 @@ pub mod client {
             .map(|r| r.0)
         }
 
-        pub fn decline<'o>(
+        pub fn encode_decline<'o>(
             &mut self,
             buf: &'o mut [u8],
-            rp_udp_client_port: Option<u16>,
-            rp_udp_server_port: Option<u16>,
             secs: u16,
             server_ip: Ipv4Addr,
             our_ip: Ipv4Addr,
         ) -> Result<&'o [u8], Error> {
             let mut opt_buf = Options::buf();
 
-            self.send(
+            self.encode_bootp_request(
                 buf,
-                rp_udp_client_port,
-                rp_udp_server_port,
                 secs,
                 Some(server_ip),
                 Some(our_ip),
@@ -901,11 +892,9 @@ pub mod client {
         }
 
         #[allow(clippy::too_many_arguments)]
-        pub fn send<'o>(
+        pub fn encode_bootp_request<'o>(
             &mut self,
             buf: &'o mut [u8],
-            rp_udp_client_port: Option<u16>,
-            rp_udp_server_port: Option<u16>,
             secs: u16,
             server_ip: Option<Ipv4Addr>,
             our_ip: Option<Ipv4Addr>,
@@ -915,12 +904,12 @@ pub mod client {
 
             let request = Packet::new_request(self.mac, xid, secs, our_ip, options.clone());
 
-            let data = if rp_udp_server_port.is_some() || rp_udp_client_port.is_some() {
+            let data = if self.rp_udp_server_port.is_some() || self.rp_udp_client_port.is_some() {
                 request.encode_raw(
                     our_ip,
-                    rp_udp_client_port.unwrap_or(68),
+                    self.rp_udp_client_port.unwrap_or(68),
                     server_ip,
-                    rp_udp_server_port.unwrap_or(67),
+                    self.rp_udp_server_port.unwrap_or(67),
                     buf,
                 )?
             } else {
@@ -930,16 +919,15 @@ pub mod client {
             Ok((data, xid))
         }
 
-        pub fn recv<'o>(
+        pub fn decode_bootp_reply<'o>(
             &self,
             data: &'o [u8],
-            rp_udp_client_port: Option<u16>,
-            rp_udp_server_port: Option<u16>,
             xid: u32,
             expected_message_types: Option<&[MessageType]>,
         ) -> Result<Option<Packet<'o>>, Error> {
-            let reply = if rp_udp_server_port.is_some() || rp_udp_client_port.is_some() {
-                Packet::decode_raw(data, rp_udp_server_port, rp_udp_client_port)?.map(|r| r.2)
+            let reply = if self.rp_udp_server_port.is_some() || self.rp_udp_client_port.is_some() {
+                Packet::decode_raw(data, self.rp_udp_server_port, self.rp_udp_client_port)?
+                    .map(|r| r.2)
             } else {
                 Some(Packet::decode(data)?)
             };
@@ -978,6 +966,12 @@ pub mod server {
         expires: Instant,
     }
 
+    /// A simple DHCP server.
+    /// The server is unaware of the IP/UDP transport layer and operates purely in terms of packets
+    /// represented as Rust slices.
+    ///
+    /// The server supports both raw IP as well as regular UDP payloads, where the raw payloads are
+    /// automatically prefixed/unprefixed with the IP and UDP header, which allows this server to be used with a raw sockets' transport layer.
     #[derive(Clone, Debug)]
     pub struct Server<const N: usize> {
         pub ip: Ipv4Addr,
@@ -991,7 +985,7 @@ pub mod server {
     }
 
     impl<const N: usize> Server<N> {
-        pub fn handle<'o>(
+        pub fn handle_bootp_request<'o>(
             &mut self,
             rp_udp_server_port: Option<u16>,
             buf: &'o mut [u8],
