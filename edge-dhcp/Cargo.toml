@@ -1,0 +1,26 @@
+[package]
+name = "edge-dhcp"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+nightly = [
+    "dep:embassy-futures",
+    "dep:edge-tcp",
+    "dep:embedded-nal-async",
+]
+
+[dependencies]
+no-std-net.workspace = true
+heapless = { workspace = true }
+log.workspace = true
+embassy-time = { version = "0.1", default-features = false }
+rand_core = "0.6"
+
+edge-tcp = { workspace = true, optional = true }
+embassy-futures = { workspace = true, optional = true }
+embedded-nal-async = { workspace = true, optional = true }
+num_enum = { version = "0.7", default-features = false }

@@ -2,9 +2,9 @@ use core::fmt::Debug;
 
 use embedded_nal_async::{SocketAddr, SocketAddrV4, UdpStack, UnconnectedUdp};
 
-use crate::dhcp;
+use crate as dhcp;
 
-use super::tcp::{RawSocket, RawStack};
+use edge_tcp::{RawSocket, RawStack};
 
 #[derive(Debug)]
 pub enum Error<E> {
@@ -231,7 +231,7 @@ pub mod client {
 
     pub use super::*;
 
-    pub use crate::dhcp::Settings;
+    pub use crate::Settings;
 
     #[derive(Clone, Debug)]
     pub struct Configuration {

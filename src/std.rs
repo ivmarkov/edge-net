@@ -1,3 +1,6 @@
+#[cfg(feature = "nightly")]
+pub mod nal;
+
 use embassy_sync::blocking_mutex::raw::RawMutex;
 
 pub struct StdRawMutex(std::sync::Mutex<()>);

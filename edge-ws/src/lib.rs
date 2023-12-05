@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 use core::cmp::min;
 
 use embedded_io_async::{Read, ReadExactError, Write};
@@ -379,6 +381,8 @@ where
 }
 
 pub mod http {
+    use edge_http::Headers;
+
     pub const NONCE_LEN: usize = 16;
     pub const MAX_BASE64_KEY_LEN: usize = 28;
     pub const MAX_BASE64_KEY_RESPONSE_LEN: usize = 33;
@@ -505,7 +509,7 @@ pub mod http {
     pub mod client {
         use embedded_nal_async::TcpConnect;
 
-        use crate::asynch::http::{client::ClientConnection, Error, Method};
+        use edge_http::{client::ClientConnection, Error, Method};
 
         use super::{upgrade_request_headers, MAX_BASE64_KEY_LEN, NONCE_LEN};
 
@@ -553,6 +557,71 @@ pub mod http {
                 && headers.headers.get("Sec-WebSocket-Accept").is_some();
 
             Ok(succeeded)
+        }
+    }
+
+    pub trait HeaderExt<'b> {
+        fn is_ws_upgrade_request(&self) -> bool;
+
+        fn set_ws_upgrade_request_headers(
+            &mut self,
+            host: Option<&'b str>,
+            origin: Option<&'b str>,
+            version: Option<&'b str>,
+            nonce: &[u8; crate::http::NONCE_LEN],
+            nonce_base64_buf: &'b mut [u8; crate::http::MAX_BASE64_KEY_LEN],
+        ) -> &mut Self;
+
+        fn set_ws_upgrade_response_headers<'a, H>(
+            &mut self,
+            request_headers: H,
+            version: Option<&'a str>,
+            sec_key_response_base64_buf: &'b mut [u8; crate::http::MAX_BASE64_KEY_RESPONSE_LEN],
+        ) -> Result<&mut Self, UpgradeError>
+        where
+            H: IntoIterator<Item = (&'a str, &'a str)>;
+    }
+
+    impl<'b, const N: usize> HeaderExt<'b> for Headers<'b, N> {
+        fn is_ws_upgrade_request(&self) -> bool {
+            crate::http::is_upgrade_request(self.iter())
+        }
+
+        fn set_ws_upgrade_request_headers(
+            &mut self,
+            host: Option<&'b str>,
+            origin: Option<&'b str>,
+            version: Option<&'b str>,
+            nonce: &[u8; crate::http::NONCE_LEN],
+            nonce_base64_buf: &'b mut [u8; crate::http::MAX_BASE64_KEY_LEN],
+        ) -> &mut Self {
+            for (name, value) in
+                crate::http::upgrade_request_headers(host, origin, version, nonce, nonce_base64_buf)
+            {
+                self.set(name, value);
+            }
+
+            self
+        }
+
+        fn set_ws_upgrade_response_headers<'a, H>(
+            &mut self,
+            request_headers: H,
+            version: Option<&'a str>,
+            sec_key_response_base64_buf: &'b mut [u8; crate::http::MAX_BASE64_KEY_RESPONSE_LEN],
+        ) -> Result<&mut Self, UpgradeError>
+        where
+            H: IntoIterator<Item = (&'a str, &'a str)>,
+        {
+            for (name, value) in crate::http::upgrade_response_headers(
+                request_headers,
+                version,
+                sec_key_response_base64_buf,
+            )? {
+                self.set(name, value);
+            }
+
+            Ok(self)
         }
     }
 }

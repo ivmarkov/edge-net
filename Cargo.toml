@@ -12,38 +12,50 @@ readme = "README.md"
 rust-version = "1.71"
 
 [features]
-default = ["std"]
+std = [
+    "alloc",
+    "embassy-sync/std",
+    "embedded-svc?/std",
+    "edge-http?/std",
+    "edge-captive?/std",
+    "dep:edge-tcp",
 
-std = ["alloc", "embedded-io/std", "embassy-sync/std", "embedded-svc?/std", "async-io", "libc", "futures-lite/std", "httparse/std", "domain?/std"]
-alloc = ["embedded-io/alloc", "embedded-svc?/alloc", "embedded-io-async?/alloc", ]
-nightly = ["embedded-io-async", "embassy-sync/nightly", "embedded-svc?/nightly"]
-embassy-util = [] # Just for backward compat. To be removed in future
+    "futures-lite/std",
+    "dep:async-io",
+    "dep:embedded-io-async",
+    "dep:embedded-nal-async",
+    "dep:libc"
+]
+alloc = ["edge-http?/alloc", "embedded-svc?/alloc"]
+nightly = ["dep:edge-http", "embedded-svc?/nightly"]
 
 [dependencies]
-embedded-io = { version = "0.6", default-features = false }
-embedded-io-async = { version = "0.6", default-features = false, optional = true }
-heapless = { version = "0.7", default-features = false }
-httparse = { version = "1.7", default-features = false }
-num_enum = { version = "0.7", default-features = false }
-embassy-futures = "0.1"
-embassy-time = "0.1"
-embassy-sync = "0.3"
-no-std-net = { version = "0.6", default-features = false }
-rand_core = "0.6"
-log = { version = "0.4", default-features = false }
-base64 = { version = "0.13", default-features = false }
-sha1_smol = { version = "1", default-features = false }
-embedded-nal-async = "0.6"
-domain = { version = "0.7", default-features = false, optional = true }
+embedded-svc = { version = "0.26", default-features = false, optional = true, features = ["embedded-io-async"] }
+
 futures-lite = { version = "1", default-features = false, optional = true }
 async-io = { version = "2", default-features = false, optional = true }
+embedded-io-async = { workspace = true, optional = true }
+embedded-nal-async = { workspace = true, optional = true }
 libc = { version = "0.2", default-features = false, optional = true }
-embedded-svc = { version = "0.26", default-features = false, optional = true, features = ["embedded-io-async"] }
-rumqttc = { version = "0.19", optional = true }
+
+embassy-sync.workspace = true
+log.workspace = true
+heapless.workspace = true
+no-std-net.workspace = true
+
+edge-captive = { workspace = true, optional = true }
+edge-dhcp = { workspace = true, optional = true }
+edge-http = { workspace = true, optional = true }
+edge-mdns = { workspace = true, optional = true }
+edge-mqtt = { workspace = true, optional = true }
+edge-ws = { workspace = true, optional = true }
+
+# edge-tcp is an exception that only contains trait definitions
+edge-tcp = { workspace = true, optional = true }
 
 [dev-dependencies]
 anyhow = "1"
-simple_logger="2.2"
+simple_logger = "2.2"
 
 [[example]]
 name = "captive_portal"
@@ -60,3 +72,33 @@ required-features = ["std", "nightly"]
 [[example]]
 name = "http_server"
 required-features = ["std", "nightly"]
+
+[workspace]
+members = [
+    ".",
+    "edge-captive",
+    "edge-dhcp",
+    "edge-http",
+    "edge-mdns",
+    "edge-mqtt", 
+    "edge-tcp",
+    "edge-ws"
+]
+
+[workspace.dependencies]
+embassy-futures = "0.1"
+embassy-sync = "0.3"
+embedded-io = { version = "0.6", default-features = false }
+embedded-io-async = { version = "0.6", default-features = false }
+embedded-nal-async = "0.6"
+log = { version = "0.4", default-features = false }
+heapless = { version = "0.7", default-features = false }
+no-std-net = { version = "0.6", default-features = false }
+
+edge-captive = { version = "0.1.0", path = "edge-captive" }
+edge-dhcp    = { version = "0.1.0", path = "edge-dhcp" }
+edge-http    = { version = "0.1.0", path = "edge-http" }
+edge-mdns    = { version = "0.1.0", path = "edge-mdns" }
+edge-mqtt    = { version = "0.1.0", path = "edge-mqtt" }
+edge-tcp     = { version = "0.1.0", path = "edge-tcp" }
+edge-ws      = { version = "0.1.0", path = "edge-ws" }

@@ -4,7 +4,7 @@ use embedded_io::ErrorType;
 use embedded_io_async::{Read, Write};
 use no_std_net::SocketAddr;
 
-use crate::asynch::http::{
+use crate::{
     send_headers, send_headers_end, send_request, Body, BodyType, Error, ResponseHeaders, SendBody,
 };
 use embedded_nal_async::TcpConnect;

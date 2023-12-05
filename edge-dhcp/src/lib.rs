@@ -1,9 +1,19 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+#![allow(stable_features)]
+#![allow(unknown_lints)]
+#![feature(async_fn_in_trait)]
+#![allow(async_fn_in_trait)]
+#![feature(impl_trait_projections)]
+
 /// This code is a `no_std` and no-alloc modification of https://github.com/krolaw/dhcp4r
 use core::str::Utf8Error;
 
 use no_std_net::Ipv4Addr;
 
 use num_enum::TryFromPrimitive;
+
+#[cfg(feature = "nightly")]
+pub mod asynch;
 
 use self::raw_ip::{Ipv4PacketHeader, UdpPacketHeader};
 

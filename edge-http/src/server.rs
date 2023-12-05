@@ -7,7 +7,7 @@ use embedded_io_async::{Read, Write};
 
 use log::{info, warn};
 
-use crate::asynch::http::{
+use crate::{
     send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, RequestHeaders,
     SendBody,
 };
@@ -336,7 +336,7 @@ pub struct Server<const N: usize, const B: usize, A, H> {
 
 impl<const N: usize, const B: usize, A, H> Server<N, B, A, H>
 where
-    A: crate::asynch::tcp::TcpAccept,
+    A: edge_tcp::TcpAccept,
     H: for<'b, 't> Handler<'b, N, &'b mut A::Connection<'t>>,
 {
     pub const fn new(acceptor: A, handler: H) -> Self {

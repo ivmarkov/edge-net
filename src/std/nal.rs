@@ -5,16 +5,14 @@ use std::os::fd::{AsFd, AsRawFd};
 use async_io::Async;
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 
-use embedded_io::ErrorType;
-use embedded_io_async::{Read, Write};
+use embedded_io_async::{ErrorType, Read, Write};
+use no_std_net::{Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use embedded_nal_async::{
     AddrType, ConnectedUdp, Dns, IpAddr, TcpConnect, UdpStack, UnconnectedUdp,
 };
 
-use no_std_net::{Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
-
-use super::tcp::{RawSocket, RawStack, TcpAccept, TcpListen, TcpSplittableConnection};
+use edge_tcp::{RawSocket, RawStack, TcpAccept, TcpListen, TcpSplittableConnection};
 
 pub struct StdTcpConnect(());
 
