@@ -92,7 +92,8 @@ where
                 socket
                     .send(
                         local,
-                        if true // TODO: Why
+                        if true
+                        // TODO: Why
                         /*request.broadcast*/
                         {
                             SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, remote.port()))
