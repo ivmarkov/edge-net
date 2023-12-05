@@ -26,7 +26,7 @@ pub struct Configuration<'a> {
 ///
 /// The client takes a socket factory (either operating on raw sockets or UDP datagrams) and
 /// then processes all incoming BOOTP requests, by updating its internal simple database of leases, and issuing replies.
-pub struct Server<'a, const N: usize, F> {
+pub struct Server<'a, F, const N: usize = 64> {
     stack: F,
     buf: &'a mut [u8],
     socket: SocketAddrV4,
@@ -34,7 +34,7 @@ pub struct Server<'a, const N: usize, F> {
     pub server: dhcp::server::Server<N>,
 }
 
-impl<'a, const N: usize, F> Server<'a, N, F>
+impl<'a, F, const N: usize> Server<'a, F, N>
 where
     F: UdpStack,
 {
