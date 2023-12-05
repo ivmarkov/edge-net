@@ -14,7 +14,7 @@ rust-version = "1.71"
 [features]
 std = ["edge-http/std", "edge-captive/std", "edge-mqtt/std", "edge-std-nal-async/std"]
 nightly = ["edge-dhcp/nightly", "edge-http/nightly", "edge-mqtt/nightly", "edge-raw/nightly", "edge-ws/nightly", "edge-std-nal-async/nightly"]
-# TODO: embedded-svc
+embedded-svc = ["edge-http/embedded-svc", "edge-mqtt/embedded-svc", "edge-ws/embedded-svc"]
 
 [dependencies]
 edge-captive = { workspace = true }
