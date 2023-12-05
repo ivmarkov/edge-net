@@ -184,132 +184,6 @@ impl UdpStack for StdUdpStack {
     }
 }
 
-pub struct StdRawSocket(Async<std::net::UdpSocket>, u32);
-
-impl RawSocket for StdRawSocket {
-    type Error = io::Error;
-
-    async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error> {
-        let sockaddr = libc::sockaddr_ll {
-            sll_family: libc::AF_PACKET as _,
-            sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
-            sll_ifindex: self.1 as _,
-            sll_hatype: 0,
-            sll_pkttype: 0,
-            sll_halen: 6,
-            sll_addr: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0], // TODO
-        };
-
-        let len = self
-            .0
-            .write_with(|io| {
-                let len = core::cmp::min(data.len(), u16::MAX as usize);
-
-                let ret = cvti(unsafe {
-                    libc::sendto(
-                        io.as_fd().as_raw_fd(),
-                        data.as_ptr() as *const _,
-                        len,
-                        libc::MSG_NOSIGNAL,
-                        &sockaddr as *const _ as *const _,
-                        core::mem::size_of::<libc::sockaddr_ll>() as _,
-                    )
-                })?;
-                Ok(ret as usize)
-            })
-            .await?;
-
-        assert_eq!(len, data.len());
-
-        Ok(())
-    }
-
-    async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-        self.0.recv(buffer).await
-    }
-}
-
-pub struct StdRawStack(());
-
-impl StdRawStack {
-    pub const fn new() -> Self {
-        Self(())
-    }
-}
-
-impl RawStack for StdRawStack {
-    type Error = io::Error;
-
-    type Socket = StdRawSocket;
-
-    type Interface = u32;
-
-    async fn bind(&self, interface: &Self::Interface) -> Result<Self::Socket, Self::Error> {
-        let socket = unsafe {
-            libc::socket(
-                libc::PF_PACKET,
-                libc::SOCK_DGRAM,
-                (libc::ETH_P_IP as u16).to_be() as _,
-            )
-        };
-
-        assert!(socket >= 0);
-
-        let sockaddr = libc::sockaddr_ll {
-            sll_family: libc::AF_PACKET as _,
-            sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
-            sll_ifindex: *interface as _,
-            sll_hatype: 0,
-            sll_pkttype: 0,
-            sll_halen: 0,
-            sll_addr: Default::default(),
-        };
-
-        cvt(unsafe {
-            libc::bind(
-                socket,
-                &sockaddr as *const _ as *const _,
-                core::mem::size_of::<libc::sockaddr_ll>() as _,
-            )
-        })?;
-
-        // unsafe {
-        //     libc::setsockopt(socket, libc::SOL_PACKET, libc::PACKET_AUXDATA, &1_u32 as *const _ as *const _, 4);
-        // }
-
-        #[cfg(any(unix, target_os = "wasi"))] // TODO
-        let socket = {
-            use std::os::fd::FromRawFd;
-
-            unsafe { std::net::UdpSocket::from_raw_fd(socket) }
-        };
-
-        Ok(StdRawSocket(Async::new(socket)?, *interface as _))
-
-        // warn!("Before connect");
-        // let (addr, socket) = self.connect_from(local, remote).await?;
-        // warn!("After connect");
-
-        // socket.0.as_ref().set_broadcast(broadcast)?;
-        // warn!("After broadcast");
-
-        // if let Some(interface) = interface {
-        //     let mut i: libc::ip;
-
-        //     let mut if_req: libc::ifreq = unsafe { core::mem::transmute([0u8; core::mem::size_of::<libc::ifreq>()]) };
-        //     let ifr_name: &mut [_] = &mut if_req.ifr_name;
-        //     let ifr_name: &mut [u8] = unsafe { core::mem::transmute(ifr_name) };
-
-        //     let len = core::cmp::min(interface.len(), ifr_name.len());
-        //     ifr_name[..len].copy_from_slice(&interface.as_bytes()[..len]);
-
-        //     unsafe { libc::setsockopt(socket.0.as_ref().as_fd().as_raw_fd(), libc::SOL_SOCKET, libc::SO_BINDTODEVICE, &if_req as *const _ as *const core::ffi::c_void, core::mem::size_of::<libc::ifreq>() as _); }
-        // }
-
-        // Ok((addr, socket))
-    }
-}
-
 pub struct StdUdpSocket(Async<UdpSocket>);
 
 impl ConnectedUdp for StdUdpSocket {
@@ -414,6 +288,113 @@ fn dns_lookup_host(host: &str, addr_type: AddrType) -> Result<IpAddr, io::Error>
             std::net::SocketAddr::V6(v6) => v6.ip().octets().into(),
         })
         .ok_or_else(|| io::ErrorKind::AddrNotAvailable.into())
+}
+
+#[cfg(unix)]
+pub struct StdRawSocket(Async<std::net::UdpSocket>, u32);
+
+#[cfg(unix)]
+impl RawSocket for StdRawSocket {
+    type Error = io::Error;
+
+    async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error> {
+        let sockaddr = libc::sockaddr_ll {
+            sll_family: libc::AF_PACKET as _,
+            sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
+            sll_ifindex: self.1 as _,
+            sll_hatype: 0,
+            sll_pkttype: 0,
+            sll_halen: 6,
+            sll_addr: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0], // TODO
+        };
+
+        let len = self
+            .0
+            .write_with(|io| {
+                let len = core::cmp::min(data.len(), u16::MAX as usize);
+
+                let ret = cvti(unsafe {
+                    libc::sendto(
+                        io.as_fd().as_raw_fd(),
+                        data.as_ptr() as *const _,
+                        len,
+                        libc::MSG_NOSIGNAL,
+                        &sockaddr as *const _ as *const _,
+                        core::mem::size_of::<libc::sockaddr_ll>() as _,
+                    )
+                })?;
+                Ok(ret as usize)
+            })
+            .await?;
+
+        assert_eq!(len, data.len());
+
+        Ok(())
+    }
+
+    async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        self.0.recv(buffer).await
+    }
+}
+
+#[cfg(unix)]
+pub struct StdRawStack(());
+
+#[cfg(unix)]
+impl StdRawStack {
+    pub const fn new() -> Self {
+        Self(())
+    }
+}
+
+#[cfg(unix)]
+impl RawStack for StdRawStack {
+    type Error = io::Error;
+
+    type Socket = StdRawSocket;
+
+    type Interface = u32;
+
+    async fn bind(&self, interface: &Self::Interface) -> Result<Self::Socket, Self::Error> {
+        let socket = cvt(unsafe {
+            libc::socket(
+                libc::PF_PACKET,
+                libc::SOCK_DGRAM,
+                (libc::ETH_P_IP as u16).to_be() as _,
+            )
+        })?;
+
+        let sockaddr = libc::sockaddr_ll {
+            sll_family: libc::AF_PACKET as _,
+            sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
+            sll_ifindex: *interface as _,
+            sll_hatype: 0,
+            sll_pkttype: 0,
+            sll_halen: 0,
+            sll_addr: Default::default(),
+        };
+
+        cvt(unsafe {
+            libc::bind(
+                socket,
+                &sockaddr as *const _ as *const _,
+                core::mem::size_of::<libc::sockaddr_ll>() as _,
+            )
+        })?;
+
+        // TODO
+        // cvt(unsafe {
+        //     libc::setsockopt(socket, libc::SOL_PACKET, libc::PACKET_AUXDATA, &1_u32 as *const _ as *const _, 4)
+        // })?;
+
+        let socket = {
+            use std::os::fd::FromRawFd;
+
+            unsafe { std::net::UdpSocket::from_raw_fd(socket) }
+        };
+
+        Ok(StdRawSocket(Async::new(socket)?, *interface as _))
+    }
 }
 
 pub fn to_std_addr(addr: SocketAddr) -> std::net::SocketAddr {
