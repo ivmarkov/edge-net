@@ -1,4 +1,4 @@
-use core::fmt::Debug;
+use core::{fmt::Debug, mem::MaybeUninit};
 
 use embedded_io_async::ErrorKind;
 
@@ -34,16 +34,16 @@ where
     }
 }
 
-pub struct ConnectedUdp2RawSocket<T>(T, SocketAddrV4, SocketAddrV4);
+pub struct ConnectedUdp2RawSocket<T, const N: usize>(T, SocketAddrV4, SocketAddrV4);
 
-impl<T> ConnectedUdp for ConnectedUdp2RawSocket<T>
+impl<T, const N: usize> ConnectedUdp for ConnectedUdp2RawSocket<T, N>
 where
     T: RawSocket,
 {
     type Error = Error<T::Error>;
 
     async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error> {
-        send(
+        send::<_, N>(
             &mut self.0,
             SocketAddr::V4(self.1),
             SocketAddr::V4(self.2),
@@ -53,15 +53,16 @@ where
     }
 
     async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-        let (len, _, _) = receive_into(&mut self.0, Some(self.1), Some(self.2), buffer).await?;
+        let (len, _, _) =
+            receive_into::<_, N>(&mut self.0, Some(self.1), Some(self.2), buffer).await?;
 
         Ok(len)
     }
 }
 
-pub struct UnconnectedUdp2RawSocket<T>(T, Option<SocketAddrV4>);
+pub struct UnconnectedUdp2RawSocket<T, const N: usize>(T, Option<SocketAddrV4>);
 
-impl<T> UnconnectedUdp for UnconnectedUdp2RawSocket<T>
+impl<T, const N: usize> UnconnectedUdp for UnconnectedUdp2RawSocket<T, N>
 where
     T: RawSocket,
 {
@@ -73,22 +74,22 @@ where
         remote: SocketAddr,
         data: &[u8],
     ) -> Result<(), Self::Error> {
-        send(&mut self.0, local, remote, data).await
+        send::<_, N>(&mut self.0, local, remote, data).await
     }
 
     async fn receive_into(
         &mut self,
         buffer: &mut [u8],
     ) -> Result<(usize, SocketAddr, SocketAddr), Self::Error> {
-        receive_into(&mut self.0, None, self.1, buffer).await
+        receive_into::<_, N>(&mut self.0, None, self.1, buffer).await
     }
 }
 
-pub struct Udp2RawStack<T>(T, T::Interface)
+pub struct Udp2RawStack<T, const N: usize = 1500>(T, T::Interface)
 where
     T: RawStack;
 
-impl<T> Udp2RawStack<T>
+impl<T, const N: usize> Udp2RawStack<T, N>
 where
     T: RawStack,
 {
@@ -97,17 +98,17 @@ where
     }
 }
 
-impl<T> UdpStack for Udp2RawStack<T>
+impl<T, const N: usize> UdpStack for Udp2RawStack<T, N>
 where
     T: RawStack,
 {
     type Error = Error<T::Error>;
 
-    type Connected = ConnectedUdp2RawSocket<T::Socket>;
+    type Connected = ConnectedUdp2RawSocket<T::Socket, N>;
 
-    type UniquelyBound = UnconnectedUdp2RawSocket<T::Socket>;
+    type UniquelyBound = UnconnectedUdp2RawSocket<T::Socket, N>;
 
-    type MultiplyBound = UnconnectedUdp2RawSocket<T::Socket>;
+    type MultiplyBound = UnconnectedUdp2RawSocket<T::Socket, N>;
 
     async fn connect_from(
         &self,
@@ -147,7 +148,7 @@ where
     }
 }
 
-async fn send<T: RawSocket>(
+async fn send<T: RawSocket, const N: usize>(
     mut socket: T,
     local: SocketAddr,
     remote: SocketAddr,
@@ -157,9 +158,10 @@ async fn send<T: RawSocket>(
         Err(Error::UnsupportedProtocol)?
     };
 
-    let mut buf = [0; 1500];
+    let mut buf = MaybeUninit::<[u8; N]>::uninit();
+    let buf = unsafe { buf.assume_init_mut() };
 
-    let data = raw::ip_udp_encode(&mut buf, local, remote, |buf| {
+    let data = raw::ip_udp_encode(buf, local, remote, |buf| {
         if data.len() <= buf.len() {
             buf[..data.len()].copy_from_slice(data);
 
@@ -172,30 +174,33 @@ async fn send<T: RawSocket>(
     socket.send(data).await.map_err(Error::Io)
 }
 
-async fn receive_into<T: RawSocket>(
+async fn receive_into<T: RawSocket, const N: usize>(
     mut socket: T,
     filter_src: Option<SocketAddrV4>,
     filter_dst: Option<SocketAddrV4>,
     buffer: &mut [u8],
 ) -> Result<(usize, SocketAddr, SocketAddr), Error<T::Error>> {
-    let mut buf = [0; 1500];
+    let mut buf = MaybeUninit::<[u8; N]>::uninit();
+    let buf = unsafe { buf.assume_init_mut() };
 
     let (local, remote, len) = loop {
-        let len = socket.receive_into(&mut buf).await.map_err(Error::Io)?;
+        let len = socket.receive_into(buf).await.map_err(Error::Io)?;
 
         match raw::ip_udp_decode(&buf[..len], filter_src, filter_dst) {
-            Ok(Some((local, remote, data))) => break (local, remote, data.len()),
+            Ok(Some((local, remote, data))) => {
+                if data.len() > buffer.len() {
+                    Err(Error::RawError(raw::Error::BufferOverflow))?;
+                }
+
+                buffer[..data.len()].copy_from_slice(data);
+
+                break (local, remote, data.len());
+            }
             Ok(None) => continue,
             Err(raw::Error::InvalidFormat) | Err(raw::Error::InvalidChecksum) => continue,
             Err(other) => Err(other)?,
         }
     };
 
-    if len <= buffer.len() {
-        buffer[..len].copy_from_slice(&buf[..len]);
-
-        Ok((len, SocketAddr::V4(local), SocketAddr::V4(remote)))
-    } else {
-        Err(raw::Error::BufferOverflow.into())
-    }
+    Ok((len, SocketAddr::V4(local), SocketAddr::V4(remote)))
 }
