@@ -88,6 +88,15 @@ pub struct Udp2RawStack<T>(T, T::Interface)
 where
     T: RawStack;
 
+impl<T> Udp2RawStack<T>
+where
+    T: RawStack,
+{
+    pub const fn new(stack: T, interface: T::Interface) -> Self {
+        Self(stack, interface)
+    }
+}
+
 impl<T> UdpStack for Udp2RawStack<T>
 where
     T: RawStack,
