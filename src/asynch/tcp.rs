@@ -1,4 +1,4 @@
-use core::fmt::Debug;
+
 
 use no_std_net::SocketAddr;
 
@@ -109,7 +109,7 @@ where
 
 // TODO: Ideally should go to `embedded-nal-async`
 pub trait RawSocket {
-    type Error: Debug + embedded_io_async::Error;
+    type Error: embedded_io_async::Error;
 
     async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error>;
     async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error>;
@@ -133,11 +133,13 @@ where
 
 // TODO: Ideally should go to `embedded-nal-async`
 pub trait RawStack {
-    type Error: Debug;
+    type Error: embedded_io_async::Error;
 
     type Socket: RawSocket<Error = Self::Error>;
 
-    async fn connect(&self, interface: Option<u32>) -> Result<Self::Socket, Self::Error>;
+    type Interface;
+
+    async fn bind(&self, interface: &Self::Interface) -> Result<Self::Socket, Self::Error>;
 }
 
 // TODO: Ideally should go to `embedded-nal-async`
@@ -149,8 +151,10 @@ where
 
     type Socket = T::Socket;
 
-    async fn connect(&self, interface: Option<u32>) -> Result<Self::Socket, Self::Error> {
-        (*self).connect(interface).await
+    type Interface = T::Interface;
+
+    async fn bind(&self, interface: &Self::Interface) -> Result<Self::Socket, Self::Error> {
+        (*self).bind(interface).await
     }
 }
 
@@ -162,8 +166,10 @@ where
 
     type Socket = T::Socket;
 
-    async fn connect(&self, interface: Option<u32>) -> Result<Self::Socket, Self::Error> {
-        (**self).connect(interface).await
+    type Interface = T::Interface;
+
+    async fn bind(&self, interface: &Self::Interface) -> Result<Self::Socket, Self::Error> {
+        (**self).bind(interface).await
     }
 }
 

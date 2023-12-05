@@ -5,17 +5,27 @@ use no_std_net::Ipv4Addr;
 
 use num_enum::TryFromPrimitive;
 
-use self::raw_ip::{Ipv4PacketHeader, UdpPacketHeader};
+use self::bytes::{BytesIn, BytesOut};
 
 #[derive(Debug)]
 pub enum Error {
     DataUnderflow,
+    BufferOverflow,
+    InvalidPacket,
     InvalidUtf8Str(Utf8Error),
     InvalidMessageType,
     MissingCookie,
     InvalidHlen,
-    BufferOverflow,
-    InvalidPacket,
+}
+
+impl From<bytes::Error> for Error {
+    fn from(value: bytes::Error) -> Self {
+        match value {
+            bytes::Error::BufferOverflow => Self::BufferOverflow,
+            bytes::Error::DataUnderflow => Self::DataUnderflow,
+            bytes::Error::InvalidFormat => Self::InvalidPacket,
+        }
+    }
 }
 
 ///
@@ -139,22 +149,6 @@ impl<'a> Packet<'a> {
             && self.reply
     }
 
-    pub fn settings(&self) -> Option<(MessageType, Settings)> {
-        if self.reply {
-            let mt = self.options.iter().find_map(|option| {
-                if let DhcpOption::MessageType(mt) = option {
-                    Some(mt)
-                } else {
-                    None
-                }
-            });
-
-            mt.map(|mt| (mt, self.into()))
-        } else {
-            None
-        }
-    }
-
     /// Parses the packet from a byte slice
     pub fn decode(data: &'a [u8]) -> Result<Self, Error> {
         let mut bytes = BytesIn::new(data);
@@ -233,64 +227,6 @@ impl<'a> Packet<'a> {
         let len = bytes.len();
 
         Ok(&buf[..len])
-    }
-
-    /// Parses the packet from a byte slice that models a raw IP packet
-    /// Useful when working with raw sockets
-    pub fn decode_raw(
-        data: &'a [u8],
-        src_port: Option<u16>,
-        dst_port: Option<u16>,
-    ) -> Result<Option<(Ipv4PacketHeader, UdpPacketHeader, Self)>, Error> {
-        if let Some((ip_hdr, ip_payload)) = Ipv4PacketHeader::decode_with_payload(data)? {
-            if ip_hdr.p == UdpPacketHeader::PROTO {
-                let (udp_hdr, udp_payload) =
-                    UdpPacketHeader::decode_with_payload(ip_payload, &ip_hdr)?;
-
-                if src_port.map(|p| p == udp_hdr.src).unwrap_or(true)
-                    && dst_port.map(|p| p == udp_hdr.dst).unwrap_or(true)
-                {
-                    return Ok(Some((ip_hdr, udp_hdr, Packet::decode(udp_payload)?)));
-                }
-            }
-        }
-
-        Ok(None)
-    }
-
-    /// Encodes the packet into the provided buf slice, together with a UDP and IPv$ headers
-    /// Useful when working with raw sockets
-    pub fn encode_raw<'o>(
-        &self,
-        src_ip: Option<Ipv4Addr>,
-        src_port: u16,
-        dst_ip: Option<Ipv4Addr>,
-        dst_port: u16,
-        buf: &'o mut [u8],
-    ) -> Result<&'o [u8], Error> {
-        if buf.len() < Ipv4PacketHeader::MIN_SIZE + UdpPacketHeader::SIZE {
-            Err(Error::BufferOverflow)?;
-        }
-
-        let mut ip_hdr = Ipv4PacketHeader::new(
-            src_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
-            dst_ip.unwrap_or(Ipv4Addr::BROADCAST),
-            UdpPacketHeader::PROTO,
-        );
-
-        ip_hdr.encode_with_payload(buf, |buf, ip_hdr| {
-            let mut udp_hdr = UdpPacketHeader::new(src_port, dst_port);
-
-            let len = udp_hdr
-                .encode_with_payload(buf, ip_hdr, |buf| {
-                    let len = self.encode(buf)?.len();
-
-                    Ok(len)
-                })?
-                .len();
-
-            Ok(len)
-        })
     }
 }
 
@@ -702,102 +638,113 @@ where
     }
 }
 
-struct BytesIn<'a> {
-    data: &'a [u8],
-    offset: usize,
-}
-
-impl<'a> BytesIn<'a> {
-    pub const fn new(data: &'a [u8]) -> Self {
-        Self { data, offset: 0 }
+pub mod bytes {
+    #[derive(Debug)]
+    pub enum Error {
+        BufferOverflow,
+        DataUnderflow,
+        InvalidFormat,
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.offset == self.data.len()
+    pub struct BytesIn<'a> {
+        data: &'a [u8],
+        offset: usize,
     }
 
-    pub fn offset(&self) -> usize {
-        self.offset
-    }
+    impl<'a> BytesIn<'a> {
+        pub const fn new(data: &'a [u8]) -> Self {
+            Self { data, offset: 0 }
+        }
 
-    pub fn byte(&mut self) -> Result<u8, Error> {
-        self.arr::<1>().map(|arr| arr[0])
-    }
+        pub fn is_empty(&self) -> bool {
+            self.offset == self.data.len()
+        }
 
-    pub fn slice(&mut self, len: usize) -> Result<&'a [u8], Error> {
-        if len > self.data.len() - self.offset {
-            Err(Error::DataUnderflow)
-        } else {
-            let data = &self.data[self.offset..self.offset + len];
-            self.offset += len;
+        pub fn offset(&self) -> usize {
+            self.offset
+        }
+
+        pub fn byte(&mut self) -> Result<u8, Error> {
+            self.arr::<1>().map(|arr| arr[0])
+        }
+
+        pub fn slice(&mut self, len: usize) -> Result<&'a [u8], Error> {
+            if len > self.data.len() - self.offset {
+                Err(Error::DataUnderflow)
+            } else {
+                let data = &self.data[self.offset..self.offset + len];
+                self.offset += len;
+
+                Ok(data)
+            }
+        }
+
+        pub fn arr<const N: usize>(&mut self) -> Result<[u8; N], Error> {
+            let slice = self.slice(N)?;
+
+            let mut data = [0; N];
+            data.copy_from_slice(slice);
 
             Ok(data)
         }
-    }
 
-    pub fn arr<const N: usize>(&mut self) -> Result<[u8; N], Error> {
-        let slice = self.slice(N)?;
+        pub fn remaining(&mut self) -> &'a [u8] {
+            let data = self.slice(self.data.len() - self.offset).unwrap();
 
-        let mut data = [0; N];
-        data.copy_from_slice(slice);
+            self.offset = self.data.len();
 
-        Ok(data)
-    }
+            data
+        }
 
-    pub fn remaining(&mut self) -> &'a [u8] {
-        let data = self.slice(self.data.len() - self.offset).unwrap();
+        pub fn remaining_byte(&mut self) -> Result<u8, Error> {
+            Ok(self.remaining_arr::<1>()?[0])
+        }
 
-        self.offset = self.data.len();
-
-        data
-    }
-
-    pub fn remaining_byte(&mut self) -> Result<u8, Error> {
-        Ok(self.remaining_arr::<1>()?[0])
-    }
-
-    pub fn remaining_arr<const N: usize>(&mut self) -> Result<[u8; N], Error> {
-        if self.data.len() - self.offset > N {
-            Err(Error::InvalidHlen) // TODO
-        } else {
-            self.arr::<N>()
+        pub fn remaining_arr<const N: usize>(&mut self) -> Result<[u8; N], Error> {
+            if self.data.len() - self.offset > N {
+                Err(Error::InvalidFormat)
+            } else {
+                self.arr::<N>()
+            }
         }
     }
-}
 
-struct BytesOut<'a> {
-    buf: &'a mut [u8],
-    offset: usize,
-}
-
-impl<'a> BytesOut<'a> {
-    pub fn new(buf: &'a mut [u8]) -> Self {
-        Self { buf, offset: 0 }
+    pub struct BytesOut<'a> {
+        buf: &'a mut [u8],
+        offset: usize,
     }
 
-    pub fn len(&self) -> usize {
-        self.offset
-    }
+    impl<'a> BytesOut<'a> {
+        pub fn new(buf: &'a mut [u8]) -> Self {
+            Self { buf, offset: 0 }
+        }
 
-    pub fn byte(&mut self, data: u8) -> Result<&mut Self, Error> {
-        self.push(&[data])
-    }
+        pub fn is_empty(&self) -> bool {
+            self.len() == 0
+        }
 
-    pub fn push(&mut self, data: &[u8]) -> Result<&mut Self, Error> {
-        if data.len() > self.buf.len() - self.offset {
-            Err(Error::BufferOverflow)
-        } else {
-            self.buf[self.offset..self.offset + data.len()].copy_from_slice(data);
-            self.offset += data.len();
+        pub fn len(&self) -> usize {
+            self.offset
+        }
 
-            Ok(self)
+        pub fn byte(&mut self, data: u8) -> Result<&mut Self, Error> {
+            self.push(&[data])
+        }
+
+        pub fn push(&mut self, data: &[u8]) -> Result<&mut Self, Error> {
+            if data.len() > self.buf.len() - self.offset {
+                Err(Error::BufferOverflow)
+            } else {
+                self.buf[self.offset..self.offset + data.len()].copy_from_slice(data);
+                self.offset += data.len();
+
+                Ok(self)
+            }
         }
     }
 }
 
 pub mod client {
-    use log::trace;
-
     use rand_core::RngCore;
 
     use super::*;
@@ -807,148 +754,100 @@ pub mod client {
     /// represented as Rust slices.
     ///
     /// As such, the client can generate all BOOTP requests and parse BOOTP replies.
-    ///
-    /// The client supports both raw IP as well as regular UDP payloads, where the raw payloads are
-    /// automatically prefixed/unprefixed with the IP and UDP header, which allows this client to be used with a raw sockets' transport layer.
-    ///
-    /// Note that it is unlikely that a non-raw socket transport would actually even work, due to the peculiarities of the
-    /// DHCP protocol, where a lot of UDP packets are send (and often broadcasted) by the client before the client actually has an assigned IP.
     pub struct Client<T> {
         pub rng: T,
         pub mac: [u8; 6],
-        pub rp_udp_client_port: Option<u16>,
-        pub rp_udp_server_port: Option<u16>,
     }
 
     impl<T> Client<T>
     where
         T: RngCore,
     {
-        pub fn encode_discover<'o>(
+        pub fn discover<'o>(
             &mut self,
-            buf: &'o mut [u8],
+            opt_buf: &'o mut [DhcpOption<'o>],
             secs: u16,
             ip: Option<Ipv4Addr>,
-        ) -> Result<(&'o [u8], u32), Error> {
-            let mut opt_buf = Options::buf();
-
-            self.encode_bootp_request(buf, secs, None, None, Options::discover(ip, &mut opt_buf))
+        ) -> (Packet<'o>, u32) {
+            self.bootp_request(secs, None, Options::discover(ip, opt_buf))
         }
 
-        pub fn encode_request<'o>(
+        pub fn request<'o>(
             &mut self,
-            buf: &'o mut [u8],
+            opt_buf: &'o mut [DhcpOption<'o>],
             secs: u16,
-            server_ip: Ipv4Addr,
-            our_ip: Ipv4Addr,
-        ) -> Result<(&'o [u8], u32), Error> {
-            let mut opt_buf = Options::buf();
-
-            self.encode_bootp_request(
-                buf,
-                secs,
-                Some(server_ip),
-                None,
-                Options::request(our_ip, &mut opt_buf),
-            )
+            ip: Ipv4Addr,
+        ) -> (Packet<'o>, u32) {
+            self.bootp_request(secs, None, Options::request(ip, opt_buf))
         }
 
-        pub fn encode_release<'o>(
+        pub fn release<'o>(
             &mut self,
-            buf: &'o mut [u8],
+            opt_buf: &'o mut [DhcpOption<'o>],
             secs: u16,
-            server_ip: Ipv4Addr,
-            our_ip: Ipv4Addr,
-        ) -> Result<&'o [u8], Error> {
-            let mut opt_buf = Options::buf();
-
-            self.encode_bootp_request(
-                buf,
-                secs,
-                Some(server_ip),
-                Some(our_ip),
-                Options::release(&mut opt_buf),
-            )
-            .map(|r| r.0)
+            ip: Ipv4Addr,
+        ) -> Packet<'o> {
+            self.bootp_request(secs, Some(ip), Options::release(opt_buf))
+                .0
         }
 
-        pub fn encode_decline<'o>(
+        pub fn decline<'o>(
             &mut self,
-            buf: &'o mut [u8],
+            opt_buf: &'o mut [DhcpOption<'o>],
             secs: u16,
-            server_ip: Ipv4Addr,
-            our_ip: Ipv4Addr,
-        ) -> Result<&'o [u8], Error> {
-            let mut opt_buf = Options::buf();
+            ip: Ipv4Addr,
+        ) -> Packet<'o> {
+            self.bootp_request(secs, Some(ip), Options::decline(opt_buf))
+                .0
+        }
 
-            self.encode_bootp_request(
-                buf,
-                secs,
-                Some(server_ip),
-                Some(our_ip),
-                Options::decline(&mut opt_buf),
-            )
-            .map(|r| r.0)
+        pub fn is_offer(&self, reply: &Packet<'_>, xid: u32) -> bool {
+            self.is_bootp_reply_for_us(reply, xid, Some(&[MessageType::Offer]))
+        }
+
+        pub fn is_ack(&self, reply: &Packet<'_>, xid: u32) -> bool {
+            self.is_bootp_reply_for_us(reply, xid, Some(&[MessageType::Ack]))
+        }
+
+        pub fn is_nak(&self, reply: &Packet<'_>, xid: u32) -> bool {
+            self.is_bootp_reply_for_us(reply, xid, Some(&[MessageType::Nak]))
         }
 
         #[allow(clippy::too_many_arguments)]
-        pub fn encode_bootp_request<'o>(
+        pub fn bootp_request<'o>(
             &mut self,
-            buf: &'o mut [u8],
             secs: u16,
-            server_ip: Option<Ipv4Addr>,
-            our_ip: Option<Ipv4Addr>,
-            options: Options<'_>,
-        ) -> Result<(&'o [u8], u32), Error> {
+            ip: Option<Ipv4Addr>,
+            options: Options<'o>,
+        ) -> (Packet<'o>, u32) {
             let xid = self.rng.next_u32();
 
-            let request = Packet::new_request(self.mac, xid, secs, our_ip, options.clone());
-
-            let data = if self.rp_udp_server_port.is_some() || self.rp_udp_client_port.is_some() {
-                request.encode_raw(
-                    our_ip,
-                    self.rp_udp_client_port.unwrap_or(68),
-                    server_ip,
-                    self.rp_udp_server_port.unwrap_or(67),
-                    buf,
-                )?
-            } else {
-                request.encode(buf)?
-            };
-
-            Ok((data, xid))
+            (Packet::new_request(self.mac, xid, secs, ip, options), xid)
         }
 
-        pub fn decode_bootp_reply<'o>(
+        pub fn is_bootp_reply_for_us(
             &self,
-            data: &'o [u8],
+            reply: &Packet<'_>,
             xid: u32,
             expected_message_types: Option<&[MessageType]>,
-        ) -> Result<Option<Packet<'o>>, Error> {
-            let reply = if self.rp_udp_server_port.is_some() || self.rp_udp_client_port.is_some() {
-                Packet::decode_raw(data, self.rp_udp_server_port, self.rp_udp_client_port)?
-                    .map(|r| r.2)
-            } else {
-                Some(Packet::decode(data)?)
-            };
-
-            trace!("DHCP packet decoded:\n{reply:?}");
-
-            Ok(reply.and_then(|reply| {
-                if reply.is_for_us(&self.mac, xid) {
-                    if let Some(expected_message_types) = expected_message_types {
-                        let (mt, _) = reply.settings().unwrap();
-
-                        if expected_message_types.iter().any(|emt| mt == *emt) {
-                            return Some(reply);
+        ) -> bool {
+            if reply.reply && reply.is_for_us(&self.mac, xid) {
+                if let Some(expected_message_types) = expected_message_types {
+                    let mt = reply.options.iter().find_map(|option| {
+                        if let DhcpOption::MessageType(mt) = option {
+                            Some(mt)
+                        } else {
+                            None
                         }
-                    } else {
-                        return Some(reply);
-                    }
-                }
+                    });
 
-                None
-            }))
+                    expected_message_types.iter().any(|emt| mt == Some(*emt))
+                } else {
+                    true
+                }
+            } else {
+                false
+            }
         }
     }
 }
@@ -958,7 +857,7 @@ pub mod server {
 
     use embassy_time::{Duration, Instant};
 
-    use log::{info, trace};
+    use log::info;
 
     use super::*;
 
@@ -968,163 +867,123 @@ pub mod server {
         expires: Instant,
     }
 
-    /// A simple DHCP server.
-    /// The server is unaware of the IP/UDP transport layer and operates purely in terms of packets
-    /// represented as Rust slices.
-    ///
-    /// The server supports both raw IP as well as regular UDP payloads, where the raw payloads are
-    /// automatically prefixed/unprefixed with the IP and UDP header, which allows this server to be used with a raw sockets' transport layer.
     #[derive(Clone, Debug)]
-    pub struct Server<const N: usize> {
-        pub ip: Ipv4Addr,
-        pub gateways: heapless::Vec<Ipv4Addr, 1>,
-        pub subnet: Option<Ipv4Addr>,
-        pub dns: heapless::Vec<Ipv4Addr, 2>,
-        pub range_start: Ipv4Addr,
-        pub range_end: Ipv4Addr,
-        pub lease_duration: Duration,
-        pub leases: heapless::LinearMap<Ipv4Addr, Lease, N>,
+    pub enum Action<'a> {
+        Discover(Option<Ipv4Addr>, &'a [u8; 16]),
+        Request(Ipv4Addr, &'a [u8; 16]),
+        Release(Ipv4Addr, &'a [u8; 16]),
+        Decline(Ipv4Addr, &'a [u8; 16]),
     }
 
-    impl<const N: usize> Server<N> {
-        pub fn handle_bootp_request<'o>(
-            &mut self,
-            rp_udp_server_port: Option<u16>,
-            buf: &'o mut [u8],
-            incoming_len: usize,
-        ) -> Result<Option<&'o [u8]>, Error> {
-            let request = if let Some(port) = rp_udp_server_port {
-                Packet::decode_raw(&buf[..incoming_len], None, Some(port))?
-                    .map(|(ip_hdr, udp_hdr, request)| (Some((ip_hdr, udp_hdr)), request))
-            } else {
-                Some((None, Packet::decode(&buf[..incoming_len])?))
-            };
+    pub struct ServerOptions<'a> {
+        pub ip: Ipv4Addr,
+        pub gateways: &'a [Ipv4Addr],
+        pub subnet: Option<Ipv4Addr>,
+        pub dns: &'a [Ipv4Addr],
+        pub lease_duration: Duration,
+    }
 
-            if let Some((raw_hdrs, request)) = request {
-                trace!("Got packet {request:?}");
+    impl<'a> ServerOptions<'a> {
+        pub fn process<'o>(&self, request: &'o Packet<'o>) -> Option<Action<'o>> {
+            if request.reply {
+                return None;
+            }
 
-                if !request.reply {
-                    let mt = request.options.iter().find_map(|option| {
-                        if let DhcpOption::MessageType(mt) = option {
-                            Some(mt)
-                        } else {
-                            None
-                        }
-                    });
+            let mt = request.options.iter().find_map(|option| {
+                if let DhcpOption::MessageType(mt) = option {
+                    Some(mt)
+                } else {
+                    None
+                }
+            });
 
-                    if let Some(mt) = mt {
-                        let server_identifier = request.options.iter().find_map(|option| {
-                            if let DhcpOption::ServerIdentifier(ip) = option {
-                                Some(ip)
-                            } else {
-                                None
-                            }
-                        });
+            if let Some(mt) = mt {
+                let server_identifier = request.options.iter().find_map(|option| {
+                    if let DhcpOption::ServerIdentifier(ip) = option {
+                        Some(ip)
+                    } else {
+                        None
+                    }
+                });
 
-                        if server_identifier == Some(self.ip)
-                            || server_identifier.is_none() && matches!(mt, MessageType::Discover)
-                        {
-                            info!("Packet is for us, will process, message type {mt:?}");
+                if server_identifier == Some(self.ip)
+                    || server_identifier.is_none() && matches!(mt, MessageType::Discover)
+                {
+                    info!("Packet is for us, will process, message type {mt:?}");
 
-                            let mut opt_buf = Options::buf();
-
-                            let reply = match mt {
-                                MessageType::Discover => {
-                                    let requested_ip = request.options.iter().find_map(|option| {
-                                        if let DhcpOption::RequestedIpAddress(ip) = option {
-                                            Some(ip)
-                                        } else {
-                                            None
-                                        }
-                                    });
-
-                                    let ip = requested_ip
-                                        .and_then(|ip| {
-                                            self.is_available(&request.chaddr, ip).then_some(ip)
-                                        })
-                                        .or_else(|| self.current_lease(&request.chaddr))
-                                        .or_else(|| self.available());
-
-                                    ip.map(|ip| {
-                                        self.reply_to(
-                                            &request,
-                                            MessageType::Offer,
-                                            Some(ip),
-                                            &mut opt_buf,
-                                        )
-                                    })
-                                }
-                                MessageType::Request => {
-                                    let ip = request
-                                        .options
-                                        .iter()
-                                        .find_map(|option| {
-                                            if let DhcpOption::RequestedIpAddress(ip) = option {
-                                                Some(ip)
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .unwrap_or(request.ciaddr);
-
-                                    Some(
-                                        if self.is_available(&request.chaddr, ip)
-                                            && self.add_lease(
-                                                ip,
-                                                request.chaddr,
-                                                Instant::now() + self.lease_duration,
-                                            )
-                                        {
-                                            self.reply_to(
-                                                &request,
-                                                MessageType::Ack,
-                                                Some(ip),
-                                                &mut opt_buf,
-                                            )
-                                        } else {
-                                            self.reply_to(
-                                                &request,
-                                                MessageType::Nak,
-                                                None,
-                                                &mut opt_buf,
-                                            )
-                                        },
-                                    )
-                                }
-                                MessageType::Decline | MessageType::Release => {
-                                    self.remove_lease(&request.chaddr);
-
+                    let request = match mt {
+                        MessageType::Discover => {
+                            let requested_ip = request.options.iter().find_map(|option| {
+                                if let DhcpOption::RequestedIpAddress(ip) = option {
+                                    Some(ip)
+                                } else {
                                     None
                                 }
-                                _ => None,
-                            };
+                            });
 
-                            if let Some(reply) = reply {
-                                let packet = if let Some((ip_hdr, udp_hdr)) = raw_hdrs {
-                                    reply.encode_raw(
-                                        Some(self.ip),
-                                        udp_hdr.dst,
-                                        Some(ip_hdr.src),
-                                        udp_hdr.src,
-                                        buf,
-                                    )?
-                                } else {
-                                    reply.encode(buf)?
-                                };
-
-                                return Ok(Some(packet));
-                            }
+                            Some(Action::Discover(requested_ip, &request.chaddr))
                         }
-                    }
+                        MessageType::Request => {
+                            let ip = request
+                                .options
+                                .iter()
+                                .find_map(|option| {
+                                    if let DhcpOption::RequestedIpAddress(ip) = option {
+                                        Some(ip)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or(request.ciaddr);
+
+                            Some(Action::Request(ip, &request.chaddr))
+                        }
+                        MessageType::Release => {
+                            Some(Action::Release(request.yiaddr, &request.chaddr))
+                        }
+                        MessageType::Decline => {
+                            Some(Action::Decline(request.yiaddr, &request.chaddr))
+                        }
+                        _ => None,
+                    };
+
+                    return request;
                 }
             }
 
-            Ok(None)
+            None
         }
 
-        fn reply_to<'a>(
-            &'a self,
-            request: &Packet<'_>,
+        pub fn offer(
+            &self,
+            request: &Packet,
+            ip: Ipv4Addr,
+            opt_buf: &'a mut [DhcpOption<'a>],
+        ) -> Packet<'a> {
+            self.reply(request, MessageType::Offer, Some(ip), opt_buf)
+        }
+
+        pub fn ack_nack(
+            &self,
+            request: &Packet,
+            ip: Option<Ipv4Addr>,
+            opt_buf: &'a mut [DhcpOption<'a>],
+        ) -> Packet<'a> {
+            self.reply(
+                request,
+                if ip.is_some() {
+                    MessageType::Ack
+                } else {
+                    MessageType::Nak
+                },
+                ip,
+                opt_buf,
+            )
+        }
+
+        fn reply(
+            &self,
+            request: &Packet,
             mt: MessageType,
             ip: Option<Ipv4Addr>,
             buf: &'a mut [DhcpOption<'a>],
@@ -1135,9 +994,9 @@ pub mod server {
                     mt,
                     self.ip,
                     self.lease_duration.as_secs() as _,
-                    &self.gateways,
+                    self.gateways,
                     self.subnet,
-                    &self.dns,
+                    self.dns,
                     buf,
                 ),
             );
@@ -1145,6 +1004,54 @@ pub mod server {
             info!("Reply: {reply:?}");
 
             reply
+        }
+    }
+
+    /// A simple DHCP server.
+    /// The server is unaware of the IP/UDP transport layer and operates purely in terms of packets
+    /// represented as Rust slices.
+    #[derive(Clone, Debug)]
+    pub struct Server<const N: usize> {
+        pub range_start: Ipv4Addr,
+        pub range_end: Ipv4Addr,
+        pub leases: heapless::LinearMap<Ipv4Addr, Lease, N>,
+    }
+
+    impl<const N: usize> Server<N> {
+        pub fn handle_request<'o>(
+            &mut self,
+            opt_buf: &'o mut [DhcpOption<'o>],
+            server_options: &'o ServerOptions,
+            request: &Packet,
+        ) -> Option<Packet<'o>> {
+            server_options
+                .process(request)
+                .and_then(|action| match action {
+                    Action::Discover(requested_ip, mac) => {
+                        let ip = requested_ip
+                            .and_then(|ip| self.is_available(mac, ip).then_some(ip))
+                            .or_else(|| self.current_lease(mac))
+                            .or_else(|| self.available());
+
+                        ip.map(|ip| server_options.offer(request, ip, opt_buf))
+                    }
+                    Action::Request(ip, mac) => {
+                        let ip = (self.is_available(mac, ip)
+                            && self.add_lease(
+                                ip,
+                                request.chaddr,
+                                Instant::now() + server_options.lease_duration,
+                            ))
+                        .then_some(ip);
+
+                        Some(server_options.ack_nack(request, ip, opt_buf))
+                    }
+                    Action::Release(_ip, mac) | Action::Decline(_ip, mac) => {
+                        self.remove_lease(mac);
+
+                        None
+                    }
+                })
         }
 
         fn is_available(&self, mac: &[u8; 16], addr: Ipv4Addr) -> bool {
@@ -1228,319 +1135,506 @@ const MESSAGE: u8 = 56;
 //
 // Useful in the context of DHCP, as it operates in terms of raw sockets (particuarly the client) so (dis)assembling
 // IP & UDP packets "by hand" is necessary.
-pub mod raw_ip {
-    use log::trace;
+pub mod raw {
+    use no_std_net::{Ipv4Addr, SocketAddrV4};
 
-    use no_std_net::Ipv4Addr;
+    use self::udp::UdpPacketHeader;
 
-    use super::{BytesIn, BytesOut, Error};
+    use super::bytes::{self, BytesIn};
 
-    #[derive(Clone, Debug)]
-    pub struct Ipv4PacketHeader {
-        pub version: u8,   // Version
-        pub hlen: u8,      // Header length
-        pub tos: u8,       // Type of service
-        pub len: u16,      // Total length
-        pub id: u16,       // Identification
-        pub off: u16,      // Fragment offset field
-        pub ttl: u8,       // Time to live
-        pub p: u8,         // Protocol
-        pub sum: u16,      // Checksum
-        pub src: Ipv4Addr, // Source address
-        pub dst: Ipv4Addr, // Dest address
+    #[derive(Debug)]
+    pub enum Error {
+        DataUnderflow,
+        BufferOverflow,
+        InvalidFormat,
+        InvalidChecksum,
     }
 
-    impl Ipv4PacketHeader {
-        pub const MIN_SIZE: usize = 20;
-        pub const CHECKSUM_WORD: usize = 5;
+    impl From<bytes::Error> for Error {
+        fn from(value: bytes::Error) -> Self {
+            match value {
+                bytes::Error::BufferOverflow => Self::BufferOverflow,
+                bytes::Error::DataUnderflow => Self::DataUnderflow,
+                bytes::Error::InvalidFormat => Self::InvalidFormat,
+            }
+        }
+    }
 
-        pub const IP_DF: u16 = 0x4000; // Don't fragment flag
-        pub const IP_MF: u16 = 0x2000; // More fragments flag
-
-        pub fn new(src: Ipv4Addr, dst: Ipv4Addr, proto: u8) -> Self {
-            Self {
-                version: 4,
-                hlen: Self::MIN_SIZE as _,
-                tos: 0,
-                len: Self::MIN_SIZE as _,
-                id: 0,
-                off: 0,
-                ttl: 64,
-                p: proto,
-                sum: 0,
+    #[allow(clippy::type_complexity)]
+    pub fn ip_udp_decode(
+        packet: &[u8],
+        filter_src: Option<SocketAddrV4>,
+        filter_dst: Option<SocketAddrV4>,
+    ) -> Result<Option<(SocketAddrV4, SocketAddrV4, &[u8])>, Error> {
+        if let Some((src, dst, _proto, udp_packet)) = ip::decode(
+            packet,
+            filter_src.map(|a| *a.ip()).unwrap_or(Ipv4Addr::UNSPECIFIED),
+            filter_dst.map(|a| *a.ip()).unwrap_or(Ipv4Addr::UNSPECIFIED),
+            Some(UdpPacketHeader::PROTO),
+        )? {
+            udp::decode(
                 src,
                 dst,
-            }
+                udp_packet,
+                filter_src.map(|a| a.port()),
+                filter_dst.map(|a| a.port()),
+            )
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn ip_udp_encode<F>(
+        buf: &mut [u8],
+        src: SocketAddrV4,
+        dst: SocketAddrV4,
+        encoder: F,
+    ) -> Result<&[u8], Error>
+    where
+        F: FnOnce(&mut [u8]) -> Result<usize, Error>,
+    {
+        ip::encode(buf, *src.ip(), *dst.ip(), UdpPacketHeader::PROTO, |buf| {
+            Ok(udp::encode(buf, src, dst, encoder)?.len())
+        })
+    }
+
+    pub mod ip {
+        use log::trace;
+
+        use no_std_net::Ipv4Addr;
+
+        use crate::dhcp::bytes::{BytesIn, BytesOut};
+
+        use super::{checksum_accumulate, checksum_finish, Error};
+
+        #[allow(clippy::type_complexity)]
+        pub fn decode(
+            packet: &[u8],
+            filter_src: Ipv4Addr,
+            filter_dst: Ipv4Addr,
+            filter_proto: Option<u8>,
+        ) -> Result<Option<(Ipv4Addr, Ipv4Addr, u8, &[u8])>, Error> {
+            let data = Ipv4PacketHeader::decode_with_payload(
+                packet,
+                filter_src,
+                filter_dst,
+                filter_proto,
+            )?
+            .map(|(hdr, payload)| (hdr.src, hdr.dst, hdr.p, payload));
+
+            Ok(data)
         }
 
-        /// Parses the packet from a byte slice
-        pub fn decode(data: &[u8]) -> Result<Self, Error> {
-            let mut bytes = BytesIn::new(data);
-
-            let vhl = bytes.byte()?;
-
-            Ok(Self {
-                version: vhl >> 4,
-                hlen: (vhl & 0x0f) * 4,
-                tos: bytes.byte()?,
-                len: u16::from_be_bytes(bytes.arr()?),
-                id: u16::from_be_bytes(bytes.arr()?),
-                off: u16::from_be_bytes(bytes.arr()?),
-                ttl: bytes.byte()?,
-                p: bytes.byte()?,
-                sum: u16::from_be_bytes(bytes.arr()?),
-                src: u32::from_be_bytes(bytes.arr()?).into(),
-                dst: u32::from_be_bytes(bytes.arr()?).into(),
-            })
-        }
-
-        /// Encodes the packet into the provided buf slice
-        pub fn encode<'o>(&self, buf: &'o mut [u8]) -> Result<&'o [u8], Error> {
-            let mut bytes = BytesOut::new(buf);
-
-            bytes
-                .byte(
-                    (self.version << 4) | (self.hlen / 4 + (if self.hlen % 4 > 0 { 1 } else { 0 })),
-                )?
-                .byte(self.tos)?
-                .push(&u16::to_be_bytes(self.len))?
-                .push(&u16::to_be_bytes(self.id))?
-                .push(&u16::to_be_bytes(self.off))?
-                .byte(self.ttl)?
-                .byte(self.p)?
-                .push(&u16::to_be_bytes(self.sum))?
-                .push(&u32::to_be_bytes(self.src.into()))?
-                .push(&u32::to_be_bytes(self.dst.into()))?;
-
-            let len = bytes.len();
-
-            Ok(&buf[..len])
-        }
-
-        pub fn encode_with_payload<'o, F>(
-            &mut self,
-            buf: &'o mut [u8],
+        pub fn encode<F>(
+            buf: &mut [u8],
+            src: Ipv4Addr,
+            dst: Ipv4Addr,
+            proto: u8,
             encoder: F,
-        ) -> Result<&'o [u8], Error>
+        ) -> Result<&[u8], Error>
         where
-            F: FnOnce(&mut [u8], &Self) -> Result<usize, Error>,
+            F: FnOnce(&mut [u8]) -> Result<usize, Error>,
         {
-            let hdr_len = self.hlen as usize;
-            if hdr_len < Self::MIN_SIZE || buf.len() < hdr_len {
-                Err(Error::BufferOverflow)?;
-            }
+            let mut hdr = Ipv4PacketHeader::new(src, dst, proto);
 
-            let (hdr_buf, payload_buf) = buf.split_at_mut(hdr_len);
-
-            let payload_len = encoder(payload_buf, self)?;
-
-            let len = hdr_len + payload_len;
-            self.len = len as _;
-
-            let min_hdr_len = self.encode(hdr_buf)?.len();
-            assert_eq!(min_hdr_len, Self::MIN_SIZE);
-
-            hdr_buf[Self::MIN_SIZE..hdr_len].fill(0);
-
-            let checksum = Self::checksum(hdr_buf);
-            self.sum = checksum;
-
-            Self::inject_checksum(hdr_buf, checksum);
-
-            Ok(&buf[..len])
+            hdr.encode_with_payload(buf, encoder)
         }
 
-        pub fn decode_with_payload(packet: &[u8]) -> Result<Option<(Self, &[u8])>, Error> {
-            let hdr = Self::decode(packet)?;
-            if hdr.version == 4 {
-                // IPv4
+        #[derive(Clone, Debug)]
+        pub struct Ipv4PacketHeader {
+            pub version: u8,   // Version
+            pub hlen: u8,      // Header length
+            pub tos: u8,       // Type of service
+            pub len: u16,      // Total length
+            pub id: u16,       // Identification
+            pub off: u16,      // Fragment offset field
+            pub ttl: u8,       // Time to live
+            pub p: u8,         // Protocol
+            pub sum: u16,      // Checksum
+            pub src: Ipv4Addr, // Source address
+            pub dst: Ipv4Addr, // Dest address
+        }
+
+        impl Ipv4PacketHeader {
+            pub const MIN_SIZE: usize = 20;
+            pub const CHECKSUM_WORD: usize = 5;
+
+            pub const IP_DF: u16 = 0x4000; // Don't fragment flag
+            pub const IP_MF: u16 = 0x2000; // More fragments flag
+
+            pub fn new(src: Ipv4Addr, dst: Ipv4Addr, proto: u8) -> Self {
+                Self {
+                    version: 4,
+                    hlen: Self::MIN_SIZE as _,
+                    tos: 0,
+                    len: Self::MIN_SIZE as _,
+                    id: 0,
+                    off: 0,
+                    ttl: 64,
+                    p: proto,
+                    sum: 0,
+                    src,
+                    dst,
+                }
+            }
+
+            /// Parses the packet from a byte slice
+            pub fn decode(data: &[u8]) -> Result<Self, Error> {
+                let mut bytes = BytesIn::new(data);
+
+                let vhl = bytes.byte()?;
+
+                Ok(Self {
+                    version: vhl >> 4,
+                    hlen: (vhl & 0x0f) * 4,
+                    tos: bytes.byte()?,
+                    len: u16::from_be_bytes(bytes.arr()?),
+                    id: u16::from_be_bytes(bytes.arr()?),
+                    off: u16::from_be_bytes(bytes.arr()?),
+                    ttl: bytes.byte()?,
+                    p: bytes.byte()?,
+                    sum: u16::from_be_bytes(bytes.arr()?),
+                    src: u32::from_be_bytes(bytes.arr()?).into(),
+                    dst: u32::from_be_bytes(bytes.arr()?).into(),
+                })
+            }
+
+            /// Encodes the packet into the provided buf slice
+            pub fn encode<'o>(&self, buf: &'o mut [u8]) -> Result<&'o [u8], Error> {
+                let mut bytes = BytesOut::new(buf);
+
+                bytes
+                    .byte(
+                        (self.version << 4)
+                            | (self.hlen / 4 + (if self.hlen % 4 > 0 { 1 } else { 0 })),
+                    )?
+                    .byte(self.tos)?
+                    .push(&u16::to_be_bytes(self.len))?
+                    .push(&u16::to_be_bytes(self.id))?
+                    .push(&u16::to_be_bytes(self.off))?
+                    .byte(self.ttl)?
+                    .byte(self.p)?
+                    .push(&u16::to_be_bytes(self.sum))?
+                    .push(&u32::to_be_bytes(self.src.into()))?
+                    .push(&u32::to_be_bytes(self.dst.into()))?;
+
+                let len = bytes.len();
+
+                Ok(&buf[..len])
+            }
+
+            pub fn encode_with_payload<'o, F>(
+                &mut self,
+                buf: &'o mut [u8],
+                encoder: F,
+            ) -> Result<&'o [u8], Error>
+            where
+                F: FnOnce(&mut [u8]) -> Result<usize, Error>,
+            {
+                let hdr_len = self.hlen as usize;
+                if hdr_len < Self::MIN_SIZE || buf.len() < hdr_len {
+                    Err(Error::BufferOverflow)?;
+                }
+
+                let (hdr_buf, payload_buf) = buf.split_at_mut(hdr_len);
+
+                let payload_len = encoder(payload_buf)?;
+
+                let len = hdr_len + payload_len;
+                self.len = len as _;
+
+                let min_hdr_len = self.encode(hdr_buf)?.len();
+                assert_eq!(min_hdr_len, Self::MIN_SIZE);
+
+                hdr_buf[Self::MIN_SIZE..hdr_len].fill(0);
+
+                let checksum = Self::checksum(hdr_buf);
+                self.sum = checksum;
+
+                Self::inject_checksum(hdr_buf, checksum);
+
+                Ok(&buf[..len])
+            }
+
+            pub fn decode_with_payload(
+                packet: &[u8],
+                filter_src: Ipv4Addr,
+                filter_dst: Ipv4Addr,
+                filter_proto: Option<u8>,
+            ) -> Result<Option<(Self, &[u8])>, Error> {
+                let hdr = Self::decode(packet)?;
+                if hdr.version == 4 {
+                    // IPv4
+
+                    if !filter_src.is_unspecified()
+                        && !hdr.src.is_broadcast()
+                        && filter_src != hdr.src
+                    {
+                        return Ok(None);
+                    }
+
+                    if !filter_dst.is_unspecified()
+                        && !hdr.dst.is_broadcast()
+                        && filter_dst != hdr.dst
+                    {
+                        return Ok(None);
+                    }
+
+                    if let Some(filter_proto) = filter_proto {
+                        if filter_proto != hdr.p {
+                            return Ok(None);
+                        }
+                    }
+
+                    let len = hdr.len as usize;
+                    if packet.len() < len {
+                        Err(Error::DataUnderflow)?;
+                    }
+
+                    let checksum = Self::checksum(&packet[..len]);
+
+                    trace!("IP header decoded, total_size={}, src={}, dst={}, hlen={}, size={}, checksum={}, ours={}", packet.len(), hdr.src, hdr.dst, hdr.hlen, hdr.len, hdr.sum, checksum);
+
+                    if checksum != hdr.sum {
+                        Err(Error::InvalidChecksum)?;
+                    }
+
+                    let packet = &packet[..len];
+                    let hdr_len = hdr.hlen as usize;
+                    if packet.len() < hdr_len {
+                        Err(Error::DataUnderflow)?;
+                    }
+
+                    Ok(Some((hdr, &packet[hdr_len..])))
+                } else {
+                    Err(Error::InvalidFormat)
+                }
+            }
+
+            pub fn inject_checksum(packet: &mut [u8], checksum: u16) {
+                let checksum = checksum.to_be_bytes();
+
+                let offset = Self::CHECKSUM_WORD << 1;
+                packet[offset] = checksum[0];
+                packet[offset + 1] = checksum[1];
+            }
+
+            pub fn checksum(packet: &[u8]) -> u16 {
+                let hlen = (packet[0] & 0x0f) as usize * 4;
+
+                let sum = checksum_accumulate(&packet[..hlen], Self::CHECKSUM_WORD);
+
+                checksum_finish(sum)
+            }
+        }
+    }
+
+    pub mod udp {
+        use log::trace;
+
+        use no_std_net::{Ipv4Addr, SocketAddrV4};
+
+        use crate::dhcp::bytes::{BytesIn, BytesOut};
+
+        use super::{checksum_accumulate, checksum_finish, Error};
+
+        #[allow(clippy::type_complexity)]
+        pub fn decode(
+            src: Ipv4Addr,
+            dst: Ipv4Addr,
+            packet: &[u8],
+            filter_src: Option<u16>,
+            filter_dst: Option<u16>,
+        ) -> Result<Option<(SocketAddrV4, SocketAddrV4, &[u8])>, Error> {
+            let data =
+                UdpPacketHeader::decode_with_payload(packet, src, dst, filter_src, filter_dst)?
+                    .map(|(hdr, payload)| {
+                        (
+                            SocketAddrV4::new(src, hdr.src),
+                            SocketAddrV4::new(dst, hdr.dst),
+                            payload,
+                        )
+                    });
+
+            Ok(data)
+        }
+
+        pub fn encode<F>(
+            buf: &mut [u8],
+            src: SocketAddrV4,
+            dst: SocketAddrV4,
+            payload: F,
+        ) -> Result<&[u8], Error>
+        where
+            F: FnOnce(&mut [u8]) -> Result<usize, Error>,
+        {
+            let mut hdr = UdpPacketHeader::new(src.port(), dst.port());
+
+            hdr.encode_with_payload(buf, *src.ip(), *dst.ip(), |buf| payload(buf))
+        }
+
+        #[derive(Clone, Debug)]
+        pub struct UdpPacketHeader {
+            pub src: u16, // Source port
+            pub dst: u16, // Destination port
+            pub len: u16, // UDP length
+            pub sum: u16, // UDP checksum
+        }
+
+        impl UdpPacketHeader {
+            pub const PROTO: u8 = 17;
+
+            pub const SIZE: usize = 8;
+            pub const CHECKSUM_WORD: usize = 3;
+
+            pub fn new(src: u16, dst: u16) -> Self {
+                Self {
+                    src,
+                    dst,
+                    len: 0,
+                    sum: 0,
+                }
+            }
+
+            /// Parses the packet header from a byte slice
+            pub fn decode(data: &[u8]) -> Result<Self, Error> {
+                let mut bytes = BytesIn::new(data);
+
+                Ok(Self {
+                    src: u16::from_be_bytes(bytes.arr()?),
+                    dst: u16::from_be_bytes(bytes.arr()?),
+                    len: u16::from_be_bytes(bytes.arr()?),
+                    sum: u16::from_be_bytes(bytes.arr()?),
+                })
+            }
+
+            /// Encodes the packet header into the provided buf slice
+            pub fn encode<'o>(&self, buf: &'o mut [u8]) -> Result<&'o [u8], Error> {
+                let mut bytes = BytesOut::new(buf);
+
+                bytes
+                    .push(&u16::to_be_bytes(self.src))?
+                    .push(&u16::to_be_bytes(self.dst))?
+                    .push(&u16::to_be_bytes(self.len))?
+                    .push(&u16::to_be_bytes(self.sum))?;
+
+                let len = bytes.len();
+
+                Ok(&buf[..len])
+            }
+
+            pub fn encode_with_payload<'o, F>(
+                &mut self,
+                buf: &'o mut [u8],
+                src: Ipv4Addr,
+                dst: Ipv4Addr,
+                encoder: F,
+            ) -> Result<&'o [u8], Error>
+            where
+                F: FnOnce(&mut [u8]) -> Result<usize, Error>,
+            {
+                if buf.len() < Self::SIZE {
+                    Err(Error::BufferOverflow)?;
+                }
+
+                let (hdr_buf, payload_buf) = buf.split_at_mut(Self::SIZE);
+
+                let payload_len = encoder(payload_buf)?;
+
+                let len = Self::SIZE + payload_len;
+                self.len = len as _;
+
+                let hdr_len = self.encode(hdr_buf)?.len();
+                assert_eq!(Self::SIZE, hdr_len);
+
+                let packet = &mut buf[..len];
+
+                let checksum = Self::checksum(packet, src, dst);
+                self.sum = checksum;
+
+                Self::inject_checksum(packet, checksum);
+
+                Ok(packet)
+            }
+
+            pub fn decode_with_payload(
+                packet: &[u8],
+                src: Ipv4Addr,
+                dst: Ipv4Addr,
+                filter_src: Option<u16>,
+                filter_dst: Option<u16>,
+            ) -> Result<Option<(Self, &[u8])>, Error> {
+                let hdr = Self::decode(packet)?;
+
+                if let Some(filter_src) = filter_src {
+                    if filter_src != hdr.src {
+                        return Ok(None);
+                    }
+                }
+
+                if let Some(filter_dst) = filter_dst {
+                    if filter_dst != hdr.dst {
+                        return Ok(None);
+                    }
+                }
+
                 let len = hdr.len as usize;
                 if packet.len() < len {
                     Err(Error::DataUnderflow)?;
                 }
 
-                let checksum = Self::checksum(&packet[..len]);
+                let checksum = Self::checksum(&packet[..len], src, dst);
 
-                trace!("IP header decoded, total_size={}, src={}, dst={}, hlen={}, size={}, checksum={}, ours={}", packet.len(), hdr.src, hdr.dst, hdr.hlen, hdr.len, hdr.sum, checksum);
+                trace!(
+                    "UDP header decoded, src={}, dst={}, size={}, checksum={}, ours={}",
+                    hdr.src,
+                    hdr.dst,
+                    hdr.len,
+                    hdr.sum,
+                    checksum
+                );
 
                 if checksum != hdr.sum {
-                    Err(Error::InvalidPacket)?;
+                    Err(Error::InvalidChecksum)?;
                 }
 
                 let packet = &packet[..len];
-                let hdr_len = hdr.hlen as usize;
-                if packet.len() < hdr_len {
-                    Err(Error::DataUnderflow)?;
-                }
 
-                Ok(Some((hdr, &packet[hdr_len..])))
-            } else {
-                Ok(None)
-            }
-        }
+                let payload_data = &packet[Self::SIZE..];
 
-        pub fn inject_checksum(packet: &mut [u8], checksum: u16) {
-            let checksum = checksum.to_be_bytes();
-
-            let offset = Self::CHECKSUM_WORD << 1;
-            packet[offset] = checksum[0];
-            packet[offset + 1] = checksum[1];
-        }
-
-        pub fn checksum(packet: &[u8]) -> u16 {
-            let hlen = (packet[0] & 0x0f) as usize * 4;
-
-            let sum = checksum_accumulate(&packet[..hlen], Self::CHECKSUM_WORD);
-
-            checksum_finish(sum)
-        }
-    }
-
-    #[derive(Clone, Debug)]
-    pub struct UdpPacketHeader {
-        pub src: u16, // Source port
-        pub dst: u16, // Destination port
-        pub len: u16, // UDP length
-        pub sum: u16, // UDP checksum
-    }
-
-    impl UdpPacketHeader {
-        pub const PROTO: u8 = 17;
-
-        pub const SIZE: usize = 8;
-        pub const CHECKSUM_WORD: usize = 3;
-
-        pub fn new(src: u16, dst: u16) -> Self {
-            Self {
-                src,
-                dst,
-                len: 0,
-                sum: 0,
-            }
-        }
-
-        /// Parses the packet header from a byte slice
-        pub fn decode(data: &[u8]) -> Result<Self, Error> {
-            let mut bytes = BytesIn::new(data);
-
-            Ok(Self {
-                src: u16::from_be_bytes(bytes.arr()?),
-                dst: u16::from_be_bytes(bytes.arr()?),
-                len: u16::from_be_bytes(bytes.arr()?),
-                sum: u16::from_be_bytes(bytes.arr()?),
-            })
-        }
-
-        /// Encodes the packet header into the provided buf slice
-        pub fn encode<'o>(&self, buf: &'o mut [u8]) -> Result<&'o [u8], Error> {
-            let mut bytes = BytesOut::new(buf);
-
-            bytes
-                .push(&u16::to_be_bytes(self.src))?
-                .push(&u16::to_be_bytes(self.dst))?
-                .push(&u16::to_be_bytes(self.len))?
-                .push(&u16::to_be_bytes(self.sum))?;
-
-            let len = bytes.len();
-
-            Ok(&buf[..len])
-        }
-
-        pub fn encode_with_payload<'o, F>(
-            &mut self,
-            buf: &'o mut [u8],
-            ip_hdr: &Ipv4PacketHeader,
-            encoder: F,
-        ) -> Result<&'o [u8], Error>
-        where
-            F: FnOnce(&mut [u8]) -> Result<usize, Error>,
-        {
-            if buf.len() < Self::SIZE {
-                Err(Error::BufferOverflow)?;
+                Ok(Some((hdr, payload_data)))
             }
 
-            let (hdr_buf, payload_buf) = buf.split_at_mut(Self::SIZE);
+            pub fn inject_checksum(packet: &mut [u8], checksum: u16) {
+                let checksum = checksum.to_be_bytes();
 
-            let payload_len = encoder(payload_buf)?;
-
-            let len = Self::SIZE + payload_len;
-            self.len = len as _;
-
-            let hdr_len = self.encode(hdr_buf)?.len();
-            assert_eq!(Self::SIZE, hdr_len);
-
-            let packet = &mut buf[..len];
-
-            let checksum = Self::checksum(packet, ip_hdr);
-            self.sum = checksum;
-
-            Self::inject_checksum(packet, checksum);
-
-            Ok(packet)
-        }
-
-        pub fn decode_with_payload<'o>(
-            packet: &'o [u8],
-            ip_hdr: &Ipv4PacketHeader,
-        ) -> Result<(Self, &'o [u8]), Error> {
-            let hdr = Self::decode(packet)?;
-
-            let len = hdr.len as usize;
-            if packet.len() < len {
-                Err(Error::DataUnderflow)?;
+                let offset = Self::CHECKSUM_WORD << 1;
+                packet[offset] = checksum[0];
+                packet[offset + 1] = checksum[1];
             }
 
-            let checksum = Self::checksum(&packet[..len], ip_hdr);
+            pub fn checksum(packet: &[u8], src: Ipv4Addr, dst: Ipv4Addr) -> u16 {
+                let mut buf = [0; 12];
 
-            trace!(
-                "UDP header decoded, src={}, dst={}, size={}, checksum={}, ours={}",
-                hdr.src,
-                hdr.dst,
-                hdr.len,
-                hdr.sum,
-                checksum
-            );
+                // Pseudo IP-header for UDP checksum calculation
+                let len = BytesOut::new(&mut buf)
+                    .push(&u32::to_be_bytes(src.into()))
+                    .unwrap()
+                    .push(&u32::to_be_bytes(dst.into()))
+                    .unwrap()
+                    .byte(0)
+                    .unwrap()
+                    .byte(UdpPacketHeader::PROTO)
+                    .unwrap()
+                    .push(&u16::to_be_bytes(packet.len() as u16))
+                    .unwrap()
+                    .len();
 
-            if checksum != hdr.sum {
-                Err(Error::InvalidPacket)?;
+                let sum = checksum_accumulate(&buf[..len], usize::MAX)
+                    + checksum_accumulate(packet, Self::CHECKSUM_WORD);
+
+                checksum_finish(sum)
             }
-
-            let packet = &packet[..len];
-
-            let payload_data = &packet[Self::SIZE..];
-
-            Ok((hdr, payload_data))
-        }
-
-        pub fn inject_checksum(packet: &mut [u8], checksum: u16) {
-            let checksum = checksum.to_be_bytes();
-
-            let offset = Self::CHECKSUM_WORD << 1;
-            packet[offset] = checksum[0];
-            packet[offset + 1] = checksum[1];
-        }
-
-        pub fn checksum(packet: &[u8], ip_hdr: &Ipv4PacketHeader) -> u16 {
-            let mut buf = [0; 12];
-
-            // Pseudo IP-header for UDP checksum calculation
-            let len = BytesOut::new(&mut buf)
-                .push(&u32::to_be_bytes(ip_hdr.src.into()))
-                .unwrap()
-                .push(&u32::to_be_bytes(ip_hdr.dst.into()))
-                .unwrap()
-                .byte(0)
-                .unwrap()
-                .byte(ip_hdr.p)
-                .unwrap()
-                .push(&u16::to_be_bytes(packet.len() as u16))
-                .unwrap()
-                .len();
-
-            let sum = checksum_accumulate(&buf[..len], usize::MAX)
-                + checksum_accumulate(packet, Self::CHECKSUM_WORD);
-
-            checksum_finish(sum)
         }
     }
 

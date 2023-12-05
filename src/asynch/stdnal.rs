@@ -263,7 +263,9 @@ impl RawStack for StdRawStack {
 
     type Socket = StdRawSocket;
 
-    async fn connect(&self, interface: Option<u32>) -> Result<Self::Socket, Self::Error> {
+    type Interface = u32;
+
+    async fn bind(&self, interface: &Self::Interface) -> Result<Self::Socket, Self::Error> {
         let socket = unsafe {
             libc::socket(
                 libc::PF_PACKET,
@@ -277,7 +279,7 @@ impl RawStack for StdRawStack {
         let sockaddr = libc::sockaddr_ll {
             sll_family: libc::AF_PACKET as _,
             sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
-            sll_ifindex: interface.unwrap_or(0) as _,
+            sll_ifindex: *interface as _,
             sll_hatype: 0,
             sll_pkttype: 0,
             sll_halen: 0,
@@ -303,10 +305,7 @@ impl RawStack for StdRawStack {
             unsafe { std::net::UdpSocket::from_raw_fd(socket) }
         };
 
-        Ok(StdRawSocket(
-            Async::new(socket)?,
-            interface.unwrap_or(0) as _,
-        ))
+        Ok(StdRawSocket(Async::new(socket)?, *interface as _))
 
         // warn!("Before connect");
         // let (addr, socket) = self.connect_from(local, remote).await?;
@@ -343,7 +342,7 @@ impl ConnectedUdp for StdUdpSocket {
         loop {
             offset += self.0.send(&data[offset..]).await?;
 
-            if offset == 0 {
+            if offset == data.len() {
                 break;
             }
         }
@@ -372,7 +371,7 @@ impl UnconnectedUdp for StdUdpSocket {
         loop {
             offset += self.0.send_to(data, to_std_addr(remote)).await?;
 
-            if offset == 0 {
+            if offset == data.len() {
                 break;
             }
         }
