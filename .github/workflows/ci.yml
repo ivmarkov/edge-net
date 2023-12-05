@@ -34,5 +34,7 @@ jobs:
         run: cargo clippy --features nightly,embedded-svc --no-deps -- -Dwarnings
       - name: Build | Default
         run: cargo build
+      - name: Build | Non-default
+        run: cargo build --no-default-features
       - name: Build | Nightly
-        run: cargo build --features nightly
+        run: cargo build --no-default-features --features nightly
