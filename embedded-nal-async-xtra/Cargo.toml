@@ -1,0 +1,11 @@
+[package]
+name = "embedded-nal-async-xtra"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+nightly = ["embedded-io-async", "embedded-nal-async"]
+
+[dependencies]
+embedded-io-async = { workspace = true, optional = true }
+embedded-nal-async = { workspace = true, optional = true }

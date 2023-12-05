@@ -2,12 +2,11 @@ use core::fmt::{self, Debug, Display, Write as _};
 use core::future::Future;
 use core::mem;
 
-use embedded_io::ErrorType;
-use embedded_io_async::{Read, Write};
+use embedded_io_async::{ErrorType, Read, Write};
 
 use log::{info, warn};
 
-use crate::{
+use super::{
     send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, RequestHeaders,
     SendBody,
 };
@@ -336,7 +335,7 @@ pub struct Server<const N: usize, const B: usize, A, H> {
 
 impl<const N: usize, const B: usize, A, H> Server<N, B, A, H>
 where
-    A: edge_tcp::TcpAccept,
+    A: embedded_nal_async_xtra::TcpAccept,
     H: for<'b, 't> Handler<'b, N, &'b mut A::Connection<'t>>,
 {
     pub const fn new(acceptor: A, handler: H) -> Self {
@@ -422,8 +421,8 @@ mod embedded_svc_compat {
     use embedded_svc::http::server::asynch::{Connection, Headers, Query};
     use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
-    use crate::asynch::http::Method;
-    use crate::asynch::http::{Body, RequestHeaders};
+    use crate::io::Body;
+    use crate::{Method, RequestHeaders};
 
     use super::*;
 

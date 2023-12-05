@@ -14,11 +14,7 @@ use domain::{
     rdata::A,
 };
 
-#[cfg(feature = "std")]
-mod server;
-
-#[cfg(feature = "std")]
-pub use server::*;
+pub mod io;
 
 #[derive(Debug)]
 pub struct InnerError<T: fmt::Debug + fmt::Display>(T);
@@ -54,11 +50,10 @@ impl From<ParseError> for DnsError {
 impl std::error::Error for DnsError {}
 
 pub fn process_dns_request(
-    request: impl AsRef<[u8]>,
+    request: &[u8],
     ip: &[u8; 4],
     ttl: Duration,
 ) -> Result<impl AsRef<[u8]>, DnsError> {
-    let request = request.as_ref();
     let response = Octets512::new();
 
     let message = domain::base::Message::from_octets(request)?;
@@ -106,5 +101,6 @@ pub fn process_dns_request(
 
         responseb.finish()
     };
+
     Ok(response)
 }

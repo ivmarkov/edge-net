@@ -1,13 +1,14 @@
 use core::{mem, str};
 
-use embedded_io::ErrorType;
-use embedded_io_async::{Read, Write};
-use no_std_net::SocketAddr;
+use embedded_io_async::{ErrorType, Read, Write};
 
-use crate::{
+use embedded_nal_async::{SocketAddr, TcpConnect};
+
+use crate::ws::{upgrade_request_headers, MAX_BASE64_KEY_LEN, NONCE_LEN};
+
+use super::{
     send_headers, send_headers_end, send_request, Body, BodyType, Error, ResponseHeaders, SendBody,
 };
-use embedded_nal_async::TcpConnect;
 
 #[allow(unused_imports)]
 #[cfg(feature = "embedded-svc")]
@@ -66,6 +67,46 @@ where
 
     pub fn is_response_initiated(&self) -> bool {
         matches!(self, Self::Response(_))
+    }
+
+    pub async fn initiate_ws_upgrade_request<'a>(
+        &'a mut self,
+        host: Option<&'a str>,
+        origin: Option<&'a str>,
+        uri: &'a str,
+        version: Option<&'a str>,
+        nonce: &[u8; NONCE_LEN],
+    ) -> Result<(), Error<T::Error>>
+    where
+        T: TcpConnect,
+    {
+        let mut nonce_base64_buf = [0_u8; MAX_BASE64_KEY_LEN];
+
+        let headers = upgrade_request_headers(host, origin, version, nonce, &mut nonce_base64_buf);
+
+        self.initiate_request(Method::Get, uri, &headers).await
+    }
+
+    pub fn is_ws_upgrade_accepted(&self, _nonce: &[u8; NONCE_LEN]) -> Result<bool, Error<T::Error>>
+    where
+        T: TcpConnect,
+    {
+        let headers = self.headers()?;
+
+        let succeeded = matches!(headers.code, Some(101))
+            && headers
+                .headers
+                .connection()
+                .map(|v| v.eq_ignore_ascii_case("Upgrade"))
+                .unwrap_or(false)
+            && headers
+                .headers
+                .upgrade()
+                .map(|v| v.eq_ignore_ascii_case("websocket"))
+                .unwrap_or(false)
+            && headers.headers.get("Sec-WebSocket-Accept").is_some();
+
+        Ok(succeeded)
     }
 
     #[allow(clippy::type_complexity)]

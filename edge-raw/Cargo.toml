@@ -1,0 +1,14 @@
+[package]
+name = "edge-raw"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+nightly = ["embedded-io-async", "embedded-nal-async", "embedded-nal-async-xtra"]
+
+[dependencies]
+log = { workspace = true }
+no-std-net = { workspace = true }
+embedded-io-async = { workspace = true, default-features = false, optional = true }
+embedded-nal-async = { workspace = true, default-features = false, optional = true }
+embedded-nal-async-xtra = { workspace = true, default-features = false, optional = true }

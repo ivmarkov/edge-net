@@ -1,93 +1,18 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(stable_features)]
 #![allow(unknown_lints)]
-#![feature(async_fn_in_trait)]
-#![allow(async_fn_in_trait)]
-#![feature(impl_trait_projections)]
-#![feature(impl_trait_in_assoc_type)]
+#![cfg_attr(feature = "nightly", feature(async_fn_in_trait))]
+#![cfg_attr(feature = "nightly", allow(async_fn_in_trait))]
+#![cfg_attr(feature = "nightly", feature(impl_trait_projections))]
+#![cfg_attr(feature = "nightly", feature(impl_trait_in_assoc_type))]
 
-use core::cmp::min;
-use core::fmt::{Display, Write as _};
+use core::fmt::Display;
 use core::str;
 
-use embedded_io::ErrorType;
-use embedded_io_async::{Read, Write};
-
-use httparse::{Header, Status, EMPTY_HEADER};
-
-use log::trace;
-
-#[allow(unused_imports)]
-#[cfg(feature = "embedded-svc")]
-pub use embedded_svc_compat::*;
+use httparse::{Header, EMPTY_HEADER};
 
 #[cfg(feature = "nightly")]
-pub mod asynch;
-
-pub mod client;
-pub mod server;
-
-/// An error in parsing the headers or the body.
-#[derive(Debug)]
-pub enum Error<E> {
-    InvalidHeaders,
-    InvalidBody,
-    TooManyHeaders,
-    TooLongHeaders,
-    TooLongBody,
-    IncompleteHeaders,
-    IncompleteBody,
-    InvalidState,
-    Io(E),
-}
-
-impl<E> From<httparse::Error> for Error<E> {
-    fn from(e: httparse::Error) -> Self {
-        match e {
-            httparse::Error::HeaderName => Self::InvalidHeaders,
-            httparse::Error::HeaderValue => Self::InvalidHeaders,
-            httparse::Error::NewLine => Self::InvalidHeaders,
-            httparse::Error::Status => Self::InvalidHeaders,
-            httparse::Error::Token => Self::InvalidHeaders,
-            httparse::Error::TooManyHeaders => Self::TooManyHeaders,
-            httparse::Error::Version => Self::InvalidHeaders,
-        }
-    }
-}
-
-impl<E> embedded_io::Error for Error<E>
-where
-    E: embedded_io::Error,
-{
-    fn kind(&self) -> embedded_io::ErrorKind {
-        match self {
-            Self::Io(e) => e.kind(),
-            _ => embedded_io::ErrorKind::Other,
-        }
-    }
-}
-
-impl<E> Display for Error<E>
-where
-    E: Display,
-{
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::InvalidHeaders => write!(f, "Invalid HTTP headers or status line"),
-            Self::InvalidBody => write!(f, "Invalid HTTP body"),
-            Self::TooManyHeaders => write!(f, "Too many HTTP headers"),
-            Self::TooLongHeaders => write!(f, "HTTP headers section is too long"),
-            Self::TooLongBody => write!(f, "HTTP body is too long"),
-            Self::IncompleteHeaders => write!(f, "HTTP headers section is incomplete"),
-            Self::IncompleteBody => write!(f, "HTTP body is incomplete"),
-            Self::InvalidState => write!(f, "Connection is not in requested state"),
-            Self::Io(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl<E> std::error::Error for Error<E> where E: std::error::Error {}
+pub mod io;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Hash))]
@@ -245,81 +170,6 @@ impl Display for Method {
     }
 }
 
-pub async fn send_request<W>(
-    method: Option<Method>,
-    path: Option<&str>,
-    output: W,
-) -> Result<(), Error<W::Error>>
-where
-    W: Write,
-{
-    send_status_line(true, method.map(|method| method.as_str()), path, output).await
-}
-
-pub async fn send_status<W>(
-    status: Option<u16>,
-    reason: Option<&str>,
-    output: W,
-) -> Result<(), Error<W::Error>>
-where
-    W: Write,
-{
-    let status_str = status.map(heapless::String::<5>::from);
-
-    send_status_line(
-        false,
-        status_str.as_ref().map(|status| status.as_str()),
-        reason,
-        output,
-    )
-    .await
-}
-
-pub async fn send_headers<'a, H, W>(headers: H, output: W) -> Result<BodyType, Error<W::Error>>
-where
-    W: Write,
-    H: IntoIterator<Item = &'a (&'a str, &'a str)>,
-{
-    send_raw_headers(
-        headers
-            .into_iter()
-            .map(|(name, value)| (*name, value.as_bytes())),
-        output,
-    )
-    .await
-}
-
-pub async fn send_raw_headers<'a, H, W>(
-    headers: H,
-    mut output: W,
-) -> Result<BodyType, Error<W::Error>>
-where
-    W: Write,
-    H: IntoIterator<Item = (&'a str, &'a [u8])>,
-{
-    let mut body = BodyType::Unknown;
-
-    for (name, value) in headers.into_iter() {
-        if body == BodyType::Unknown {
-            body = BodyType::from_header(name, unsafe { str::from_utf8_unchecked(value) });
-        }
-
-        output.write_all(name.as_bytes()).await.map_err(Error::Io)?;
-        output.write_all(b": ").await.map_err(Error::Io)?;
-        output.write_all(value).await.map_err(Error::Io)?;
-        output.write_all(b"\r\n").await.map_err(Error::Io)?;
-    }
-
-    Ok(body)
-}
-
-pub async fn send_headers_end<W>(mut output: W) -> Result<(), Error<W::Error>>
-where
-    W: Write,
-{
-    output.write_all(b"\r\n").await.map_err(Error::Io)
-}
-
 #[derive(Debug)]
 pub struct Headers<'b, const N: usize = 64>([httparse::Header<'b>; N]);
 
@@ -355,6 +205,10 @@ impl<'b, const N: usize> Headers<'b, N> {
 
     pub fn cache_control(&self) -> Option<&str> {
         self.get("Cache-Control")
+    }
+
+    pub fn is_ws_upgrade_request(&self) -> bool {
+        crate::ws::is_upgrade_request(self.iter())
     }
 
     pub fn upgrade(&self) -> Option<&str> {
@@ -484,11 +338,39 @@ impl<'b, const N: usize> Headers<'b, N> {
         self.set_upgrade("websocket")
     }
 
-    pub async fn send<W>(&self, output: W) -> Result<BodyType, Error<W::Error>>
+    pub fn set_ws_upgrade_request_headers(
+        &mut self,
+        host: Option<&'b str>,
+        origin: Option<&'b str>,
+        version: Option<&'b str>,
+        nonce: &[u8; ws::NONCE_LEN],
+        nonce_base64_buf: &'b mut [u8; ws::MAX_BASE64_KEY_LEN],
+    ) -> &mut Self {
+        for (name, value) in
+            ws::upgrade_request_headers(host, origin, version, nonce, nonce_base64_buf)
+        {
+            self.set(name, value);
+        }
+
+        self
+    }
+
+    pub fn set_ws_upgrade_response_headers<'a, H>(
+        &mut self,
+        request_headers: H,
+        version: Option<&'a str>,
+        sec_key_response_base64_buf: &'b mut [u8; ws::MAX_BASE64_KEY_RESPONSE_LEN],
+    ) -> Result<&mut Self, ws::UpgradeError>
     where
-        W: Write,
+        H: IntoIterator<Item = (&'a str, &'a str)>,
     {
-        send_raw_headers(self.iter_raw(), output).await
+        for (name, value) in
+            ws::upgrade_response_headers(request_headers, version, sec_key_response_base64_buf)?
+        {
+            self.set(name, value);
+        }
+
+        Ok(self)
     }
 }
 
@@ -537,608 +419,6 @@ impl BodyType {
     }
 }
 
-pub enum Body<'b, R> {
-    Close(PartiallyRead<'b, R>),
-    ContentLen(ContentLenRead<PartiallyRead<'b, R>>),
-    Chunked(ChunkedRead<'b, PartiallyRead<'b, R>>),
-}
-
-impl<'b, R> Body<'b, R>
-where
-    R: Read,
-{
-    pub fn new(body_type: BodyType, buf: &'b mut [u8], read_len: usize, input: R) -> Self {
-        match body_type {
-            BodyType::Chunked => Body::Chunked(ChunkedRead::new(
-                PartiallyRead::new(&[], input),
-                buf,
-                read_len,
-            )),
-            BodyType::ContentLen(content_len) => Body::ContentLen(ContentLenRead::new(
-                content_len,
-                PartiallyRead::new(&buf[..read_len], input),
-            )),
-            BodyType::Close => Body::Close(PartiallyRead::new(&buf[..read_len], input)),
-            BodyType::Unknown => Body::ContentLen(ContentLenRead::new(
-                0,
-                PartiallyRead::new(&buf[..read_len], input),
-            )),
-        }
-    }
-
-    pub fn is_complete(&self) -> bool {
-        match self {
-            Self::Close(_) => true,
-            Self::ContentLen(r) => r.is_complete(),
-            Self::Chunked(r) => r.is_complete(),
-        }
-    }
-
-    pub fn as_raw_reader(&mut self) -> &mut R {
-        match self {
-            Self::Close(r) => &mut r.input,
-            Self::ContentLen(r) => &mut r.input.input,
-            Self::Chunked(r) => &mut r.input.input,
-        }
-    }
-
-    pub fn release(self) -> R {
-        match self {
-            Self::Close(r) => r.release(),
-            Self::ContentLen(r) => r.release().release(),
-            Self::Chunked(r) => r.release().release(),
-        }
-    }
-}
-
-impl<'b, R> ErrorType for Body<'b, R>
-where
-    R: ErrorType,
-{
-    type Error = Error<R::Error>;
-}
-
-impl<'b, R> Read for Body<'b, R>
-where
-    R: Read,
-{
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        match self {
-            Self::Close(read) => Ok(read.read(buf).await.map_err(Error::Io)?),
-            Self::ContentLen(read) => Ok(read.read(buf).await?),
-            Self::Chunked(read) => Ok(read.read(buf).await?),
-        }
-    }
-}
-
-pub struct PartiallyRead<'b, R> {
-    buf: &'b [u8],
-    read_len: usize,
-    input: R,
-}
-
-impl<'b, R> PartiallyRead<'b, R> {
-    pub const fn new(buf: &'b [u8], input: R) -> Self {
-        Self {
-            buf,
-            read_len: 0,
-            input,
-        }
-    }
-
-    pub fn buf_len(&self) -> usize {
-        self.buf.len()
-    }
-
-    pub fn as_raw_reader(&mut self) -> &mut R {
-        &mut self.input
-    }
-
-    pub fn release(self) -> R {
-        self.input
-    }
-}
-
-impl<'b, R> ErrorType for PartiallyRead<'b, R>
-where
-    R: ErrorType,
-{
-    type Error = R::Error;
-}
-
-impl<'b, R> Read for PartiallyRead<'b, R>
-where
-    R: Read,
-{
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        if self.buf.len() > self.read_len {
-            let len = min(buf.len(), self.buf.len() - self.read_len);
-            buf[..len].copy_from_slice(&self.buf[self.read_len..self.read_len + len]);
-
-            self.read_len += len;
-
-            Ok(len)
-        } else {
-            Ok(self.input.read(buf).await?)
-        }
-    }
-}
-
-pub struct ContentLenRead<R> {
-    content_len: u64,
-    read_len: u64,
-    input: R,
-}
-
-impl<R> ContentLenRead<R> {
-    pub const fn new(content_len: u64, input: R) -> Self {
-        Self {
-            content_len,
-            read_len: 0,
-            input,
-        }
-    }
-
-    pub fn is_complete(&self) -> bool {
-        self.content_len == self.read_len
-    }
-
-    pub fn release(self) -> R {
-        self.input
-    }
-}
-
-impl<R> ErrorType for ContentLenRead<R>
-where
-    R: ErrorType,
-{
-    type Error = Error<R::Error>;
-}
-
-impl<R> Read for ContentLenRead<R>
-where
-    R: Read,
-{
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        let len = min(buf.len() as _, self.content_len - self.read_len);
-        if len > 0 {
-            let read = self
-                .input
-                .read(&mut buf[..len as _])
-                .await
-                .map_err(Error::Io)?;
-            self.read_len += read as u64;
-
-            Ok(read)
-        } else {
-            Ok(0)
-        }
-    }
-}
-
-pub struct ChunkedRead<'b, R> {
-    buf: &'b mut [u8],
-    buf_offset: usize,
-    buf_len: usize,
-    input: R,
-    remain: u64,
-    complete: bool,
-}
-
-impl<'b, R> ChunkedRead<'b, R>
-where
-    R: Read,
-{
-    pub fn new(input: R, buf: &'b mut [u8], buf_len: usize) -> Self {
-        Self {
-            buf,
-            buf_offset: 0,
-            buf_len,
-            input,
-            remain: 0,
-            complete: false,
-        }
-    }
-
-    pub fn is_complete(&self) -> bool {
-        self.complete
-    }
-
-    pub fn release(self) -> R {
-        self.input
-    }
-
-    // The elegant pull parser taken from here:
-    // https://github.com/kchmck/uhttp_chunked_bytes.rs/blob/master/src/lib.rs
-    // Changes:
-    // - Converted to async
-    // - Iterators removed
-    // - Simpler error handling
-    // - Consumption of trailer
-    async fn next(&mut self) -> Result<Option<u8>, Error<R::Error>> {
-        if self.complete {
-            return Ok(None);
-        }
-
-        if self.remain == 0 {
-            if let Some(size) = self.parse_size().await? {
-                // If chunk size is zero (final chunk), the stream is finished [RFC7230§4.1].
-                if size == 0 {
-                    self.consume_trailer().await?;
-                    self.complete = true;
-                    return Ok(None);
-                }
-
-                self.remain = size;
-            } else {
-                self.complete = true;
-                return Ok(None);
-            }
-        }
-
-        let next = self.input_fetch().await?;
-        self.remain -= 1;
-
-        // If current chunk is finished, verify it ends with CRLF [RFC7230§4.1].
-        if self.remain == 0 {
-            self.consume_multi(b"\r\n").await?;
-        }
-
-        Ok(Some(next))
-    }
-
-    // Parse the number of bytes in the next chunk.
-    async fn parse_size(&mut self) -> Result<Option<u64>, Error<R::Error>> {
-        let mut digits = [0_u8; 16];
-
-        let slice = match self.parse_digits(&mut digits[..]).await? {
-            // This is safe because the following call to `from_str_radix` does
-            // its own verification on the bytes.
-            Some(s) => unsafe { str::from_utf8_unchecked(s) },
-            None => return Ok(None),
-        };
-
-        let size = u64::from_str_radix(slice, 16).map_err(|_| Error::InvalidBody)?;
-
-        Ok(Some(size))
-    }
-
-    // Extract the hex digits for the current chunk size.
-    async fn parse_digits<'a>(
-        &'a mut self,
-        digits: &'a mut [u8],
-    ) -> Result<Option<&'a [u8]>, Error<R::Error>> {
-        // Number of hex digits that have been extracted.
-        let mut len = 0;
-
-        loop {
-            let b = match self.input_next().await? {
-                Some(b) => b,
-                None => {
-                    return if len == 0 {
-                        // If EOF at the beginning of a new chunk, the stream is finished.
-                        Ok(None)
-                    } else {
-                        Err(Error::IncompleteBody)
-                    };
-                }
-            };
-
-            match b {
-                b'\r' => {
-                    self.consume(b'\n').await?;
-                    break;
-                }
-                b';' => {
-                    self.consume_ext().await?;
-                    break;
-                }
-                _ => {
-                    match digits.get_mut(len) {
-                        Some(d) => *d = b,
-                        None => return Err(Error::InvalidBody),
-                    }
-
-                    len += 1;
-                }
-            }
-        }
-
-        Ok(Some(&digits[..len]))
-    }
-
-    // Consume and discard current chunk extension.
-    // This doesn't check whether the characters up to CRLF actually have correct syntax.
-    async fn consume_ext(&mut self) -> Result<(), Error<R::Error>> {
-        self.consume_header().await?;
-
-        Ok(())
-    }
-
-    // Consume and discard the optional trailer following the last chunk.
-    async fn consume_trailer(&mut self) -> Result<(), Error<R::Error>> {
-        while self.consume_header().await? {}
-
-        Ok(())
-    }
-
-    // Consume and discard each header in the optional trailer following the last chunk.
-    async fn consume_header(&mut self) -> Result<bool, Error<R::Error>> {
-        let mut first = self.input_fetch().await?;
-        let mut len = 1;
-
-        loop {
-            let second = self.input_fetch().await?;
-            len += 1;
-
-            if first == b'\r' && second == b'\n' {
-                return Ok(len > 2);
-            }
-
-            first = second;
-        }
-    }
-
-    // Verify the next bytes in the stream match the expectation.
-    async fn consume_multi(&mut self, bytes: &[u8]) -> Result<(), Error<R::Error>> {
-        for byte in bytes {
-            self.consume(*byte).await?;
-        }
-
-        Ok(())
-    }
-
-    // Verify the next byte in the stream is matching the expectation.
-    async fn consume(&mut self, byte: u8) -> Result<(), Error<R::Error>> {
-        if self.input_fetch().await? == byte {
-            Ok(())
-        } else {
-            Err(Error::InvalidBody)
-        }
-    }
-
-    async fn input_fetch(&mut self) -> Result<u8, Error<R::Error>> {
-        self.input_next().await?.ok_or(Error::IncompleteBody)
-    }
-
-    async fn input_next(&mut self) -> Result<Option<u8>, Error<R::Error>> {
-        if self.buf_offset == self.buf_len {
-            self.buf_len = self.input.read(self.buf).await.map_err(Error::Io)?;
-            self.buf_offset = 0;
-        }
-
-        if self.buf_len > 0 {
-            let byte = self.buf[self.buf_offset];
-            self.buf_offset += 1;
-
-            Ok(Some(byte))
-        } else {
-            Ok(None)
-        }
-    }
-}
-
-impl<'b, R> ErrorType for ChunkedRead<'b, R>
-where
-    R: ErrorType,
-{
-    type Error = Error<R::Error>;
-}
-
-impl<'b, R> Read for ChunkedRead<'b, R>
-where
-    R: Read,
-{
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        for (index, byte_pos) in buf.iter_mut().enumerate() {
-            if let Some(byte) = self.next().await? {
-                *byte_pos = byte;
-            } else {
-                return Ok(index);
-            }
-        }
-
-        Ok(buf.len())
-    }
-}
-
-pub enum SendBody<W> {
-    Close(W),
-    ContentLen(ContentLenWrite<W>),
-    Chunked(ChunkedWrite<W>),
-}
-
-impl<W> SendBody<W>
-where
-    W: Write,
-{
-    pub fn new(body_type: BodyType, output: W) -> SendBody<W> {
-        match body_type {
-            BodyType::Chunked => SendBody::Chunked(ChunkedWrite::new(output)),
-            BodyType::ContentLen(content_len) => {
-                SendBody::ContentLen(ContentLenWrite::new(content_len, output))
-            }
-            BodyType::Close => SendBody::Close(output),
-            BodyType::Unknown => SendBody::ContentLen(ContentLenWrite::new(0, output)),
-        }
-    }
-
-    pub fn is_complete(&self) -> bool {
-        match self {
-            Self::ContentLen(w) => w.is_complete(),
-            _ => true,
-        }
-    }
-
-    pub async fn finish(&mut self) -> Result<(), Error<W::Error>>
-    where
-        W: Write,
-    {
-        match self {
-            Self::Close(_) => (),
-            Self::ContentLen(_) => (),
-            Self::Chunked(w) => w.finish().await?,
-        }
-
-        self.flush().await?;
-
-        Ok(())
-    }
-
-    pub fn as_raw_writer(&mut self) -> &mut W {
-        match self {
-            Self::Close(w) => w,
-            Self::ContentLen(w) => &mut w.output,
-            Self::Chunked(w) => &mut w.output,
-        }
-    }
-
-    pub fn release(self) -> W {
-        match self {
-            Self::Close(w) => w,
-            Self::ContentLen(w) => w.release(),
-            Self::Chunked(w) => w.release(),
-        }
-    }
-}
-
-impl<W> ErrorType for SendBody<W>
-where
-    W: ErrorType,
-{
-    type Error = Error<W::Error>;
-}
-
-impl<W> Write for SendBody<W>
-where
-    W: Write,
-{
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        match self {
-            Self::Close(w) => Ok(w.write(buf).await.map_err(Error::Io)?),
-            Self::ContentLen(w) => Ok(w.write(buf).await?),
-            Self::Chunked(w) => Ok(w.write(buf).await?),
-        }
-    }
-
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        match self {
-            Self::Close(w) => Ok(w.flush().await.map_err(Error::Io)?),
-            Self::ContentLen(w) => Ok(w.flush().await?),
-            Self::Chunked(w) => Ok(w.flush().await?),
-        }
-    }
-}
-
-pub struct ContentLenWrite<W> {
-    content_len: u64,
-    write_len: u64,
-    output: W,
-}
-
-impl<W> ContentLenWrite<W> {
-    pub const fn new(content_len: u64, output: W) -> Self {
-        Self {
-            content_len,
-            write_len: 0,
-            output,
-        }
-    }
-
-    pub fn is_complete(&self) -> bool {
-        self.content_len == self.write_len
-    }
-
-    pub fn release(self) -> W {
-        self.output
-    }
-}
-
-impl<W> ErrorType for ContentLenWrite<W>
-where
-    W: ErrorType,
-{
-    type Error = Error<W::Error>;
-}
-
-impl<W> Write for ContentLenWrite<W>
-where
-    W: Write,
-{
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        if self.content_len >= self.write_len + buf.len() as u64 {
-            let write = self.output.write(buf).await.map_err(Error::Io)?;
-            self.write_len += write as u64;
-
-            Ok(write)
-        } else {
-            Err(Error::TooLongBody)
-        }
-    }
-
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        self.output.flush().await.map_err(Error::Io)
-    }
-}
-
-pub struct ChunkedWrite<W> {
-    output: W,
-}
-
-impl<W> ChunkedWrite<W> {
-    pub const fn new(output: W) -> Self {
-        Self { output }
-    }
-
-    pub async fn finish(&mut self) -> Result<(), Error<W::Error>>
-    where
-        W: Write,
-    {
-        self.output.write_all(b"\r\n").await.map_err(Error::Io)
-    }
-
-    pub fn release(self) -> W {
-        self.output
-    }
-}
-
-impl<W> ErrorType for ChunkedWrite<W>
-where
-    W: ErrorType,
-{
-    type Error = Error<W::Error>;
-}
-
-impl<W> Write for ChunkedWrite<W>
-where
-    W: Write,
-{
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        if !buf.is_empty() {
-            let mut len_str = heapless::String::<10>::new();
-            write!(&mut len_str, "{:X}\r\n", buf.len()).unwrap();
-            self.output
-                .write_all(len_str.as_bytes())
-                .await
-                .map_err(Error::Io)?;
-
-            self.output.write_all(buf).await.map_err(Error::Io)?;
-            self.output
-                .write_all("\r\n".as_bytes())
-                .await
-                .map_err(Error::Io)?;
-
-            Ok(buf.len())
-        } else {
-            Ok(0)
-        }
-    }
-
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        self.output.flush().await.map_err(Error::Io)
-    }
-}
-
 #[derive(Default, Debug)]
 pub struct RequestHeaders<'b, const N: usize> {
     pub method: Option<Method>,
@@ -1153,55 +433,6 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
             path: None,
             headers: Headers::<N>::new(),
         }
-    }
-
-    pub async fn receive<R>(
-        &mut self,
-        buf: &'b mut [u8],
-        mut input: R,
-    ) -> Result<(&'b mut [u8], usize), Error<R::Error>>
-    where
-        R: Read,
-    {
-        let (read_len, headers_len) = match read_reply_buf::<N, _>(&mut input, buf, true).await {
-            Ok(read_len) => read_len,
-            Err(e) => return Err(e),
-        };
-
-        let mut parser = httparse::Request::new(&mut self.headers.0);
-
-        let (headers_buf, body_buf) = buf.split_at_mut(headers_len);
-
-        let status = match parser.parse(headers_buf) {
-            Ok(status) => status,
-            Err(e) => return Err(e.into()),
-        };
-
-        if let Status::Complete(headers_len2) = status {
-            if headers_len != headers_len2 {
-                unreachable!("Should not happen. HTTP header parsing is indeterminate.")
-            }
-
-            self.method = parser.method.and_then(Method::new);
-            self.path = parser.path;
-
-            trace!("Received:\n{}", self);
-
-            Ok((body_buf, read_len - headers_len))
-        } else {
-            unreachable!("Secondary parse of already loaded buffer failed.")
-        }
-    }
-
-    pub async fn send<W>(&self, mut output: W) -> Result<BodyType, Error<W::Error>>
-    where
-        W: Write,
-    {
-        send_request(self.method, self.path, &mut output).await?;
-        let body_type = self.headers.send(&mut output).await?;
-        send_headers_end(output).await?;
-
-        Ok(body_type)
     }
 }
 
@@ -1242,49 +473,6 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
             headers: Headers::<N>::new(),
         }
     }
-
-    pub async fn receive<R>(
-        &mut self,
-        buf: &'b mut [u8],
-        mut input: R,
-    ) -> Result<(&'b mut [u8], usize), Error<R::Error>>
-    where
-        R: Read,
-    {
-        let (read_len, headers_len) = read_reply_buf::<N, _>(&mut input, buf, false).await?;
-
-        let mut parser = httparse::Response::new(&mut self.headers.0);
-
-        let (headers_buf, body_buf) = buf.split_at_mut(headers_len);
-
-        let status = parser.parse(headers_buf).map_err(Error::from)?;
-
-        if let Status::Complete(headers_len2) = status {
-            if headers_len != headers_len2 {
-                unreachable!("Should not happen. HTTP header parsing is indeterminate.")
-            }
-
-            self.code = parser.code;
-            self.reason = parser.reason;
-
-            trace!("Received:\n{}", self);
-
-            Ok((body_buf, read_len - headers_len))
-        } else {
-            unreachable!("Secondary parse of already loaded buffer failed.")
-        }
-    }
-
-    pub async fn send<W>(&self, mut output: W) -> Result<BodyType, Error<W::Error>>
-    where
-        W: Write,
-    {
-        send_status(self.code, self.reason, &mut output).await?;
-        let body_type = self.headers.send(&mut output).await?;
-        send_headers_end(output).await?;
-
-        Ok(body_type)
-    }
 }
 
 impl<'b, const N: usize> Display for ResponseHeaders<'b, N> {
@@ -1309,92 +497,129 @@ impl<'b, const N: usize> Display for ResponseHeaders<'b, N> {
     }
 }
 
-async fn read_reply_buf<const N: usize, R>(
-    mut input: R,
-    buf: &mut [u8],
-    request: bool,
-) -> Result<(usize, usize), Error<R::Error>>
-where
-    R: Read,
-{
-    let mut offset = 0;
-    let mut size = 0;
+pub mod ws {
+    pub const NONCE_LEN: usize = 16;
+    pub const MAX_BASE64_KEY_LEN: usize = 28;
+    pub const MAX_BASE64_KEY_RESPONSE_LEN: usize = 33;
 
-    while buf.len() > size {
-        let read = input.read(&mut buf[offset..]).await.map_err(Error::Io)?;
+    pub const UPGRADE_REQUEST_HEADERS_LEN: usize = 7;
+    pub const UPGRADE_RESPONSE_HEADERS_LEN: usize = 3;
 
-        offset += read;
-        size += read;
+    pub fn upgrade_request_headers<'a>(
+        host: Option<&'a str>,
+        origin: Option<&'a str>,
+        version: Option<&'a str>,
+        nonce: &[u8; NONCE_LEN],
+        nonce_base64_buf: &'a mut [u8; MAX_BASE64_KEY_LEN],
+    ) -> [(&'a str, &'a str); UPGRADE_REQUEST_HEADERS_LEN] {
+        let nonce_base64_len =
+            base64::encode_config_slice(nonce, base64::URL_SAFE, nonce_base64_buf);
 
-        let mut headers = [httparse::EMPTY_HEADER; N];
+        let host = host.map(|host| ("Host", host)).unwrap_or(("", ""));
+        let origin = origin.map(|origin| ("Origin", origin)).unwrap_or(("", ""));
 
-        let status = if request {
-            httparse::Request::new(&mut headers).parse(&buf[..size])?
+        [
+            host,
+            origin,
+            ("Content-Length", "0"),
+            ("Connection", "Upgrade"),
+            ("Upgrade", "websocket"),
+            ("Sec-WebSocket-Version", version.unwrap_or("13")),
+            ("Sec-WebSocket-Key", unsafe {
+                core::str::from_utf8_unchecked(&nonce_base64_buf[..nonce_base64_len])
+            }),
+        ]
+    }
+
+    pub fn is_upgrade_request<'a, H>(request_headers: H) -> bool
+    where
+        H: IntoIterator<Item = (&'a str, &'a str)>,
+    {
+        let mut connection = false;
+        let mut upgrade = false;
+
+        for (name, value) in request_headers {
+            if name.eq_ignore_ascii_case("Connection") {
+                connection = value.eq_ignore_ascii_case("Upgrade");
+            } else if name.eq_ignore_ascii_case("Upgrade") {
+                upgrade = value.eq_ignore_ascii_case("websocket");
+            }
+        }
+
+        connection && upgrade
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    pub enum UpgradeError {
+        NoVersion,
+        NoSecKey,
+        UnsupportedVersion,
+        SecKeyTooLong,
+    }
+
+    pub fn upgrade_response_headers<'a, 'b, H>(
+        request_headers: H,
+        version: Option<&'a str>,
+        sec_key_response_base64_buf: &'b mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
+    ) -> Result<[(&'b str, &'b str); UPGRADE_RESPONSE_HEADERS_LEN], UpgradeError>
+    where
+        H: IntoIterator<Item = (&'a str, &'a str)>,
+    {
+        let mut version_ok = false;
+        let mut sec_key = None;
+
+        for (name, value) in request_headers {
+            if name.eq_ignore_ascii_case("Sec-WebSocket-Version") {
+                if !value.eq_ignore_ascii_case(version.unwrap_or("13")) {
+                    return Err(UpgradeError::NoVersion);
+                }
+
+                version_ok = true;
+            } else if name.eq_ignore_ascii_case("Sec-WebSocket-Key") {
+                const WS_MAGIC_GUUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+                let mut buf = [0_u8; MAX_BASE64_KEY_LEN + WS_MAGIC_GUUID.len()];
+
+                let value_len = value.as_bytes().len();
+
+                if value_len > MAX_BASE64_KEY_LEN {
+                    return Err(UpgradeError::SecKeyTooLong);
+                }
+
+                buf[..value_len].copy_from_slice(value.as_bytes());
+                buf[value_len..value_len + WS_MAGIC_GUUID.as_bytes().len()]
+                    .copy_from_slice(WS_MAGIC_GUUID.as_bytes());
+
+                let mut sha1 = sha1_smol::Sha1::new();
+
+                sha1.update(&buf[..value_len + WS_MAGIC_GUUID.as_bytes().len()]);
+
+                let sec_key_len = base64::encode_config_slice(
+                    sha1.digest().bytes(),
+                    base64::STANDARD_NO_PAD,
+                    sec_key_response_base64_buf,
+                );
+
+                sec_key = Some(sec_key_len);
+            }
+        }
+
+        if version_ok {
+            if let Some(sec_key_len) = sec_key {
+                Ok([
+                    ("Connection", "Upgrade"),
+                    ("Upgrade", "websocket"),
+                    ("Sec-WebSocket-Accept", unsafe {
+                        core::str::from_utf8_unchecked(&sec_key_response_base64_buf[..sec_key_len])
+                    }),
+                ])
+            } else {
+                Err(UpgradeError::NoSecKey)
+            }
         } else {
-            httparse::Response::new(&mut headers).parse(&buf[..size])?
-        };
-
-        if let httparse::Status::Complete(headers_len) = status {
-            return Ok((size, headers_len));
+            Err(UpgradeError::NoVersion)
         }
     }
-
-    Err(Error::TooManyHeaders)
-}
-
-async fn send_status_line<W>(
-    request: bool,
-    token: Option<&str>,
-    extra: Option<&str>,
-    mut output: W,
-) -> Result<(), Error<W::Error>>
-where
-    W: Write,
-{
-    let mut written = false;
-
-    if !request {
-        output.write_all(b"HTTP/1.1").await.map_err(Error::Io)?;
-        written = true;
-    }
-
-    if let Some(token) = token {
-        if written {
-            output.write_all(b" ").await.map_err(Error::Io)?;
-        }
-
-        output
-            .write_all(token.as_bytes())
-            .await
-            .map_err(Error::Io)?;
-
-        written = true;
-    }
-
-    if let Some(extra) = extra {
-        if written {
-            output.write_all(b" ").await.map_err(Error::Io)?;
-        }
-
-        output
-            .write_all(extra.as_bytes())
-            .await
-            .map_err(Error::Io)?;
-
-        written = true;
-    }
-
-    if request {
-        if written {
-            output.write_all(b" ").await.map_err(Error::Io)?;
-        }
-
-        output.write_all(b"HTTP/1.1").await.map_err(Error::Io)?;
-    }
-
-    output.write_all(b"\r\n").await.map_err(Error::Io)?;
-
-    Ok(())
 }
 
 #[cfg(feature = "embedded-svc")]

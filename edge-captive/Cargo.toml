@@ -3,12 +3,9 @@ name = "edge-captive"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [features]
 std = ["domain/std"]
 
 [dependencies]
-log.workspace = true
-
+log = { workspace = true }
 domain = { version = "0.7", default-features = false }

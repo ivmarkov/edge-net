@@ -1,6 +1,6 @@
 [package]
 name = "edge-net"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
 categories = ["embedded", "hardware-support"]
@@ -12,46 +12,19 @@ readme = "README.md"
 rust-version = "1.71"
 
 [features]
-std = [
-    "alloc",
-    "embassy-sync/std",
-    "embedded-svc?/std",
-    "edge-http?/std",
-    "edge-captive?/std",
-    "dep:edge-tcp",
-
-    "futures-lite/std",
-    "dep:async-io",
-    "dep:embedded-io-async",
-    "dep:embedded-nal-async",
-    "dep:libc"
-]
-alloc = ["edge-http?/alloc", "embedded-svc?/alloc"]
-nightly = ["dep:edge-http", "embedded-svc?/nightly"]
+std = ["edge-http/std", "edge-captive/std", "edge-mqtt/std", "edge-std-nal-async/std"]
+nightly = ["edge-dhcp/nightly", "edge-http/nightly", "edge-mqtt/nightly", "edge-raw/nightly", "edge-ws/nightly", "edge-std-nal-async/nightly"]
+# TODO: embedded-svc
 
 [dependencies]
-embedded-svc = { version = "0.26", default-features = false, optional = true, features = ["embedded-io-async"] }
-
-futures-lite = { version = "1", default-features = false, optional = true }
-async-io = { version = "2", default-features = false, optional = true }
-embedded-io-async = { workspace = true, optional = true }
-embedded-nal-async = { workspace = true, optional = true }
-libc = { version = "0.2", default-features = false, optional = true }
-
-embassy-sync.workspace = true
-log.workspace = true
-heapless.workspace = true
-no-std-net.workspace = true
-
-edge-captive = { workspace = true, optional = true }
-edge-dhcp = { workspace = true, optional = true }
-edge-http = { workspace = true, optional = true }
-edge-mdns = { workspace = true, optional = true }
-edge-mqtt = { workspace = true, optional = true }
-edge-ws = { workspace = true, optional = true }
-
-# edge-tcp is an exception that only contains trait definitions
-edge-tcp = { workspace = true, optional = true }
+edge-captive = { workspace = true }
+edge-dhcp = { workspace = true }
+edge-http = { workspace = true }
+edge-mdns = { workspace = true }
+edge-mqtt = { workspace = true }
+edge-raw = { workspace = true }
+edge-ws = { workspace = true }
+edge-std-nal-async = { workspace = true }
 
 [dev-dependencies]
 anyhow = "1"
@@ -81,24 +54,29 @@ members = [
     "edge-http",
     "edge-mdns",
     "edge-mqtt", 
-    "edge-tcp",
-    "edge-ws"
+    "edge-raw",
+    "edge-ws",
+    "edge-std-nal-async",
+    "embedded-nal-async-xtra"
 ]
 
 [workspace.dependencies]
-embassy-futures = "0.1"
-embassy-sync = "0.3"
-embedded-io = { version = "0.6", default-features = false }
+embassy-futures = { version = "0.1", default-features = false }
+embassy-sync = { version = "0.3", default-features = false }
+embassy-time = { version = "0.1", default-features = false }
 embedded-io-async = { version = "0.6", default-features = false }
-embedded-nal-async = "0.6"
+embedded-nal-async = { version = "0.6", default-features = false }
+embedded-svc = { version = "0.26", default-features = false, features = ["embedded-io-async"] }
 log = { version = "0.4", default-features = false }
 heapless = { version = "0.7", default-features = false }
 no-std-net = { version = "0.6", default-features = false }
 
-edge-captive = { version = "0.1.0", path = "edge-captive" }
-edge-dhcp    = { version = "0.1.0", path = "edge-dhcp" }
-edge-http    = { version = "0.1.0", path = "edge-http" }
-edge-mdns    = { version = "0.1.0", path = "edge-mdns" }
-edge-mqtt    = { version = "0.1.0", path = "edge-mqtt" }
-edge-tcp     = { version = "0.1.0", path = "edge-tcp" }
-edge-ws      = { version = "0.1.0", path = "edge-ws" }
+edge-captive = { version = "0.1.0", path = "edge-captive", default-features = false }
+edge-dhcp = { version = "0.1.0", path = "edge-dhcp", default-features = false }
+edge-http = { version = "0.1.0", path = "edge-http", default-features = false }
+edge-mdns = { version = "0.1.0", path = "edge-mdns", default-features = false }
+edge-mqtt = { version = "0.1.0", path = "edge-mqtt", default-features = false }
+edge-raw = { version = "0.1.0", path = "edge-raw", default-features = false }
+edge-ws = { version = "0.1.0", path = "edge-ws", default-features = false }
+edge-std-nal-async = { version = "0.1.0", path = "edge-std-nal-async", default-features = false }
+embedded-nal-async-xtra = { version = "0.1.0", path = "embedded-nal-async-xtra", default-features = false }

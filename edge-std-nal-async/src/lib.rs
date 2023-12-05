@@ -1,3 +1,10 @@
+#![allow(stable_features)]
+#![allow(unknown_lints)]
+#![allow(async_fn_in_trait)]
+#![cfg_attr(feature = "nightly", feature(async_fn_in_trait))]
+#![cfg_attr(feature = "nightly", feature(impl_trait_projections))]
+#![cfg(all(feature = "nightly", feature = "std"))]
+
 use std::io;
 use std::net::{self, TcpStream, ToSocketAddrs, UdpSocket};
 use std::os::fd::{AsFd, AsRawFd};
@@ -6,13 +13,13 @@ use async_io::Async;
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 
 use embedded_io_async::{ErrorType, Read, Write};
-use no_std_net::{Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use embedded_nal_async::{
-    AddrType, ConnectedUdp, Dns, IpAddr, TcpConnect, UdpStack, UnconnectedUdp,
+    AddrType, ConnectedUdp, Dns, IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6,
+    TcpConnect, UdpStack, UnconnectedUdp,
 };
 
-use edge_tcp::{RawSocket, RawStack, TcpAccept, TcpListen, TcpSplittableConnection};
+use embedded_nal_async_xtra::{RawSocket, RawStack, TcpAccept, TcpListen, TcpSplittableConnection};
 
 pub struct StdTcpConnect(());
 
@@ -173,33 +180,7 @@ impl UdpStack for StdUdpStack {
     }
 
     async fn bind_multiple(&self, _local: SocketAddr) -> Result<Self::MultiplyBound, Self::Error> {
-        unimplemented!()
-    }
-}
-
-fn cvt<T>(res: T) -> io::Result<T>
-where
-    T: Into<i64> + Copy,
-{
-    let ires: i64 = res.into();
-
-    if ires == -1 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(res)
-    }
-}
-
-fn cvti<T>(res: T) -> io::Result<T>
-where
-    T: Into<isize> + Copy,
-{
-    let ires: isize = res.into();
-
-    if ires == -1 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(res)
+        unimplemented!() // TODO
     }
 }
 
@@ -261,7 +242,9 @@ impl RawStack for StdRawStack {
 
     type Socket = StdRawSocket;
 
-    async fn connect(&self, interface: Option<u32>) -> Result<Self::Socket, Self::Error> {
+    type Interface = u32;
+
+    async fn bind(&self, interface: &Self::Interface) -> Result<Self::Socket, Self::Error> {
         let socket = unsafe {
             libc::socket(
                 libc::PF_PACKET,
@@ -275,7 +258,7 @@ impl RawStack for StdRawStack {
         let sockaddr = libc::sockaddr_ll {
             sll_family: libc::AF_PACKET as _,
             sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
-            sll_ifindex: interface.unwrap_or(0) as _,
+            sll_ifindex: *interface as _,
             sll_hatype: 0,
             sll_pkttype: 0,
             sll_halen: 0,
@@ -301,10 +284,7 @@ impl RawStack for StdRawStack {
             unsafe { std::net::UdpSocket::from_raw_fd(socket) }
         };
 
-        Ok(StdRawSocket(
-            Async::new(socket)?,
-            interface.unwrap_or(0) as _,
-        ))
+        Ok(StdRawSocket(Async::new(socket)?, *interface as _))
 
         // warn!("Before connect");
         // let (addr, socket) = self.connect_from(local, remote).await?;
@@ -341,7 +321,7 @@ impl ConnectedUdp for StdUdpSocket {
         loop {
             offset += self.0.send(&data[offset..]).await?;
 
-            if offset == 0 {
+            if offset == data.len() {
                 break;
             }
         }
@@ -370,7 +350,7 @@ impl UnconnectedUdp for StdUdpSocket {
         loop {
             offset += self.0.send_to(data, to_std_addr(remote)).await?;
 
-            if offset == 0 {
+            if offset == data.len() {
                 break;
             }
         }
@@ -392,18 +372,15 @@ impl UnconnectedUdp for StdUdpSocket {
     }
 }
 
-pub struct StdDns<U>(U);
+pub struct StdDns(());
 
-impl<U> StdDns<U> {
-    pub const fn new(unblocker: U) -> Self {
-        Self(unblocker)
+impl StdDns {
+    pub const fn new() -> Self {
+        Self(())
     }
 }
 
-impl<U> Dns for StdDns<U>
-where
-    U: crate::asynch::Unblocker,
-{
+impl Dns for StdDns {
     type Error = io::Error;
 
     async fn get_host_by_name(
@@ -413,28 +390,7 @@ where
     ) -> Result<IpAddr, Self::Error> {
         let host = host.to_string();
 
-        self.0
-            .unblock(move || dns_lookup_host(&host, addr_type))
-            .await
-    }
-
-    async fn get_host_by_address(
-        &self,
-        _addr: IpAddr,
-    ) -> Result<heapless::String<256>, Self::Error> {
-        Err(io::ErrorKind::Unsupported.into())
-    }
-}
-
-impl Dns for StdDns<()> {
-    type Error = io::Error;
-
-    async fn get_host_by_name(
-        &self,
-        host: &str,
-        addr_type: AddrType,
-    ) -> Result<IpAddr, Self::Error> {
-        dns_lookup_host(host, addr_type)
+        dns_lookup_host(&host, addr_type)
     }
 
     async fn get_host_by_address(
@@ -495,4 +451,30 @@ pub fn to_std_ipv4_addr(addr: Ipv4Addr) -> std::net::Ipv4Addr {
 
 pub fn to_nal_ipv4_addr(addr: std::net::Ipv4Addr) -> Ipv4Addr {
     addr.octets().into()
+}
+
+fn cvt<T>(res: T) -> io::Result<T>
+where
+    T: Into<i64> + Copy,
+{
+    let ires: i64 = res.into();
+
+    if ires == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(res)
+    }
+}
+
+fn cvti<T>(res: T) -> io::Result<T>
+where
+    T: Into<isize> + Copy,
+{
+    let ires: isize = res.into();
+
+    if ires == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(res)
+    }
 }

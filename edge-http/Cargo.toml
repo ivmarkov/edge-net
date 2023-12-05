@@ -3,22 +3,20 @@ name = "edge-http"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [features]
-std = ["httparse/std", "embedded-io/std", "embassy-sync/std"]
-alloc = ["embedded-io/alloc", "embedded-io-async/alloc"]
+std = []
+nightly = ["embedded-io-async", "embedded-nal-async", "embedded-nal-async-xtra/nightly", "embassy-sync", "embassy-futures", "embedded-svc?/nightly"]
 
 [dependencies]
-embassy-sync = { workspace = true, features = ["nightly"] }
-embedded-io.workspace = true
-embedded-io-async.workspace = true
-embedded-nal-async.workspace = true
-heapless.workspace = true
-log.workspace = true
-no-std-net.workspace = true
-
-embassy-futures.workspace = true
+embedded-io-async = { workspace = true, optional = true }
+embedded-nal-async = { workspace = true, optional = true }
+embedded-nal-async-xtra = { workspace = true, optional = true }
+embedded-svc = { workspace = true, optional = true, default-features = false }
+heapless = { workspace = true }
+log = { workspace = true }
+no-std-net = { workspace = true }
+embassy-sync = { workspace = true, optional = true }
+embassy-futures = { workspace = true, optional = true }
 httparse = { version = "1.7", default-features = false }
-
-edge-tcp = { version = "0.1.0", path = "../edge-tcp" }
+base64 = { version = "0.13", default-features = false }
+sha1_smol = { version = "1", default-features = false }
