@@ -17,6 +17,7 @@ use crate::{Options, Packet};
 #[derive(Clone, Debug)]
 pub struct Configuration {
     pub socket: SocketAddrV4,
+    pub server_port: u16,
     pub mac: [u8; 6],
     pub timeout: Duration,
 }
@@ -24,7 +25,8 @@ pub struct Configuration {
 impl Configuration {
     pub const fn new(mac: [u8; 6]) -> Self {
         Self {
-            socket: SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 68),
+            socket: SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_CLIENT_PORT),
+            server_port: DEFAULT_SERVER_PORT,
             mac,
             timeout: Duration::from_secs(10),
         }
@@ -44,6 +46,7 @@ pub struct Client<'a, T, F> {
     buf: &'a mut [u8],
     client: dhcp::client::Client<T>,
     socket: SocketAddrV4,
+    server_port: u16,
     timeout: Duration,
     pub settings: Option<(Settings, Instant)>,
 }
@@ -61,6 +64,7 @@ where
             buf,
             client: dhcp::client::Client { rng, mac: conf.mac },
             socket: conf.socket,
+            server_port: conf.server_port,
             timeout: conf.timeout,
             settings: None,
         }
@@ -133,7 +137,7 @@ where
                 .stack
                 .connect_from(
                     SocketAddr::V4(self.socket),
-                    SocketAddr::V4(SocketAddrV4::new(server_ip, self.socket.port())),
+                    SocketAddr::V4(SocketAddrV4::new(server_ip, self.server_port)),
                 )
                 .await
                 .map_err(Error::Io)?;
@@ -160,7 +164,10 @@ where
         loop {
             let mut socket = self
                 .stack
-                .bind_multiple(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 68)))
+                .bind_multiple(SocketAddr::V4(SocketAddrV4::new(
+                    Ipv4Addr::UNSPECIFIED,
+                    self.socket.port(),
+                )))
                 .await
                 .map_err(Error::Io)?;
 
@@ -172,8 +179,8 @@ where
 
             socket
                 .send(
-                    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 68)),
-                    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, 67)),
+                    SocketAddr::V4(self.socket),
+                    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, self.server_port)),
                     request.encode(self.buf)?,
                 )
                 .await
@@ -218,9 +225,9 @@ where
         for _ in 0..3 {
             info!("Requesting IP {ip} from DHCP server {server_ip}");
 
-            let mut socket = self
+            let (_, mut socket) = self
                 .stack
-                .bind_multiple(SocketAddr::V4(SocketAddrV4::new(server_ip, 68)))
+                .bind_single(SocketAddr::V4(self.socket))
                 .await
                 .map_err(Error::Io)?;
 
@@ -234,8 +241,8 @@ where
 
             socket
                 .send(
-                    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 68)),
-                    SocketAddr::V4(SocketAddrV4::new(server_ip, 67)),
+                    SocketAddr::V4(self.socket),
+                    SocketAddr::V4(SocketAddrV4::new(server_ip, self.server_port)),
                     request.encode(self.buf)?,
                 )
                 .await

@@ -54,7 +54,7 @@ impl<'a> ServerOptions<'a> {
             if server_identifier == Some(self.ip)
                 || server_identifier.is_none() && matches!(mt, MessageType::Discover)
             {
-                info!("Packet is for us, will process, message type {mt:?}");
+                info!("Request: ({mt:?}) {request:?}");
 
                 let request = match mt {
                     MessageType::Discover => {

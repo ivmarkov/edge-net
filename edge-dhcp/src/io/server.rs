@@ -4,7 +4,7 @@ use embassy_time::Duration;
 
 use embedded_nal_async::Ipv4Addr;
 
-use log::info;
+use log::{info, warn};
 
 use self::dhcp::{Options, Packet};
 
@@ -65,9 +65,9 @@ where
     /// Note that dropping this future is safe in that it won't remove the internal leases' database,
     /// so users are free to drop the future in case they would like to take a snapshot of the leases or inspect them otherwise.
     pub async fn run(&mut self) -> Result<(), Error<F::Error>> {
-        let mut socket = self
+        let (_, mut socket) = self
             .stack
-            .bind_multiple(SocketAddr::V4(self.socket))
+            .bind_single(SocketAddr::V4(self.socket))
             .await
             .map_err(Error::Io)?;
 
@@ -75,7 +75,13 @@ where
             let (len, local, remote) = socket.receive_into(self.buf).await.map_err(Error::Io)?;
             let packet = &self.buf[..len];
 
-            let request = Packet::decode(packet)?;
+            let request = match Packet::decode(packet) {
+                Ok(request) => request,
+                Err(err) => {
+                    warn!("Decoding packet returned error: {:?}", err);
+                    continue;
+                }
+            };
 
             let mut opt_buf = Options::buf();
 
@@ -86,7 +92,9 @@ where
                 socket
                     .send(
                         local,
-                        if request.broadcast {
+                        if true // TODO: Why
+                        /*request.broadcast*/
+                        {
                             SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, remote.port()))
                         } else {
                             remote

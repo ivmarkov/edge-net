@@ -7,6 +7,9 @@ use crate as dhcp;
 pub mod client;
 pub mod server;
 
+pub const DEFAULT_SERVER_PORT: u16 = 67;
+pub const DEFAULT_CLIENT_PORT: u16 = 68;
+
 #[derive(Debug)]
 pub enum Error<E> {
     Io(E),
