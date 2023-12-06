@@ -24,8 +24,13 @@ pub struct Configuration<'a> {
 
 /// A simple asynchronous DHCP server.
 ///
-/// The client takes a socket factory (either operating on raw sockets or UDP datagrams) and
-/// then processes all incoming BOOTP requests, by updating its internal simple database of leases, and issuing replies.
+/// The server takes a UDP socket stack and then processes all incoming BOOTP requests, by updating its internal simple database of leases,
+/// and issuing replies.
+///
+/// Note that the `UdpStack` implementation that the server takes need to be a bit special, because DHCP clients operate
+/// before they have an IP address assigned:
+/// - It needs to be able to send broadcast packets (to IP 255.255.255.255)
+/// - It needs to be able to receive broadcast packets
 pub struct Server<'a, F, const N: usize = 64> {
     stack: F,
     buf: &'a mut [u8],
@@ -60,7 +65,7 @@ where
         }
     }
 
-    /// Runs the DHCP server wth the supplied socket factory, processing incoming DHCP requests.
+    /// Runs the DHCP server, processing incoming DHCP requests.
     ///
     /// Note that dropping this future is safe in that it won't remove the internal leases' database,
     /// so users are free to drop the future in case they would like to take a snapshot of the leases or inspect them otherwise.

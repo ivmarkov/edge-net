@@ -35,12 +35,15 @@ impl Configuration {
 
 /// A simple asynchronous DHCP client.
 ///
-/// The client takes a socket factory (either operating on raw sockets or UDP datagrams) and
-/// then takes care of the all the negotiations with the DHCP server, as in discovering servers,
-/// negotiating initial IP, and then keeping the lease of that IP up to date.
+/// The client takes a UDP socket stack and then takes care of the all the negotiations with the DHCP server,
+/// as in discovering servers, negotiating initial IP, and then keeping the lease of that IP up to date.
 ///
-/// Note that it is unlikely that a non-raw socket factory would actually even work, due to the peculiarities of the
-/// DHCP protocol, where a lot of UDP packets are send (and often broadcasted) by the client before the client actually has an assigned IP.
+/// Note that the `UdpStack` implementation that the client takes need to be a bit special, because the DHCP client operates
+/// before it has an IP address assigned:
+/// - It needs to be able to send broadcast packets (to IP 255.255.255.255)
+/// - It needs to be able to receive broadcast packets
+///
+/// Usually, this is achieved by utilizing raw sockets. One such socket stack is `Udp2RawStack` in the `edge-raw` crate.
 pub struct Client<'a, T, F> {
     stack: F,
     buf: &'a mut [u8],
@@ -70,8 +73,7 @@ where
         }
     }
 
-    /// Runs the DHCP client with the supplied socket factory, and takes care of
-    /// all aspects of negotiating an IP with the first DHCP server that replies to the discovery requests.
+    /// Runs the DHCP client and takes care of all aspects of negotiating an IP with the first DHCP server that replies to the discovery requests.
     ///
     /// From the POV of the user, this method will return only in two cases, which are exactly the cases where the user is expected to take an action:
     /// - When an initial/new IP lease was negotiated; in that case, `Some(Settings)` is returned, and the user should assign the returned IP settings
