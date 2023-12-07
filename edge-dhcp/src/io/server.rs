@@ -22,6 +22,30 @@ pub struct Configuration<'a> {
     pub lease_duration_secs: u32,
 }
 
+impl<'a> Configuration<'a> {
+    pub fn new(ip: Ipv4Addr, gw_buf: Option<&'a mut [Ipv4Addr; 1]>) -> Self {
+        let octets = ip.octets();
+
+        let gateways = if let Some(gw_buf) = gw_buf {
+            gw_buf[0] = ip;
+            gw_buf.as_slice()
+        } else {
+            &[]
+        };
+
+        Self {
+            socket: SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_SERVER_PORT),
+            ip,
+            gateways,
+            subnet: Some(Ipv4Addr::new(255, 255, 255, 0)),
+            dns: &[],
+            range_start: Ipv4Addr::new(octets[0], octets[1], octets[2], 50),
+            range_end: Ipv4Addr::new(octets[0], octets[1], octets[2], 200),
+            lease_duration_secs: 7200,
+        }
+    }
+}
+
 /// A simple asynchronous DHCP server.
 ///
 /// The server takes a UDP socket stack and then processes all incoming BOOTP requests, by updating its internal simple database of leases,
