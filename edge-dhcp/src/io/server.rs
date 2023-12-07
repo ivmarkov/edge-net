@@ -118,19 +118,18 @@ where
                 self.server
                     .handle_request(&mut opt_buf, &self.server_options, &request)
             {
+                let remote = if let SocketAddr::V4(socket) = remote {
+                    if request.broadcast || *socket.ip() == Ipv4Addr::UNSPECIFIED {
+                        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, remote.port()))
+                    } else {
+                        remote
+                    }
+                } else {
+                    remote
+                };
+
                 socket
-                    .send(
-                        local,
-                        if true
-                        // TODO: Why
-                        /*request.broadcast*/
-                        {
-                            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, remote.port()))
-                        } else {
-                            remote
-                        },
-                        request.encode(self.buf)?,
-                    )
+                    .send(local, remote, request.encode(self.buf)?)
                     .await
                     .map_err(Error::Io)?;
             }
