@@ -7,6 +7,8 @@ use super::*;
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
 
+pub type Error<E> = super::Error<E>;
+
 impl<E> From<ReadExactError<E>> for Error<E> {
     fn from(e: ReadExactError<E>) -> Self {
         match e {
