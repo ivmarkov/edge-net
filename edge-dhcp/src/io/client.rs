@@ -19,7 +19,7 @@ pub struct Configuration {
     pub socket: SocketAddrV4,
     pub server_port: u16,
     pub mac: [u8; 6],
-    pub timeout: Duration,
+    pub timeout_secs: u32,
 }
 
 impl Configuration {
@@ -28,7 +28,7 @@ impl Configuration {
             socket: SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_CLIENT_PORT),
             server_port: DEFAULT_SERVER_PORT,
             mac,
-            timeout: Duration::from_secs(10),
+            timeout_secs: 10,
         }
     }
 }
@@ -68,7 +68,7 @@ where
             client: dhcp::client::Client { rng, mac: conf.mac },
             socket: conf.socket,
             server_port: conf.server_port,
-            timeout: conf.timeout,
+            timeout: Duration::from_secs(conf.timeout_secs as _),
             settings: None,
         }
     }
