@@ -138,13 +138,13 @@ where
     }
 
     async fn bind_multiple(&self, local: SocketAddr) -> Result<Self::MultiplyBound, Self::Error> {
-        let SocketAddr::V4(local) = local else {
+        let SocketAddr::V4(localv4) = local else {
             Err(Error::UnsupportedProtocol)?
         };
 
         let socket = self.0.bind(&self.1).await.map_err(Self::Error::Io)?;
 
-        Ok(UnconnectedUdp2RawSocket(socket, Some(local)))
+        Ok(UnconnectedUdp2RawSocket(socket, Some(localv4)))
     }
 }
 
