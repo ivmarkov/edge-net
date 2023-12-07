@@ -114,13 +114,13 @@ where
 
             let mut opt_buf = Options::buf();
 
-            if let Some(request) =
+            if let Some(reply) =
                 self.server
                     .handle_request(&mut opt_buf, &self.server_options, &request)
             {
                 let remote = if let SocketAddr::V4(socket) = remote {
                     if request.broadcast || *socket.ip() == Ipv4Addr::UNSPECIFIED {
-                        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, remote.port()))
+                        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, socket.port()))
                     } else {
                         remote
                     }
@@ -129,7 +129,7 @@ where
                 };
 
                 socket
-                    .send(local, remote, request.encode(self.buf)?)
+                    .send(local, remote, reply.encode(self.buf)?)
                     .await
                     .map_err(Error::Io)?;
             }
