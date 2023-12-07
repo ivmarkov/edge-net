@@ -187,7 +187,7 @@ async fn receive_into<T: RawSocket, const N: usize>(
         let len = socket.receive_into(buf).await.map_err(Error::Io)?;
 
         match raw::ip_udp_decode(&buf[..len], filter_src, filter_dst) {
-            Ok(Some((local, remote, data))) => {
+            Ok(Some((remote, local, data))) => {
                 if data.len() > buffer.len() {
                     Err(Error::RawError(raw::Error::BufferOverflow))?;
                 }
