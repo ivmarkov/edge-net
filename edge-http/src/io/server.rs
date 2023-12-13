@@ -1,6 +1,7 @@
 use core::fmt::{self, Debug, Display, Write as _};
 use core::future::Future;
 use core::mem;
+use core::pin::pin;
 
 use embedded_io_async::{ErrorType, Read, Write};
 
@@ -338,6 +339,7 @@ where
     A: embedded_nal_async_xtra::TcpAccept,
     H: for<'b, 't> Handler<'b, N, &'b mut A::Connection<'t>>,
 {
+    #[inline(always)]
     pub const fn new(acceptor: A, handler: H) -> Self {
         Self { acceptor, handler }
     }
@@ -351,6 +353,8 @@ where
         &mut self,
         quit: Q,
     ) -> Result<(), Error<A::Error>> {
+        let mut quit = pin!(quit);
+
         warn!("Creating queue for {} requests", W);
         let channel = embassy_sync::channel::Channel::<R, _, W>::new();
 
@@ -382,29 +386,27 @@ where
                 .unwrap();
         }
 
-        let handlers = handlers
-            .into_array::<P>()
-            .unwrap_or_else(|_| unreachable!());
+        let mut accept = pin!(async {
+            loop {
+                warn!("Acceptor: waiting for new connection");
 
-        embassy_futures::select::select3(
-            quit,
-            async {
-                loop {
-                    warn!("Acceptor: waiting for new connection");
-
-                    match self.acceptor.accept().await.map_err(Error::Io) {
-                        Ok(io) => {
-                            warn!("Acceptor: got new connection");
-                            channel.send(io).await;
-                            warn!("Acceptor: connection sent");
-                        }
-                        Err(e) => {
-                            warn!("Got error when accepting a new connection: {:?}", e);
-                        }
+                match self.acceptor.accept().await.map_err(Error::Io) {
+                    Ok(io) => {
+                        warn!("Acceptor: got new connection");
+                        channel.send(io).await;
+                        warn!("Acceptor: connection sent");
+                    }
+                    Err(e) => {
+                        warn!("Got error when accepting a new connection: {:?}", e);
                     }
                 }
-            },
-            embassy_futures::select::select_array(handlers),
+            }
+        });
+
+        embassy_futures::select::select3(
+            &mut quit,
+            &mut accept,
+            embassy_futures::select::select_slice(&mut handlers),
         )
         .await;
 
