@@ -3,7 +3,7 @@
 /// This code is a `no_std` and no-alloc modification of https://github.com/krolaw/dhcp4r
 use core::str::Utf8Error;
 
-use no_std_net::Ipv4Addr;
+pub use no_std_net::Ipv4Addr;
 
 use num_enum::TryFromPrimitive;
 
