@@ -1,3 +1,5 @@
+#![no_std]
+
 /// This code is a `no_std` and no-alloc modification of https://github.com/krolaw/dhcp4r
 use core::str::Utf8Error;
 
