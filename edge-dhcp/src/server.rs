@@ -101,7 +101,15 @@ impl<'a> ServerOptions<'a> {
         ip: Ipv4Addr,
         opt_buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
-        self.reply(request, MessageType::Offer, Some(ip), opt_buf)
+        self.reply(
+            request,
+            MessageType::Offer,
+            None,
+            Some(ip),
+            Some(request.siaddr),
+            Some(request.giaddr),
+            opt_buf,
+        )
     }
 
     pub fn ack_nack(
@@ -118,6 +126,9 @@ impl<'a> ServerOptions<'a> {
                 MessageType::Nak
             },
             ip,
+            ip,
+            Some(request.siaddr),
+            Some(request.giaddr),
             opt_buf,
         )
     }
@@ -126,11 +137,17 @@ impl<'a> ServerOptions<'a> {
         &self,
         request: &Packet,
         mt: MessageType,
-        ip: Option<Ipv4Addr>,
+        ciaddr: Option<Ipv4Addr>,
+        yiaddr: Option<Ipv4Addr>,
+        siaddr: Option<Ipv4Addr>,
+        giaddr: Option<Ipv4Addr>,
         buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
         let reply = request.new_reply(
-            ip,
+            ciaddr,
+            yiaddr,
+            siaddr,
+            giaddr,
             request.options.reply(
                 mt,
                 self.ip,

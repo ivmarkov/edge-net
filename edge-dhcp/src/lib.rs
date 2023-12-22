@@ -132,17 +132,24 @@ impl<'a> Packet<'a> {
         }
     }
 
-    pub fn new_reply<'b>(&self, ip: Option<Ipv4Addr>, options: Options<'b>) -> Packet<'b> {
+    pub fn new_reply<'b>(
+        &self,
+        ciaddr: Option<Ipv4Addr>,
+        yiaddr: Option<Ipv4Addr>,
+        siaddr: Option<Ipv4Addr>,
+        giaddr: Option<Ipv4Addr>,
+        options: Options<'b>,
+    ) -> Packet<'b> {
         Packet {
             reply: true,
             hops: 0,
             xid: self.xid,
             secs: 0,
             broadcast: self.broadcast,
-            ciaddr: ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
-            yiaddr: ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
-            siaddr: Ipv4Addr::UNSPECIFIED,
-            giaddr: Ipv4Addr::UNSPECIFIED,
+            ciaddr: ciaddr.unwrap_or(Ipv4Addr::UNSPECIFIED),
+            yiaddr: yiaddr.unwrap_or(Ipv4Addr::UNSPECIFIED),
+            siaddr: siaddr.unwrap_or(Ipv4Addr::UNSPECIFIED),
+            giaddr: giaddr.unwrap_or(Ipv4Addr::UNSPECIFIED),
             chaddr: self.chaddr,
             options,
         }
@@ -482,16 +489,30 @@ impl<'a> OptionsInner<'a> {
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum DhcpOption<'a> {
+    /// 53: DHCP Message Type
     MessageType(MessageType),
+    /// 54: Server Identifier
     ServerIdentifier(Ipv4Addr),
+    /// 55: Parameter Request List
     ParameterRequestList(&'a [u8]),
+    /// 50: Requested IP Address
     RequestedIpAddress(Ipv4Addr),
+    /// 12: Host Name Option
     HostName(&'a str),
+    /// 3: Router Option
     Router(Ipv4Addrs<'a>),
+    /// 6: Domain Name Server Option
     DomainNameServer(Ipv4Addrs<'a>),
+    /// 51: IP Address Lease Time
     IpAddressLeaseTime(u32),
+    /// 1: Subnet Mask
     SubnetMask(Ipv4Addr),
+    /// 56: Message
     Message(&'a str),
+    /// 57: Maximum DHCP Message Size
+    MaximumMessageSize(u16),
+    /// 61: Client-identifier
+    ClientIdentifier(&'a [u8]),
     Unrecognized(u8, &'a [u8]),
 }
 
@@ -523,6 +544,9 @@ impl<'a> DhcpOption<'a> {
                 HOST_NAME => DhcpOption::HostName(
                     core::str::from_utf8(bytes.remaining()).map_err(Error::InvalidUtf8Str)?,
                 ),
+                MAXIMUM_DHCP_MESSAGE_SIZE => {
+                    DhcpOption::MaximumMessageSize(u16::from_be_bytes(bytes.remaining_arr()?))
+                }
                 ROUTER => {
                     DhcpOption::Router(Ipv4Addrs(Ipv4AddrsInner::ByteSlice(bytes.remaining())))
                 }
@@ -536,6 +560,13 @@ impl<'a> DhcpOption<'a> {
                 MESSAGE => DhcpOption::Message(
                     core::str::from_utf8(bytes.remaining()).map_err(Error::InvalidUtf8Str)?,
                 ),
+                CLIENT_IDENTIFIER => {
+                    if len < 2 {
+                        return Err(Error::DataUnderflow);
+                    }
+
+                    DhcpOption::ClientIdentifier(bytes.remaining())
+                }
                 _ => DhcpOption::Unrecognized(code, bytes.remaining()),
             };
 
@@ -565,7 +596,9 @@ impl<'a> DhcpOption<'a> {
             Self::DomainNameServer(_) => DOMAIN_NAME_SERVER,
             Self::IpAddressLeaseTime(_) => IP_ADDRESS_LEASE_TIME,
             Self::SubnetMask(_) => SUBNET_MASK,
+            Self::MaximumMessageSize(_) => MAXIMUM_DHCP_MESSAGE_SIZE,
             Self::Message(_) => MESSAGE,
+            Self::ClientIdentifier(_) => CLIENT_IDENTIFIER,
             Self::Unrecognized(code, _) => *code,
         }
     }
@@ -587,6 +620,8 @@ impl<'a> DhcpOption<'a> {
             Self::IpAddressLeaseTime(secs) => f(&secs.to_be_bytes()),
             Self::SubnetMask(mask) => f(&mask.octets()),
             Self::Message(msg) => f(msg.as_bytes()),
+            Self::MaximumMessageSize(size) => f(&size.to_be_bytes()),
+            Self::ClientIdentifier(id) => f(id),
             Self::Unrecognized(_, data) => f(data),
         }
     }
@@ -659,3 +694,5 @@ const DHCP_MESSAGE_TYPE: u8 = 53;
 const SERVER_IDENTIFIER: u8 = 54;
 const PARAMETER_REQUEST_LIST: u8 = 55;
 const MESSAGE: u8 = 56;
+const MAXIMUM_DHCP_MESSAGE_SIZE: u8 = 57;
+const CLIENT_IDENTIFIER: u8 = 61;
