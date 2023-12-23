@@ -109,7 +109,7 @@ impl<'a> ServerOptions<'a> {
             MessageType::Offer,
             None,
             Some(yiaddr),
-            None,
+            Some(self.ip),
             Some(request.giaddr),
             opt_buf,
         )
@@ -139,7 +139,7 @@ impl<'a> ServerOptions<'a> {
             MessageType::Ack,
             Some(request.ciaddr),
             Some(yiaddr),
-            None, // Could also be this server's IP address.
+            Some(self.ip),
             Some(request.giaddr),
             opt_buf,
         )
