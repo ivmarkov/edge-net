@@ -135,8 +135,6 @@ impl<'a> ServerOptions<'a> {
         yiaddr: Ipv4Addr,
         opt_buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
-        let siaddr = None;
-
         let reply = self.reply(
             request,
             MessageType::Ack,
