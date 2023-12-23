@@ -139,7 +139,7 @@ impl<'a> ServerOptions<'a> {
 
         let reply = self.reply(
             request,
-            message_type,
+            MessageType::Ack,
             Some(request.ciaddr),
             Some(yiaddr),
             None, // Could also be this server's IP address.
@@ -155,7 +155,7 @@ impl<'a> ServerOptions<'a> {
     fn nak(&self, request: &Packet, opt_buf: &'a mut [DhcpOption<'a>]) -> Packet<'a> {
         let reply = self.reply(
             request,
-            message_type,
+            MessageType::Nak,
             None,
             None,
             None,
