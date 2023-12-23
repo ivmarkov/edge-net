@@ -42,58 +42,62 @@ impl<'a> ServerOptions<'a> {
             }
         });
 
-        if let Some(message_type) = message_type {
-            let server_identifier = request.options.iter().find_map(|option| {
-                if let DhcpOption::ServerIdentifier(ip) = option {
-                    Some(ip)
-                } else {
-                    None
+        let message_type = if let Some(message_type) = message_type {
+            message_type
+        } else {
+            info!("Ignoring DHCP packet, no message type found: {request:?}");
+            return None;
+        };
+
+        let server_identifier = request.options.iter().find_map(|option| {
+            if let DhcpOption::ServerIdentifier(ip) = option {
+                Some(ip)
+            } else {
+                None
+            }
+        });
+
+        if server_identifier == Some(self.ip)
+            || server_identifier.is_none() && matches!(message_type, MessageType::Discover)
+        {
+            info!("Received {message_type} request: {request:?}");
+
+            let request = match message_type {
+                MessageType::Discover => {
+                    let requested_ip = request.options.iter().find_map(|option| {
+                        if let DhcpOption::RequestedIpAddress(ip) = option {
+                            Some(ip)
+                        } else {
+                            None
+                        }
+                    });
+
+                    Some(Action::Discover(requested_ip, &request.chaddr))
                 }
-            });
-
-            if server_identifier == Some(self.ip)
-                || server_identifier.is_none() && matches!(message_type, MessageType::Discover)
-            {
-                info!("Received {message_type} request: {request:?}");
-
-                let request = match message_type {
-                    MessageType::Discover => {
-                        let requested_ip = request.options.iter().find_map(|option| {
+                MessageType::Request => {
+                    let ip = request
+                        .options
+                        .iter()
+                        .find_map(|option| {
                             if let DhcpOption::RequestedIpAddress(ip) = option {
                                 Some(ip)
                             } else {
                                 None
                             }
-                        });
+                        })
+                        .unwrap_or(request.ciaddr);
 
-                        Some(Action::Discover(requested_ip, &request.chaddr))
-                    }
-                    MessageType::Request => {
-                        let ip = request
-                            .options
-                            .iter()
-                            .find_map(|option| {
-                                if let DhcpOption::RequestedIpAddress(ip) = option {
-                                    Some(ip)
-                                } else {
-                                    None
-                                }
-                            })
-                            .unwrap_or(request.ciaddr);
+                    Some(Action::Request(ip, &request.chaddr))
+                }
+                MessageType::Release => Some(Action::Release(request.yiaddr, &request.chaddr)),
+                MessageType::Decline => Some(Action::Decline(request.yiaddr, &request.chaddr)),
+                _ => None,
+            };
 
-                        Some(Action::Request(ip, &request.chaddr))
-                    }
-                    MessageType::Release => Some(Action::Release(request.yiaddr, &request.chaddr)),
-                    MessageType::Decline => Some(Action::Decline(request.yiaddr, &request.chaddr)),
-                    _ => None,
-                };
-
-                return request;
-            } else {
-                info!("Ignoring {message_type} request: {request:?}");
-            }
+            return request;
         }
 
+        info!("Ignoring {message_type} request: {request:?}");
         None
     }
 
