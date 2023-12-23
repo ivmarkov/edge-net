@@ -101,7 +101,7 @@ impl<'a> ServerOptions<'a> {
         yiaddr: Ipv4Addr,
         opt_buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
-        self.reply(
+        let reply = self.reply(
             request,
             MessageType::Offer,
             None,
@@ -109,7 +109,11 @@ impl<'a> ServerOptions<'a> {
             None,
             Some(request.giaddr),
             opt_buf,
-        )
+        );
+
+        info!("DHCPOFFER {reply:?}");
+
+        reply
     }
 
     pub fn ack_nak(
@@ -133,7 +137,7 @@ impl<'a> ServerOptions<'a> {
     ) -> Packet<'a> {
         let siaddr = None;
 
-        self.reply(
+        let reply = self.reply(
             request,
             message_type,
             Some(request.ciaddr),
@@ -141,11 +145,15 @@ impl<'a> ServerOptions<'a> {
             None, // Could also be this server's IP address.
             Some(request.giaddr),
             opt_buf,
-        )
+        );
+
+        info!("DHCPACK {reply:?}");
+
+        reply
     }
 
     fn nak(&self, request: &Packet, opt_buf: &'a mut [DhcpOption<'a>]) -> Packet<'a> {
-        self.reply(
+        let reply = self.reply(
             request,
             message_type,
             None,
@@ -153,7 +161,11 @@ impl<'a> ServerOptions<'a> {
             None,
             Some(request.giaddr),
             opt_buf,
-        )
+        );
+
+        info!("DHCPNAK {reply:?}");
+
+        reply
     }
 
     fn reply(
@@ -166,7 +178,7 @@ impl<'a> ServerOptions<'a> {
         giaddr: Option<Ipv4Addr>,
         buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
-        let reply = request.new_reply(
+        request.new_reply(
             ciaddr,
             yiaddr,
             siaddr,
@@ -180,11 +192,7 @@ impl<'a> ServerOptions<'a> {
                 self.dns,
                 buf,
             ),
-        );
-
-        info!("Reply: {reply:?}");
-
-        reply
+        )
     }
 }
 
