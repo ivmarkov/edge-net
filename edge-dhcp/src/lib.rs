@@ -323,7 +323,7 @@ impl From<&Packet<'_>> for Settings {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Options<'a>(OptionsInner<'a>);
 
 impl<'a> Options<'a> {
@@ -454,6 +454,12 @@ impl<'a> Options<'a> {
 
     pub fn iter(&self) -> impl Iterator<Item = DhcpOption<'a>> + 'a {
         self.0.iter()
+    }
+}
+
+impl fmt::Debug for Options<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_set().entries(self.iter()).finish()
     }
 }
 
