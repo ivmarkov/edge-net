@@ -98,36 +98,59 @@ impl<'a> ServerOptions<'a> {
     pub fn offer(
         &self,
         request: &Packet,
-        ip: Ipv4Addr,
+        yiaddr: Ipv4Addr,
         opt_buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
         self.reply(
             request,
             MessageType::Offer,
             None,
-            Some(ip),
-            Some(request.siaddr),
+            Some(yiaddr),
+            None,
             Some(request.giaddr),
             opt_buf,
         )
     }
 
-    pub fn ack_nack(
+    pub fn ack_nak(
         &self,
         request: &Packet,
-        ip: Option<Ipv4Addr>,
+        yiaddr: Option<Ipv4Addr>,
         opt_buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
+        if let Some(yiaddr) = yiaddr {
+            self.ack(request, yiaddr, opt_buf)
+        } else {
+            self.nak(request, opt_buf)
+        }
+    }
+
+    fn ack(
+        &self,
+        request: &Packet,
+        yiaddr: Ipv4Addr,
+        opt_buf: &'a mut [DhcpOption<'a>],
+    ) -> Packet<'a> {
+        let siaddr = None;
+
         self.reply(
             request,
-            if ip.is_some() {
-                MessageType::Ack
-            } else {
-                MessageType::Nak
-            },
-            ip,
-            ip,
-            Some(request.siaddr),
+            message_type,
+            Some(request.ciaddr),
+            Some(yiaddr),
+            None, // Could also be this server's IP address.
+            Some(request.giaddr),
+            opt_buf,
+        )
+    }
+
+    fn nak(&self, request: &Packet, opt_buf: &'a mut [DhcpOption<'a>]) -> Packet<'a> {
+        self.reply(
+            request,
+            message_type,
+            None,
+            None,
+            None,
             Some(request.giaddr),
             opt_buf,
         )
@@ -202,7 +225,7 @@ impl<const N: usize> Server<N> {
                         ))
                     .then_some(ip);
 
-                    Some(server_options.ack_nack(request, ip, opt_buf))
+                    Some(server_options.ack_nak(request, ip, opt_buf))
                 }
                 Action::Release(_ip, mac) | Action::Decline(_ip, mac) => {
                     self.remove_lease(mac);
