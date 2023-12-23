@@ -1,5 +1,6 @@
 #![no_std]
 
+use core::fmt;
 /// This code is a `no_std` and no-alloc modification of https://github.com/krolaw/dhcp4r
 use core::str::Utf8Error;
 
@@ -78,6 +79,22 @@ pub enum MessageType {
     /// Client to server, asking only for local configuration parameters; client already has
     /// externally configured network address.
     Inform = 8,
+}
+
+impl fmt::Display for MessageType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Discover => "DHCPDISCOVER",
+            Self::Offer => "DHCPOFFER",
+            Self::Request => "DHCPREQUEST",
+            Self::Decline => "DHCPDECLINE",
+            Self::Ack => "DHCPACK",
+            Self::Nak => "DHCPNAK",
+            Self::Release => "DHCPRELEASE",
+            Self::Inform => "DHCPINFORM",
+        }
+        .fmt(f)
+    }
 }
 
 /// DHCP Packet Structure
