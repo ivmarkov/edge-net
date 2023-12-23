@@ -89,6 +89,8 @@ impl<'a> ServerOptions<'a> {
                 };
 
                 return request;
+            } else {
+                info!("Ignoring {message_type} request: {request:?}");
             }
         }
 
