@@ -113,11 +113,16 @@ impl<'a> ServerOptions<'a> {
         ip: Option<Ipv4Addr>,
         opt_buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
-        if let Some(ip) = ip {
-            self.reply(request, MessageType::Ack, Some(ip), opt_buf)
-        } else {
-            self.reply(request, MessageType::Nak, None, opt_buf)
-        }
+        self.reply(
+            request,
+            if ip.is_some() {
+                MessageType::Ack
+            } else {
+                MessageType::Nak
+            },
+            ip,
+            opt_buf,
+        )
     }
 
     fn reply(
