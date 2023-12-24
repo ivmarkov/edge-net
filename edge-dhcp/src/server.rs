@@ -57,43 +57,27 @@ impl<'a> ServerOptions<'a> {
             }
         });
 
-        if !(server_identifier == Some(self.ip)
-            || server_identifier.is_none() && matches!(message_type, MessageType::Discover))
-        {
+        if server_identifier.is_some() && server_identifier != Some(self.ip) {
             info!("Ignoring {message_type} request, not addressed to this server: {request:?}");
             return None;
         }
 
         info!("Received {message_type} request: {request:?}");
         match message_type {
-            MessageType::Discover => {
-                let requested_ip = request.options.iter().find_map(|option| {
-                    if let DhcpOption::RequestedIpAddress(ip) = option {
-                        Some(ip)
-                    } else {
-                        None
-                    }
-                });
-
-                Some(Action::Discover(requested_ip, &request.chaddr))
+            MessageType::Discover => Some(Action::Discover(
+                request.options.requested_ip(),
+                &request.chaddr,
+            )),
+            MessageType::Request => Some(Action::Request(
+                request.options.requested_ip()?,
+                &request.chaddr,
+            )),
+            MessageType::Release if server_identifier == Some(self.ip) => {
+                Some(Action::Release(request.yiaddr, &request.chaddr))
             }
-            MessageType::Request => {
-                let ip = request
-                    .options
-                    .iter()
-                    .find_map(|option| {
-                        if let DhcpOption::RequestedIpAddress(ip) = option {
-                            Some(ip)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(request.ciaddr);
-
-                Some(Action::Request(ip, &request.chaddr))
+            MessageType::Decline if server_identifier == Some(self.ip) => {
+                Some(Action::Decline(request.yiaddr, &request.chaddr))
             }
-            MessageType::Release => Some(Action::Release(request.yiaddr, &request.chaddr)),
-            MessageType::Decline => Some(Action::Decline(request.yiaddr, &request.chaddr)),
             _ => None,
         }
     }

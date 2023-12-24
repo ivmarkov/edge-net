@@ -458,6 +458,16 @@ impl<'a> Options<'a> {
     pub fn iter(&self) -> impl Iterator<Item = DhcpOption<'a>> + 'a {
         self.0.iter()
     }
+
+    pub(crate) fn requested_ip(&self) -> Option<Ipv4Addr> {
+        self.iter().find_map(|option| {
+            if let DhcpOption::RequestedIpAddress(ip) = option {
+                Some(ip)
+            } else {
+                None
+            }
+        })
+    }
 }
 
 impl fmt::Debug for Options<'_> {
