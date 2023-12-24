@@ -2,7 +2,7 @@ use core::fmt::Debug;
 
 use embassy_time::{Duration, Instant};
 
-use log::info;
+use log::{info, warn};
 
 use super::*;
 
@@ -34,77 +34,71 @@ impl<'a> ServerOptions<'a> {
             return None;
         }
 
-        let mt = request.options.iter().find_map(|option| {
-            if let DhcpOption::MessageType(mt) = option {
-                Some(mt)
+        let message_type = request.options.iter().find_map(|option| {
+            if let DhcpOption::MessageType(message_type) = option {
+                Some(message_type)
             } else {
                 None
             }
         });
 
-        if let Some(mt) = mt {
-            let server_identifier = request.options.iter().find_map(|option| {
-                if let DhcpOption::ServerIdentifier(ip) = option {
-                    Some(ip)
-                } else {
-                    None
-                }
-            });
+        let message_type = if let Some(message_type) = message_type {
+            message_type
+        } else {
+            warn!("Ignoring DHCP request, no message type found: {request:?}");
+            return None;
+        };
 
-            if server_identifier == Some(self.ip)
-                || server_identifier.is_none() && matches!(mt, MessageType::Discover)
-            {
-                info!("Request: ({mt:?}) {request:?}");
-
-                let request = match mt {
-                    MessageType::Discover => {
-                        let requested_ip = request.options.iter().find_map(|option| {
-                            if let DhcpOption::RequestedIpAddress(ip) = option {
-                                Some(ip)
-                            } else {
-                                None
-                            }
-                        });
-
-                        Some(Action::Discover(requested_ip, &request.chaddr))
-                    }
-                    MessageType::Request => {
-                        let ip = request
-                            .options
-                            .iter()
-                            .find_map(|option| {
-                                if let DhcpOption::RequestedIpAddress(ip) = option {
-                                    Some(ip)
-                                } else {
-                                    None
-                                }
-                            })
-                            .unwrap_or(request.ciaddr);
-
-                        Some(Action::Request(ip, &request.chaddr))
-                    }
-                    MessageType::Release => Some(Action::Release(request.yiaddr, &request.chaddr)),
-                    MessageType::Decline => Some(Action::Decline(request.yiaddr, &request.chaddr)),
-                    _ => None,
-                };
-
-                return request;
+        let server_identifier = request.options.iter().find_map(|option| {
+            if let DhcpOption::ServerIdentifier(ip) = option {
+                Some(ip)
+            } else {
+                None
             }
+        });
+
+        if server_identifier.is_some() && server_identifier != Some(self.ip) {
+            warn!("Ignoring {message_type} request, not addressed to this server: {request:?}");
+            return None;
         }
 
-        None
+        info!("Received {message_type} request: {request:?}");
+        match message_type {
+            MessageType::Discover => Some(Action::Discover(
+                request.options.requested_ip(),
+                &request.chaddr,
+            )),
+            MessageType::Request => {
+                let requested_ip = request.options.requested_ip().or_else(|| {
+                    if request.ciaddr.is_unspecified() {
+                        None
+                    } else {
+                        Some(request.ciaddr)
+                    }
+                })?;
+
+                Some(Action::Request(requested_ip, &request.chaddr))
+            }
+            MessageType::Release if server_identifier == Some(self.ip) => {
+                Some(Action::Release(request.yiaddr, &request.chaddr))
+            }
+            MessageType::Decline if server_identifier == Some(self.ip) => {
+                Some(Action::Decline(request.yiaddr, &request.chaddr))
+            }
+            _ => None,
+        }
     }
 
     pub fn offer(
         &self,
         request: &Packet,
-        ip: Ipv4Addr,
+        yiaddr: Ipv4Addr,
         opt_buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
-        self.reply(request, MessageType::Offer, Some(ip), opt_buf)
+        self.reply(request, MessageType::Offer, Some(yiaddr), opt_buf)
     }
 
-    pub fn ack_nack(
+    pub fn ack_nak(
         &self,
         request: &Packet,
         ip: Option<Ipv4Addr>,
@@ -125,14 +119,14 @@ impl<'a> ServerOptions<'a> {
     fn reply(
         &self,
         request: &Packet,
-        mt: MessageType,
+        message_type: MessageType,
         ip: Option<Ipv4Addr>,
         buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
         let reply = request.new_reply(
             ip,
             request.options.reply(
-                mt,
+                message_type,
                 self.ip,
                 self.lease_duration.as_secs() as _,
                 self.gateways,
@@ -142,7 +136,7 @@ impl<'a> ServerOptions<'a> {
             ),
         );
 
-        info!("Reply: {reply:?}");
+        info!("Sending {message_type} reply: {reply:?}");
 
         reply
     }
@@ -185,7 +179,7 @@ impl<const N: usize> Server<N> {
                         ))
                     .then_some(ip);
 
-                    Some(server_options.ack_nack(request, ip, opt_buf))
+                    Some(server_options.ack_nak(request, ip, opt_buf))
                 }
                 Action::Release(_ip, mac) | Action::Decline(_ip, mac) => {
                     self.remove_lease(mac);

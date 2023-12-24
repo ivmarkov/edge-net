@@ -63,7 +63,7 @@ members = [
 [workspace.dependencies]
 embassy-futures = { version = "0.1", default-features = false }
 embassy-sync = { version = "0.3", default-features = false }
-embassy-time = { version = "0.1", default-features = false }
+embassy-time = { version = "0.2", default-features = false }
 embedded-io-async = { version = "0.6", default-features = false }
 embedded-nal-async = { version = "0.6", default-features = false }
 embedded-svc = { version = "0.26", default-features = false, features = ["embedded-io-async"] }
