@@ -68,10 +68,17 @@ impl<'a> ServerOptions<'a> {
                 request.options.requested_ip(),
                 &request.chaddr,
             )),
-            MessageType::Request => Some(Action::Request(
-                request.options.requested_ip()?,
-                &request.chaddr,
-            )),
+            MessageType::Request => {
+                let requested_ip = request.options.requested_ip().or_else(|| {
+                    if request.ciaddr.is_unspecified() {
+                        None
+                    } else {
+                        Some(request.ciaddr)
+                    }
+                })?;
+
+                Some(Action::Request(requested_ip, &request.chaddr))
+            }
             MessageType::Release if server_identifier == Some(self.ip) => {
                 Some(Action::Release(request.yiaddr, &request.chaddr))
             }
