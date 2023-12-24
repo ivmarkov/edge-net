@@ -2,7 +2,7 @@ use core::fmt::Debug;
 
 use embassy_time::{Duration, Instant};
 
-use log::info;
+use log::{info, warn};
 
 use super::*;
 
@@ -45,7 +45,7 @@ impl<'a> ServerOptions<'a> {
         let message_type = if let Some(message_type) = message_type {
             message_type
         } else {
-            info!("Ignoring DHCP request, no message type found: {request:?}");
+            warn!("Ignoring DHCP request, no message type found: {request:?}");
             return None;
         };
 
@@ -58,7 +58,7 @@ impl<'a> ServerOptions<'a> {
         });
 
         if server_identifier.is_some() && server_identifier != Some(self.ip) {
-            info!("Ignoring {message_type} request, not addressed to this server: {request:?}");
+            warn!("Ignoring {message_type} request, not addressed to this server: {request:?}");
             return None;
         }
 
