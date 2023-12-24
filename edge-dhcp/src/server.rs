@@ -104,74 +104,31 @@ impl<'a> ServerOptions<'a> {
         yiaddr: Ipv4Addr,
         opt_buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
-        self.reply(
-            request,
-            MessageType::Offer,
-            None,
-            Some(yiaddr),
-            Some(self.ip),
-            Some(request.giaddr),
-            opt_buf,
-        )
+        self.reply(request, MessageType::Offer, Some(yiaddr), opt_buf)
     }
 
     pub fn ack_nak(
         &self,
         request: &Packet,
-        yiaddr: Option<Ipv4Addr>,
+        ip: Option<Ipv4Addr>,
         opt_buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
-        if let Some(yiaddr) = yiaddr {
-            self.ack(request, yiaddr, opt_buf)
+        if let Some(ip) = ip {
+            self.reply(request, MessageType::Ack, Some(ip), opt_buf)
         } else {
-            self.nak(request, opt_buf)
+            self.reply(request, MessageType::Nak, None, opt_buf)
         }
-    }
-
-    fn ack(
-        &self,
-        request: &Packet,
-        yiaddr: Ipv4Addr,
-        opt_buf: &'a mut [DhcpOption<'a>],
-    ) -> Packet<'a> {
-        self.reply(
-            request,
-            MessageType::Ack,
-            Some(request.ciaddr),
-            Some(yiaddr),
-            Some(self.ip),
-            Some(request.giaddr),
-            opt_buf,
-        )
-    }
-
-    fn nak(&self, request: &Packet, opt_buf: &'a mut [DhcpOption<'a>]) -> Packet<'a> {
-        self.reply(
-            request,
-            MessageType::Nak,
-            None,
-            None,
-            None,
-            Some(request.giaddr),
-            opt_buf,
-        )
     }
 
     fn reply(
         &self,
         request: &Packet,
         message_type: MessageType,
-        ciaddr: Option<Ipv4Addr>,
-        yiaddr: Option<Ipv4Addr>,
-        siaddr: Option<Ipv4Addr>,
-        giaddr: Option<Ipv4Addr>,
+        ip: Option<Ipv4Addr>,
         buf: &'a mut [DhcpOption<'a>],
     ) -> Packet<'a> {
         let reply = request.new_reply(
-            ciaddr,
-            yiaddr,
-            siaddr,
-            giaddr,
+            ip,
             request.options.reply(
                 message_type,
                 self.ip,

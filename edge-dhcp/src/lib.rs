@@ -149,24 +149,27 @@ impl<'a> Packet<'a> {
         }
     }
 
-    pub fn new_reply<'b>(
-        &self,
-        ciaddr: Option<Ipv4Addr>,
-        yiaddr: Option<Ipv4Addr>,
-        siaddr: Option<Ipv4Addr>,
-        giaddr: Option<Ipv4Addr>,
-        options: Options<'b>,
-    ) -> Packet<'b> {
+    pub fn new_reply<'b>(&self, ip: Option<Ipv4Addr>, options: Options<'b>) -> Packet<'b> {
+        let mut ciaddr = Ipv4Addr::UNSPECIFIED;
+        if ip.is_some() {
+            for opt in self.options.iter() {
+                if matches!(opt, DhcpOption::MessageType(MessageType::Request)) {
+                    ciaddr = self.ciaddr;
+                    break;
+                }
+            }
+        }
+
         Packet {
             reply: true,
             hops: 0,
             xid: self.xid,
             secs: 0,
             broadcast: self.broadcast,
-            ciaddr: ciaddr.unwrap_or(Ipv4Addr::UNSPECIFIED),
-            yiaddr: yiaddr.unwrap_or(Ipv4Addr::UNSPECIFIED),
-            siaddr: siaddr.unwrap_or(Ipv4Addr::UNSPECIFIED),
-            giaddr: giaddr.unwrap_or(Ipv4Addr::UNSPECIFIED),
+            ciaddr,
+            yiaddr: ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
+            siaddr: Ipv4Addr::UNSPECIFIED,
+            giaddr: self.giaddr,
             chaddr: self.chaddr,
             options,
         }
