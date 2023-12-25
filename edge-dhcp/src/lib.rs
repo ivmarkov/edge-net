@@ -129,6 +129,7 @@ impl<'a> Packet<'a> {
         xid: u32,
         secs: u16,
         our_ip: Option<Ipv4Addr>,
+        broadcast: bool,
         options: Options<'a>,
     ) -> Self {
         let mut chaddr = [0; 16];
@@ -139,7 +140,7 @@ impl<'a> Packet<'a> {
             hops: 0,
             xid,
             secs,
-            broadcast: our_ip.is_none(),
+            broadcast,
             ciaddr: our_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
             yiaddr: our_ip.unwrap_or(Ipv4Addr::UNSPECIFIED),
             siaddr: Ipv4Addr::UNSPECIFIED,

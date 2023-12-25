@@ -16,13 +16,17 @@ impl<T> Client<T>
 where
     T: RngCore,
 {
+    pub const fn new(rng: T, mac: [u8; 6]) -> Self {
+        Self { rng, mac }
+    }
+    
     pub fn discover<'o>(
         &mut self,
         opt_buf: &'o mut [DhcpOption<'o>],
         secs: u16,
         ip: Option<Ipv4Addr>,
     ) -> (Packet<'o>, u32) {
-        self.bootp_request(secs, None, Options::discover(ip, opt_buf))
+        self.bootp_request(secs, None, true, Options::discover(ip, opt_buf))
     }
 
     pub fn request<'o>(
@@ -30,8 +34,9 @@ where
         opt_buf: &'o mut [DhcpOption<'o>],
         secs: u16,
         ip: Ipv4Addr,
+        broadcast: bool,
     ) -> (Packet<'o>, u32) {
-        self.bootp_request(secs, None, Options::request(ip, opt_buf))
+        self.bootp_request(secs, None, broadcast, Options::request(ip, opt_buf))
     }
 
     pub fn release<'o>(
@@ -40,7 +45,7 @@ where
         secs: u16,
         ip: Ipv4Addr,
     ) -> Packet<'o> {
-        self.bootp_request(secs, Some(ip), Options::release(opt_buf))
+        self.bootp_request(secs, Some(ip), false, Options::release(opt_buf))
             .0
     }
 
@@ -50,7 +55,7 @@ where
         secs: u16,
         ip: Ipv4Addr,
     ) -> Packet<'o> {
-        self.bootp_request(secs, Some(ip), Options::decline(opt_buf))
+        self.bootp_request(secs, Some(ip), false, Options::decline(opt_buf))
             .0
     }
 
@@ -71,11 +76,12 @@ where
         &mut self,
         secs: u16,
         ip: Option<Ipv4Addr>,
+        broadcast: bool,
         options: Options<'o>,
     ) -> (Packet<'o>, u32) {
         let xid = self.rng.next_u32();
 
-        (Packet::new_request(self.mac, xid, secs, ip, options), xid)
+        (Packet::new_request(self.mac, xid, secs, ip, broadcast, options), xid)
     }
 
     pub fn is_bootp_reply_for_us(
