@@ -19,7 +19,7 @@ where
     pub const fn new(rng: T, mac: [u8; 6]) -> Self {
         Self { rng, mac }
     }
-    
+
     pub fn discover<'o>(
         &mut self,
         opt_buf: &'o mut [DhcpOption<'o>],
@@ -81,7 +81,10 @@ where
     ) -> (Packet<'o>, u32) {
         let xid = self.rng.next_u32();
 
-        (Packet::new_request(self.mac, xid, secs, ip, broadcast, options), xid)
+        (
+            Packet::new_request(self.mac, xid, secs, ip, broadcast, options),
+            xid,
+        )
     }
 
     pub fn is_bootp_reply_for_us(

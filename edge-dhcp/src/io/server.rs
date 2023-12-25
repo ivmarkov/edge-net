@@ -15,14 +15,14 @@ pub use super::*;
 ///
 /// Dropping this future is safe in that it won't remove the internal leases' database,
 /// so users are free to drop the future in case they would like to take a snapshot of the leases or inspect them otherwise.
-/// 
+///
 /// Note that the UDP socket that the server takes need to be capable of sending and receiving broadcast UDP packets.
-/// 
+///
 /// Furthermore, some DHCP clients do send DHCP OFFER packets without the broadcast flag in the DHCP payload being set to true.
-/// To support these clients, the socket needs to also be capable of sending packets with a broadcast IP destination address 
+/// To support these clients, the socket needs to also be capable of sending packets with a broadcast IP destination address
 /// - yet - with the destination *MAC* address in the Ethernet frame set to the MAC address of the DHCP client.
-/// 
-/// Such UDP sockets implement the `UnconnectedUdpWithMac` trait and are essentially based on the raw socket functionality, 
+///
+/// Such UDP sockets implement the `UnconnectedUdpWithMac` trait and are essentially based on the raw socket functionality,
 /// as available on most operating systems.
 pub async fn run<T, const N: usize>(
     server: &mut dhcp::server::Server<N>,
@@ -33,7 +33,10 @@ pub async fn run<T, const N: usize>(
 where
     T: UnconnectedUdp + UnconnectedUdpWithMac,
 {
-    info!("Running DHCP server for addresses {}-{} with configuration {server_options:?}", server.range_start, server.range_end);
+    info!(
+        "Running DHCP server for addresses {}-{} with configuration {server_options:?}",
+        server.range_start, server.range_end
+    );
 
     loop {
         let (len, local, remote) = UnconnectedUdp::receive_into(socket, buf)

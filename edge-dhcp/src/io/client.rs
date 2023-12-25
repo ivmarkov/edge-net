@@ -24,8 +24,8 @@ pub struct NetworkInfo {
 }
 
 /// Represents a DHCP IP lease.
-/// 
-/// This structure has a set of asynchronous methods that can utilize a supplied DHCP client instance and UDP socket to 
+///
+/// This structure has a set of asynchronous methods that can utilize a supplied DHCP client instance and UDP socket to
 /// transparently implement all aspects of negotiating an IP with the DHCP server and then keeping the lease of that IP up to date.
 #[derive(Debug, Clone)]
 pub struct Lease {
@@ -38,10 +38,14 @@ pub struct Lease {
 impl Lease {
     /// Creates a new DHCP lease by discovering a DHCP server and requesting an IP from it.
     /// This is done by utilizing the supplied DHCP client instance and UDP socket.
-    /// 
+    ///
     /// Note that the supplied UDP socket should be capable of sending and receiving broadcast UDP packets.
-    pub async fn new<T, S>(client: &mut dhcp::client::Client<T>, socket: &mut S, buf: &mut [u8]) -> Result<(Self, NetworkInfo), Error<S::Error>>
-    where 
+    pub async fn new<T, S>(
+        client: &mut dhcp::client::Client<T>,
+        socket: &mut S,
+        buf: &mut [u8],
+    ) -> Result<(Self, NetworkInfo), Error<S::Error>>
+    where
         T: RngCore,
         S: UnconnectedUdp,
     {
@@ -50,25 +54,44 @@ impl Lease {
 
             let now = Instant::now();
 
-            if let Some(settings) = Self::request(client, socket, buf, offer.server_ip.unwrap(), offer.ip, true, Duration::from_secs(3), 3).await? {
-                break Ok((Self {
-                    ip: settings.ip,
-                    server_ip: settings.server_ip.unwrap(),
-                    duration: Duration::from_secs(settings.lease_time_secs.unwrap_or(7200) as _),
-                    acquired: now,
-                }, NetworkInfo {
-                    gateway: settings.gateway,
-                    subnet: settings.subnet,
-                    dns1: settings.dns1,
-                    dns2: settings.dns2,
-                }));
+            if let Some(settings) = Self::request(
+                client,
+                socket,
+                buf,
+                offer.server_ip.unwrap(),
+                offer.ip,
+                true,
+                Duration::from_secs(3),
+                3,
+            )
+            .await?
+            {
+                break Ok((
+                    Self {
+                        ip: settings.ip,
+                        server_ip: settings.server_ip.unwrap(),
+                        duration: Duration::from_secs(settings.lease_time_secs.unwrap_or(7200) as _),
+                        acquired: now,
+                    },
+                    NetworkInfo {
+                        gateway: settings.gateway,
+                        subnet: settings.subnet,
+                        dns1: settings.dns1,
+                        dns2: settings.dns2,
+                    },
+                ));
             }
         }
     }
 
     /// Keeps the DHCP lease up to date by renewing it when necessary using the supplied DHCP client instance and UDP socket.
-    pub async fn keep<T, S>(&mut self, client: &mut dhcp::client::Client<T>, socket: &mut S, buf: &mut [u8]) -> Result<(), Error<S::Error>>
-    where 
+    pub async fn keep<T, S>(
+        &mut self,
+        client: &mut dhcp::client::Client<T>,
+        socket: &mut S,
+        buf: &mut [u8],
+    ) -> Result<(), Error<S::Error>>
+    where
         T: RngCore,
         S: UnconnectedUdp,
     {
@@ -89,18 +112,36 @@ impl Lease {
     }
 
     /// Renews the DHCP lease by utilizing the supplied DHCP client instance and UDP socket.
-    pub async fn renew<T, S>(&mut self, client: &mut dhcp::client::Client<T>, socket: &mut S, buf: &mut [u8]) -> Result<bool, Error<S::Error>>
-    where 
+    pub async fn renew<T, S>(
+        &mut self,
+        client: &mut dhcp::client::Client<T>,
+        socket: &mut S,
+        buf: &mut [u8],
+    ) -> Result<bool, Error<S::Error>>
+    where
         T: RngCore,
         S: UnconnectedUdp,
     {
         info!("Renewing DHCP lease...");
 
         let now = Instant::now();
-        let settings = Self::request(client, socket, buf, self.server_ip, self.ip, false, Duration::from_secs(3), 3).await?;
+        let settings = Self::request(
+            client,
+            socket,
+            buf,
+            self.server_ip,
+            self.ip,
+            false,
+            Duration::from_secs(3),
+            3,
+        )
+        .await?;
 
         if let Some(settings) = settings.as_ref() {
-            self.duration = settings.lease_time_secs.map(|lt| Duration::from_secs(lt as _)).unwrap_or(self.duration);
+            self.duration = settings
+                .lease_time_secs
+                .map(|lt| Duration::from_secs(lt as _))
+                .unwrap_or(self.duration);
             self.acquired = now;
         }
 
@@ -108,8 +149,13 @@ impl Lease {
     }
 
     /// Releases the DHCP lease by utilizing the supplied DHCP client instance and UDP socket.
-    pub async fn release<T, S>(self, client: &mut dhcp::client::Client<T>, socket: &mut S, buf: &mut [u8]) -> Result<(), Error<S::Error>>
-    where 
+    pub async fn release<T, S>(
+        self,
+        client: &mut dhcp::client::Client<T>,
+        socket: &mut S,
+        buf: &mut [u8],
+    ) -> Result<(), Error<S::Error>>
+    where
         T: RngCore,
         S: UnconnectedUdp,
     {
@@ -120,7 +166,8 @@ impl Lease {
             .send(
                 SocketAddr::V4(SocketAddrV4::new(self.ip, DEFAULT_CLIENT_PORT)),
                 SocketAddr::V4(SocketAddrV4::new(self.server_ip, DEFAULT_SERVER_PORT)),
-                request.encode(buf)?)
+                request.encode(buf)?,
+            )
             .await
             .map_err(Error::Io)?;
 
@@ -132,8 +179,8 @@ impl Lease {
         socket: &mut S,
         buf: &mut [u8],
         timeout: Duration,
-    ) -> Result<Settings, Error<S::Error>> 
-    where 
+    ) -> Result<Settings, Error<S::Error>>
+    where
         T: RngCore,
         S: UnconnectedUdp,
     {
@@ -145,19 +192,23 @@ impl Lease {
             let mut opt_buf = Options::buf();
 
             let (request, xid) =
-                client
-                    .discover(&mut opt_buf, (Instant::now() - start).as_secs() as _, None);
+                client.discover(&mut opt_buf, (Instant::now() - start).as_secs() as _, None);
 
             socket
                 .send(
-                    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_CLIENT_PORT)),
+                    SocketAddr::V4(SocketAddrV4::new(
+                        Ipv4Addr::UNSPECIFIED,
+                        DEFAULT_CLIENT_PORT,
+                    )),
                     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, DEFAULT_SERVER_PORT)),
                     request.encode(buf)?,
                 )
                 .await
                 .map_err(Error::Io)?;
 
-            if let Either::First(result) = select(socket.receive_into(buf), Timer::after(timeout)).await {
+            if let Either::First(result) =
+                select(socket.receive_into(buf), Timer::after(timeout)).await
+            {
                 let (len, _local, _remote) = result.map_err(Error::Io)?;
                 let reply = Packet::decode(&buf[..len])?;
 
@@ -187,8 +238,8 @@ impl Lease {
         broadcast: bool,
         timeout: Duration,
         retries: usize,
-    ) -> Result<Option<Settings>, Error<S::Error>> 
-    where 
+    ) -> Result<Option<Settings>, Error<S::Error>>
+    where
         T: RngCore,
         S: UnconnectedUdp,
     {
@@ -199,20 +250,35 @@ impl Lease {
 
             let mut opt_buf = Options::buf();
 
-            let (request, xid) =
-                client
-                    .request(&mut opt_buf, (Instant::now() - start).as_secs() as _, ip, broadcast);
+            let (request, xid) = client.request(
+                &mut opt_buf,
+                (Instant::now() - start).as_secs() as _,
+                ip,
+                broadcast,
+            );
 
             socket
                 .send(
-                    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_CLIENT_PORT)),
-                    SocketAddr::V4(SocketAddrV4::new(if broadcast { Ipv4Addr::BROADCAST } else { server_ip }, DEFAULT_SERVER_PORT)),
+                    SocketAddr::V4(SocketAddrV4::new(
+                        Ipv4Addr::UNSPECIFIED,
+                        DEFAULT_CLIENT_PORT,
+                    )),
+                    SocketAddr::V4(SocketAddrV4::new(
+                        if broadcast {
+                            Ipv4Addr::BROADCAST
+                        } else {
+                            server_ip
+                        },
+                        DEFAULT_SERVER_PORT,
+                    )),
                     request.encode(buf)?,
                 )
                 .await
                 .map_err(Error::Io)?;
 
-            if let Either::First(result) = select(socket.receive_into(buf), Timer::after(timeout)).await {
+            if let Either::First(result) =
+                select(socket.receive_into(buf), Timer::after(timeout)).await
+            {
                 let (len, _local, _remote) = result.map_err(Error::Io)?;
                 let packet = &buf[..len];
 
