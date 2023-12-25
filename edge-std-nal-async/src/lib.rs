@@ -5,7 +5,7 @@
 #![cfg_attr(feature = "nightly", feature(impl_trait_projections))]
 #![cfg(all(feature = "nightly", feature = "std"))]
 
-use std::io;
+use std::io::{self, ErrorKind};
 use std::net::{self, TcpStream, ToSocketAddrs, UdpSocket};
 use std::os::fd::{AsFd, AsRawFd};
 
@@ -297,16 +297,21 @@ pub struct StdRawSocket(Async<std::net::UdpSocket>, u32);
 impl RawSocket for StdRawSocket {
     type Error = io::Error;
 
-    async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error> {
-        let sockaddr = libc::sockaddr_ll {
+    async fn send(&mut self, mac: Option<&[u8; 6]>, data: &[u8]) -> Result<(), Self::Error> {
+        let mut sockaddr = libc::sockaddr_ll {
             sll_family: libc::AF_PACKET as _,
             sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
             sll_ifindex: self.1 as _,
             sll_hatype: 0,
             sll_pkttype: 0,
-            sll_halen: 6,
-            sll_addr: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0], // TODO
+            sll_halen: 0,
+            sll_addr: Default::default(),
         };
+
+        if let Some(mac) = mac {
+            sockaddr.sll_halen = mac.len() as _;
+            sockaddr.sll_addr[..mac.len()].copy_from_slice(mac);
+        }
 
         let len = self
             .0
@@ -332,18 +337,41 @@ impl RawSocket for StdRawSocket {
         Ok(())
     }
 
-    async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-        self.0.recv(buffer).await
+    async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<(usize, [u8; 6]), Self::Error> {
+        self.0
+            .read_with(|io| {
+                let mut storage: libc::sockaddr_storage = unsafe { core::mem::zeroed() };
+                let mut addrlen = core::mem::size_of_val(&storage) as libc::socklen_t;
+
+                let ret = cvti(unsafe {
+                    libc::recvfrom(
+                        io.as_fd().as_raw_fd(),
+                        buffer.as_mut_ptr() as *mut _,
+                        buffer.len(),
+                        0,
+                        &mut storage as *mut _ as *mut _,
+                        &mut addrlen,
+                    )
+                })?;
+
+                let sockaddr = as_sockaddr_ll(&storage, addrlen as usize)?;
+
+                let mut mac = [0; 6];
+                mac.copy_from_slice(&sockaddr.sll_addr[..6]);
+
+                Ok((ret as usize, mac))
+            })
+            .await
     }
 }
 
 #[cfg(unix)]
-pub struct StdRawStack(());
+pub struct StdRawStack(u32);
 
 #[cfg(unix)]
 impl StdRawStack {
-    pub const fn new() -> Self {
-        Self(())
+    pub const fn new(interface: u32) -> Self {
+        Self(interface)
     }
 }
 
@@ -353,9 +381,7 @@ impl RawStack for StdRawStack {
 
     type Socket = StdRawSocket;
 
-    type Interface = u32;
-
-    async fn bind(&self, interface: &Self::Interface) -> Result<Self::Socket, Self::Error> {
+    async fn bind(&self) -> Result<Self::Socket, Self::Error> {
         let socket = cvt(unsafe {
             libc::socket(
                 libc::PF_PACKET,
@@ -367,7 +393,7 @@ impl RawStack for StdRawStack {
         let sockaddr = libc::sockaddr_ll {
             sll_family: libc::AF_PACKET as _,
             sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
-            sll_ifindex: *interface as _,
+            sll_ifindex: self.0 as _,
             sll_hatype: 0,
             sll_pkttype: 0,
             sll_halen: 0,
@@ -393,7 +419,19 @@ impl RawStack for StdRawStack {
             unsafe { std::net::UdpSocket::from_raw_fd(socket) }
         };
 
-        Ok(StdRawSocket(Async::new(socket)?, *interface as _))
+        socket.set_broadcast(true)?;
+
+        Ok(StdRawSocket(Async::new(socket)?, self.0 as _))
+    }
+}
+
+fn as_sockaddr_ll(storage: &libc::sockaddr_storage, len: usize) -> io::Result<&libc::sockaddr_ll> {
+    match storage.ss_family as core::ffi::c_int {
+        libc::AF_PACKET => {
+            assert!(len as usize >= core::mem::size_of::<libc::sockaddr_ll>());
+            Ok(unsafe { (storage as *const _ as *const libc::sockaddr_ll).as_ref() }.unwrap())
+        }
+        _ => Err(io::Error::new(ErrorKind::InvalidInput, "invalid argument")),
     }
 }
 
