@@ -1,8 +1,8 @@
 pub trait RawSocket {
     type Error: embedded_io_async::Error;
 
-    async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error>;
-    async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error>;
+    async fn send(&mut self, mac: Option<&[u8; 6]>, data: &[u8]) -> Result<(), Self::Error>;
+    async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<(usize, [u8; 6]), Self::Error>;
 }
 
 impl<T> RawSocket for &mut T
@@ -11,11 +11,11 @@ where
 {
     type Error = T::Error;
 
-    async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error> {
-        (**self).send(data).await
+    async fn send(&mut self, mac: Option<&[u8; 6]>, data: &[u8]) -> Result<(), Self::Error> {
+        (**self).send(mac, data).await
     }
 
-    async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+    async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<(usize, [u8; 6]), Self::Error> {
         (**self).receive_into(buffer).await
     }
 }
@@ -25,9 +25,7 @@ pub trait RawStack {
 
     type Socket: RawSocket<Error = Self::Error>;
 
-    type Interface;
-
-    async fn bind(&self, interface: &Self::Interface) -> Result<Self::Socket, Self::Error>;
+    async fn bind(&self) -> Result<Self::Socket, Self::Error>;
 }
 
 impl<T> RawStack for &T
@@ -38,10 +36,8 @@ where
 
     type Socket = T::Socket;
 
-    type Interface = T::Interface;
-
-    async fn bind(&self, interface: &Self::Interface) -> Result<Self::Socket, Self::Error> {
-        (*self).bind(interface).await
+    async fn bind(&self) -> Result<Self::Socket, Self::Error> {
+        (*self).bind().await
     }
 }
 
@@ -53,9 +49,7 @@ where
 
     type Socket = T::Socket;
 
-    type Interface = T::Interface;
-
-    async fn bind(&self, interface: &Self::Interface) -> Result<Self::Socket, Self::Error> {
-        (**self).bind(interface).await
+    async fn bind(&self) -> Result<Self::Socket, Self::Error> {
+        (**self).bind().await
     }
 }
