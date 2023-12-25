@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = ["nightly"]
-nightly = ["embassy-futures", "embedded-nal-async"]
+nightly = ["embassy-futures", "embedded-nal-async", "embedded-nal-async-xtra"]
 
 [dependencies]
 no-std-net = { workspace = true }
@@ -15,5 +15,6 @@ rand_core = "0.6"
 embassy-futures = { workspace = true, optional = true }
 embassy-time = { workspace = true, default-features = false } # TODO: Make optional
 embedded-nal-async = { workspace = true, optional = true }
+embedded-nal-async-xtra = { workspace = true, optional = true }
 num_enum = { version = "0.7", default-features = false }
 edge-raw = { workspace = true, default-features = false }
