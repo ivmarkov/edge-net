@@ -229,6 +229,7 @@ impl Lease {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn request<T, S>(
         client: &mut dhcp::client::Client<T>,
         socket: &mut S,
