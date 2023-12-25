@@ -20,15 +20,33 @@ pub enum Action<'a> {
     Decline(Ipv4Addr, &'a [u8; 16]),
 }
 
+#[derive(Clone, Debug)]
 pub struct ServerOptions<'a> {
     pub ip: Ipv4Addr,
     pub gateways: &'a [Ipv4Addr],
     pub subnet: Option<Ipv4Addr>,
     pub dns: &'a [Ipv4Addr],
-    pub lease_duration: Duration,
+    pub lease_duration_secs: u32,
 }
 
 impl<'a> ServerOptions<'a> {
+    pub fn new(ip: Ipv4Addr, gw_buf: Option<&'a mut [Ipv4Addr; 1]>) -> Self {
+        let gateways = if let Some(gw_buf) = gw_buf {
+            gw_buf[0] = ip;
+            gw_buf.as_slice()
+        } else {
+            &[]
+        };
+
+        Self {
+            ip,
+            gateways,
+            subnet: Some(Ipv4Addr::new(255, 255, 255, 0)),
+            dns: &[],
+            lease_duration_secs: 7200,
+        }
+    }
+
     pub fn process<'o>(&self, request: &'o Packet<'o>) -> Option<Action<'o>> {
         if request.reply {
             return None;
@@ -128,7 +146,7 @@ impl<'a> ServerOptions<'a> {
             request.options.reply(
                 message_type,
                 self.ip,
-                self.lease_duration.as_secs() as _,
+                self.lease_duration_secs as _,
                 self.gateways,
                 self.subnet,
                 self.dns,
@@ -153,6 +171,16 @@ pub struct Server<const N: usize> {
 }
 
 impl<const N: usize> Server<N> {
+    pub const fn new(ip: Ipv4Addr) -> Self {
+        let octets = ip.octets();
+
+        Self {
+            range_start: Ipv4Addr::new(octets[0], octets[1], octets[2], 50),
+            range_end: Ipv4Addr::new(octets[0], octets[1], octets[2], 200),
+            leases: heapless::LinearMap::new(),
+        }
+    }
+
     pub fn handle_request<'o>(
         &mut self,
         opt_buf: &'o mut [DhcpOption<'o>],
@@ -175,7 +203,8 @@ impl<const N: usize> Server<N> {
                         && self.add_lease(
                             ip,
                             request.chaddr,
-                            Instant::now() + server_options.lease_duration,
+                            Instant::now()
+                                + Duration::from_secs(server_options.lease_duration_secs as _),
                         ))
                     .then_some(ip);
 
