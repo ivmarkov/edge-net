@@ -11,12 +11,12 @@ Suitable for MCU development, bare-metal in particular.
 Working:
 * WS client
 * MQTT client (just a slim wrapper around `rumqttc`, so currently needs STD)
+* DHCP
 * DNS Captive Portal
 * MDNS responder
 
 Needs bugfixing:
 * HTTP / WS server
 * HTTP client
-* DHCP
 
 PRs welcome!
