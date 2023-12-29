@@ -8,9 +8,13 @@ use log::debug;
 use domain::{
     base::{
         iana::{Class, Opcode, Rcode},
-        octets::*,
+        message::ShortMessage,
+        message_builder::PushError,
+        record::Ttl,
+        wire::ParseError,
         Record, Rtype,
     },
+    dep::octseq::ShortBuf,
     rdata::A,
 };
 
@@ -22,14 +26,18 @@ pub struct InnerError<T: fmt::Debug + fmt::Display>(T);
 #[derive(Debug)]
 pub enum DnsError {
     ShortBuf(InnerError<ShortBuf>),
+    ShortMessage(InnerError<ShortMessage>),
     ParseError(InnerError<ParseError>),
+    PushError(InnerError<PushError>),
 }
 
 impl fmt::Display for DnsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DnsError::ShortBuf(e) => e.0.fmt(f),
+            DnsError::ShortMessage(e) => e.0.fmt(f),
             DnsError::ParseError(e) => e.0.fmt(f),
+            DnsError::PushError(e) => e.0.fmt(f),
         }
     }
 }
@@ -40,9 +48,21 @@ impl From<ShortBuf> for DnsError {
     }
 }
 
+impl From<ShortMessage> for DnsError {
+    fn from(e: ShortMessage) -> Self {
+        Self::ShortMessage(InnerError(e))
+    }
+}
+
 impl From<ParseError> for DnsError {
     fn from(e: ParseError) -> Self {
         Self::ParseError(InnerError(e))
+    }
+}
+
+impl From<PushError> for DnsError {
+    fn from(e: PushError) -> Self {
+        Self::PushError(InnerError(e))
     }
 }
 
@@ -54,7 +74,7 @@ pub fn process_dns_request(
     ip: &[u8; 4],
     ttl: Duration,
 ) -> Result<impl AsRef<[u8]>, DnsError> {
-    let response = Octets512::new();
+    let response = heapless::Vec::<u8, 512>::new();
 
     let message = domain::base::Message::from_octets(request)?;
     debug!("Processing message with header: {:?}", message.header());
@@ -69,16 +89,18 @@ pub fn process_dns_request(
         for question in message.question() {
             let question = question?;
 
-            if matches!(question.qtype(), Rtype::A) {
-                debug!(
+            if matches!(question.qtype(), Rtype::A) && matches!(question.qclass(), Class::In) {
+                log::info!(
                     "Question {:?} is of type A, answering with IP {:?}, TTL {:?}",
-                    question, ip, ttl
+                    question,
+                    ip,
+                    ttl
                 );
 
                 let record = Record::new(
                     question.qname(),
                     Class::In,
-                    ttl.as_secs() as u32,
+                    Ttl::from_duration_lossy(ttl),
                     A::from_octets(ip[0], ip[1], ip[2], ip[3]),
                 );
                 debug!("Answering question {:?} with {:?}", question, record);

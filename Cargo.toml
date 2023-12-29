@@ -53,7 +53,7 @@ members = [
     "edge-dhcp",
     "edge-http",
     "edge-mdns",
-    "edge-mqtt", 
+    "edge-mqtt",
     "edge-raw",
     "edge-ws",
     "edge-std-nal-async",
