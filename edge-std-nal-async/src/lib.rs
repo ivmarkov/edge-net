@@ -1,9 +1,4 @@
-#![allow(stable_features)]
-#![allow(unknown_lints)]
 #![allow(async_fn_in_trait)]
-#![cfg_attr(feature = "nightly", feature(async_fn_in_trait))]
-#![cfg_attr(feature = "nightly", feature(impl_trait_projections))]
-#![cfg(all(feature = "nightly", feature = "std"))]
 
 use std::io::{self, ErrorKind};
 use std::net::{self, TcpStream, ToSocketAddrs, UdpSocket};
@@ -32,12 +27,12 @@ impl StdTcpConnect {
 impl TcpConnect for StdTcpConnect {
     type Error = io::Error;
 
-    type Connection<'m> = StdTcpConnection where Self: 'm;
+    type Connection<'a> = StdTcpConnection where Self: 'a;
 
-    async fn connect<'m>(&'m self, remote: SocketAddr) -> Result<Self::Connection<'m>, Self::Error>
-    where
-        Self: 'm,
-    {
+    async fn connect<'a>(
+        &'a self,
+        remote: SocketAddr,
+    ) -> Result<Self::Connection<'a>, Self::Error> {
         let connection = Async::<TcpStream>::connect(to_std_addr(remote)).await?;
 
         Ok(StdTcpConnection(connection))
@@ -270,7 +265,8 @@ impl Dns for StdDns {
     async fn get_host_by_address(
         &self,
         _addr: IpAddr,
-    ) -> Result<heapless::String<256>, Self::Error> {
+        _result: &mut [u8],
+    ) -> Result<usize, Self::Error> {
         Err(io::ErrorKind::Unsupported.into())
     }
 }

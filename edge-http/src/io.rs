@@ -94,7 +94,7 @@ pub async fn send_status<W>(
 where
     W: Write,
 {
-    let status_str = status.map(heapless::String::<5>::from);
+    let status_str: Option<heapless::String<5>> = status.map(|status| status.try_into().unwrap());
 
     send_status_line(
         false,

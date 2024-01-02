@@ -13,7 +13,7 @@ use edge_raw::bytes::{self, BytesIn, BytesOut};
 pub mod client;
 pub mod server;
 
-#[cfg(feature = "nightly")]
+#[cfg(feature = "io")]
 pub mod io;
 
 #[derive(Debug)]

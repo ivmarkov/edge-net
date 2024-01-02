@@ -1,17 +1,12 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-#![allow(stable_features)]
-#![allow(unknown_lints)]
-#![cfg_attr(feature = "nightly", feature(async_fn_in_trait))]
-#![cfg_attr(feature = "nightly", allow(async_fn_in_trait))]
-#![cfg_attr(feature = "nightly", feature(impl_trait_projections))]
-#![cfg_attr(feature = "nightly", feature(impl_trait_in_assoc_type))]
+#![allow(async_fn_in_trait)]
 
 use core::fmt::Display;
 use core::str;
 
 use httparse::{Header, EMPTY_HEADER};
 
-#[cfg(feature = "nightly")]
+#[cfg(feature = "io")]
 pub mod io;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -281,7 +276,7 @@ impl<'b, const N: usize> Headers<'b, N> {
         content_len: u64,
         buf: &'b mut heapless::String<20>,
     ) -> &mut Self {
-        *buf = heapless::String::<20>::from(content_len);
+        *buf = content_len.try_into().unwrap();
 
         self.set("Content-Length", buf.as_str())
     }

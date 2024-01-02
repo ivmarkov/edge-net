@@ -2,16 +2,13 @@
 name = "edge-std-nal-async"
 version = "0.1.0"
 edition = "2021"
-
-[features]
-std = ["async-io", "futures-lite", "libc"]
-nightly = ["embedded-nal-async-xtra/nightly", "embedded-io-async", "embedded-nal-async", "embedded-nal-async-xtra"]
+rust-version = "1.75"
 
 [dependencies]
-embedded-io-async = { workspace = true, features = ["std"], optional = true }
-embedded-nal-async = { workspace = true, optional = true }
-embedded-nal-async-xtra = { workspace = true, optional = true }
-async-io = { version = "2", optional = true }
-futures-lite = { version = "1", optional = true }
-libc = { version = "0.2", optional = true }
+embedded-io-async = { workspace = true, features = ["std"] }
+embedded-nal-async = { workspace = true }
+embedded-nal-async-xtra = { workspace = true }
+async-io = "2"
+futures-lite = "1"
+libc = "0.2"
 heapless = { workspace = true }

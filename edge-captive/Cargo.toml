@@ -2,11 +2,14 @@
 name = "edge-captive"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
 
 [features]
+default = ["io"]
+io = [] # TODO
 std = ["domain/std"]
 
 [dependencies]
 log = { workspace = true }
 domain = { version = "0.9.3", default-features = false, features = ["heapless"] }
-heapless = { workspace = true }
+heapless07 = { package = "heapless", version = "0.7" }

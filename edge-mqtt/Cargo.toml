@@ -2,13 +2,9 @@
 name = "edge-mqtt"
 version = "0.1.0"
 edition = "2021"
-
-[features]
-default = ["std"]
-std = ["embedded-svc?/std", "rumqttc"]
-nightly = ["embedded-svc?/nightly"]
+rust-version = "1.75"
 
 [dependencies]
-rumqttc = { version = "0.19", optional = true }
+rumqttc = "0.19"
 log = { workspace = true }
-embedded-svc = { workspace = true, optional = true, default-features = false }
+embedded-svc = { workspace = true, optional = true, default-features = false, features = ["std"] }

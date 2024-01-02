@@ -2,10 +2,12 @@
 name = "edge-http"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
 
 [features]
+default = ["io"]
 std = []
-nightly = ["embedded-io-async", "embedded-nal-async", "embedded-nal-async-xtra/nightly", "embassy-sync", "embassy-futures", "embedded-svc?/nightly"]
+io = ["embedded-io-async", "embedded-nal-async", "embedded-nal-async-xtra", "embassy-sync", "embassy-futures"]
 
 [dependencies]
 embedded-io-async = { workspace = true, optional = true }

@@ -2,9 +2,11 @@
 name = "edge-raw"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
 
 [features]
-nightly = ["embedded-io-async", "embedded-nal-async", "embedded-nal-async-xtra"]
+default = ["io"]
+io = ["embedded-io-async", "embedded-nal-async", "embedded-nal-async-xtra"]
 
 [dependencies]
 log = { workspace = true }

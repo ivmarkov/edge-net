@@ -9,11 +9,16 @@ description = "no_std and no-alloc async implementations of various network prot
 repository = "https://github.com/ivmarkov/edge-net"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.71"
+rust-version = "1.75"
+
+[patch.crates-io]
+embedded-svc = { git = "https://github.com/esp-rs/embedded-svc", branch = "rust-stable" }
 
 [features]
-std = ["edge-http/std", "edge-captive/std", "edge-mqtt/std", "edge-std-nal-async/std"]
-nightly = ["edge-dhcp/nightly", "edge-http/nightly", "edge-mqtt/nightly", "edge-raw/nightly", "edge-ws/nightly", "edge-std-nal-async/nightly"]
+default = ["io"]
+std = ["edge-http/std", "edge-captive/std", "edge-mqtt", "edge-std-nal-async"]
+io = ["edge-captive/io", "edge-dhcp/io", "edge-http/io", "edge-mdns/io", "edge-raw/io", "edge-ws/io", "embedded-nal-async-xtra"]
+nightly = []
 embedded-svc = ["edge-http/embedded-svc", "edge-mqtt/embedded-svc", "edge-ws/embedded-svc"]
 
 [dependencies]
@@ -21,10 +26,11 @@ edge-captive = { workspace = true }
 edge-dhcp = { workspace = true }
 edge-http = { workspace = true }
 edge-mdns = { workspace = true }
-edge-mqtt = { workspace = true }
+edge-mqtt = { workspace = true, optional = true }
 edge-raw = { workspace = true }
 edge-ws = { workspace = true }
-edge-std-nal-async = { workspace = true }
+edge-std-nal-async = { workspace = true, optional = true }
+embedded-nal-async-xtra = { workspace = true, optional = true }
 
 [dev-dependencies]
 anyhow = "1"
@@ -36,15 +42,15 @@ required-features = ["std", "domain"]
 
 [[example]]
 name = "simple"
-required-features = ["std", "nightly"]
+required-features = ["std"]
 
 [[example]]
 name = "http_client"
-required-features = ["std", "nightly"]
+required-features = ["std"]
 
 [[example]]
 name = "http_server"
-required-features = ["std", "nightly"]
+required-features = ["std"]
 
 [workspace]
 members = [
@@ -62,13 +68,13 @@ members = [
 
 [workspace.dependencies]
 embassy-futures = { version = "0.1", default-features = false }
-embassy-sync = { version = "0.3", default-features = false }
-embassy-time = { version = "0.1", default-features = false }
+embassy-sync = { version = "0.5", default-features = false }
+embassy-time = { version = "0.2", default-features = false }
 embedded-io-async = { version = "0.6", default-features = false }
-embedded-nal-async = { version = "0.6", default-features = false }
-embedded-svc = { version = "0.26", default-features = false, features = ["embedded-io-async"] }
+embedded-nal-async = { version = "0.7", default-features = false }
+embedded-svc = { version = "0.26", default-features = false }
 log = { version = "0.4", default-features = false }
-heapless = { version = "0.7", default-features = false }
+heapless = { version = "0.8", default-features = false }
 no-std-net = { version = "0.6", default-features = false }
 
 edge-captive = { version = "0.1.0", path = "edge-captive", default-features = false }

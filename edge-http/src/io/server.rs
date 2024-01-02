@@ -24,7 +24,7 @@ pub struct HandlerError(HandlerErrorString);
 
 impl HandlerError {
     pub fn new(message: &str) -> Self {
-        Self(message.into())
+        Self(message.try_into().unwrap())
     }
 
     pub fn message(&self) -> &str {
@@ -41,10 +41,10 @@ where
     E: Debug,
 {
     fn from(e: E) -> Self {
-        let mut string: HandlerErrorString = "".into();
+        let mut string: HandlerErrorString = "".try_into().unwrap();
 
         if write!(&mut string, "{e:?}").is_err() {
-            string = "(Error string too big to serve)".into();
+            string = "(Error string too big to serve)".try_into().unwrap();
         }
 
         Self(string)
@@ -162,7 +162,8 @@ where
 
     async fn complete_err<'a>(&'a mut self, err_str: &'a str) -> Result<(), Error<T::Error>> {
         if self.request_mut().is_ok() {
-            let err_str_len: heapless::String<5> = (err_str.as_bytes().len() as u16).into();
+            let err_str_len: heapless::String<5> =
+                (err_str.as_bytes().len() as u16).try_into().unwrap();
 
             let headers = [
                 ("Content-Length", err_str_len.as_str()),

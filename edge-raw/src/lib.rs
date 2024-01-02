@@ -1,15 +1,11 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-#![allow(stable_features)]
-#![allow(unknown_lints)]
-#![cfg_attr(feature = "nightly", feature(async_fn_in_trait))]
-#![cfg_attr(feature = "nightly", allow(async_fn_in_trait))]
-#![cfg_attr(feature = "nightly", feature(impl_trait_projections))]
+#![allow(async_fn_in_trait)]
 
 use no_std_net::{Ipv4Addr, SocketAddrV4};
 
 use self::udp::UdpPacketHeader;
 
-#[cfg(feature = "nightly")]
+#[cfg(feature = "io")]
 pub mod io;
 
 pub mod bytes;

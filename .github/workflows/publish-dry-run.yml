@@ -4,7 +4,7 @@ on:
   workflow_dispatch
 
 env:
-  rust_toolchain: nightly
+  rust_toolchain: stable
 
 jobs:
   publishdryrun:
@@ -19,7 +19,7 @@ jobs:
           toolchain: ${{ env.rust_toolchain }}
       - name: Setup | Std
         run: rustup component add rust-src --toolchain ${{ env.rust_toolchain }}-x86_64-unknown-linux-gnu
-      - name: Setup | Default to nightly
+      - name: Setup | Set default toolchain
         run: rustup default ${{ env.rust_toolchain }}
       - name: Build | Publish Dry Run
         run: cargo publish --dry-run

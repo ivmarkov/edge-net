@@ -2,10 +2,11 @@
 name = "edge-dhcp"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
 
 [features]
-default = ["nightly"]
-nightly = ["embassy-futures", "embedded-nal-async", "embedded-nal-async-xtra"]
+default = ["io"]
+io = ["embassy-futures", "embedded-nal-async", "embedded-nal-async-xtra"]
 
 [dependencies]
 no-std-net = { workspace = true }

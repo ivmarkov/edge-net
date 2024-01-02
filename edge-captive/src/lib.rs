@@ -74,7 +74,7 @@ pub fn process_dns_request(
     ip: &[u8; 4],
     ttl: Duration,
 ) -> Result<impl AsRef<[u8]>, DnsError> {
-    let response = heapless::Vec::<u8, 512>::new();
+    let response = heapless07::Vec::<u8, 512>::new();
 
     let message = domain::base::Message::from_octets(request)?;
     debug!("Processing message with header: {:?}", message.header());

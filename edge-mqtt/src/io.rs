@@ -1,9 +1,9 @@
 pub use rumqttc::*;
 
-#[cfg(all(feature = "nightly", feature = "embedded-svc"))]
+#[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
 
-#[cfg(all(feature = "nightly", feature = "embedded-svc"))]
+#[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
     use core::fmt::{Debug, Display};
     use core::marker::PhantomData;

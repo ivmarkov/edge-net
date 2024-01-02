@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-  rust_toolchain: nightly
+  rust_toolchain: stable
 
 jobs:
   compile:
@@ -26,15 +26,13 @@ jobs:
           components: rustfmt, clippy
       - name: Setup | Std
         run: rustup component add rust-src --toolchain ${{ env.rust_toolchain }}-x86_64-unknown-linux-gnu
-      - name: Setup | Default to nightly
+      - name: Setup | Set default toolchain
         run: rustup default ${{ env.rust_toolchain }}
       - name: Build | Fmt Check
         run: cargo fmt -- --check
       - name: Build | Clippy
-        run: cargo clippy --features nightly,embedded-svc --no-deps -- -Dwarnings
+        run: cargo clippy --features embedded-svc --no-deps -- -Dwarnings
       - name: Build | Default
         run: cargo build
       - name: Build | Non-default
         run: cargo build --no-default-features
-      - name: Build | Nightly
-        run: cargo build --no-default-features --features nightly

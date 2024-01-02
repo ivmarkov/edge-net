@@ -3,6 +3,10 @@ name = "edge-mdns"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["io"]
+io = [] # TODO
+
 [dependencies]
 log = { workspace = true }
 heapless = { workspace = true }
