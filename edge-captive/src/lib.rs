@@ -21,6 +21,7 @@ use domain::{
 };
 use octseq::Truncate;
 
+#[cfg(feature = "io")]
 pub mod io;
 
 #[derive(Debug)]
