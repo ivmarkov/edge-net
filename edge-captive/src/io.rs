@@ -138,13 +138,15 @@ pub mod server {
 
                 let request = &request_arr[..request_len];
 
-                debug!("Received {} bytes from {}", request.len(), source_addr);
-                let response = crate::process_dns_request(request, &ip.octets(), ttl)
+                debug!("Received {} bytes from {source_addr}", request.len());
+
+                let mut reply_arr = [0_u8; 1280];
+                let len = crate::reply(request, &ip.octets(), ttl, &mut reply_arr)
                     .map_err(|_| io::ErrorKind::Other)?;
 
-                socket.send_to(response.as_ref(), source_addr)?;
+                socket.send_to(&reply_arr[..len], source_addr)?;
 
-                debug!("Sent {} bytes to {}", response.as_ref().len(), source_addr);
+                debug!("Sent {len} bytes to {source_addr}");
             }
 
             Ok(())

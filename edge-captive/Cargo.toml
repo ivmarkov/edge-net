@@ -12,4 +12,4 @@ std = ["domain/std"]
 [dependencies]
 log = { workspace = true }
 domain = { workspace = true }
-heapless07 = { package = "heapless", version = "0.7" }
+octseq = { workspace = true }

@@ -3,6 +3,8 @@
 use core::fmt::{self, Display};
 use core::time::Duration;
 
+use domain::base::wire::Composer;
+use domain::dep::octseq::OctetsBuilder;
 use log::debug;
 
 use domain::{
@@ -17,6 +19,7 @@ use domain::{
     dep::octseq::ShortBuf,
     rdata::A,
 };
+use octseq::Truncate;
 
 pub mod io;
 
@@ -62,19 +65,20 @@ impl From<ParseError> for DnsError {
     }
 }
 
-pub fn process_dns_request(
+pub fn reply(
     request: &[u8],
     ip: &[u8; 4],
     ttl: Duration,
-) -> Result<impl AsRef<[u8]>, DnsError> {
-    let response = heapless07::Vec::<u8, 512>::new();
+    buf: &mut [u8],
+) -> Result<usize, DnsError> {
+    let buf = Buf(buf, 0);
 
     let message = domain::base::Message::from_octets(request)?;
     debug!("Processing message with header: {:?}", message.header());
 
-    let mut responseb = domain::base::MessageBuilder::from_target(response)?;
+    let mut responseb = domain::base::MessageBuilder::from_target(buf)?;
 
-    let response = if matches!(message.header().opcode(), Opcode::Query) {
+    let buf = if matches!(message.header().opcode(), Opcode::Query) {
         debug!("Message is of type Query, processing all questions");
 
         let mut answerb = responseb.start_answer(&message, Rcode::NoError)?;
@@ -117,5 +121,43 @@ pub fn process_dns_request(
         responseb.finish()
     };
 
-    Ok(response)
+    Ok(buf.1)
+}
+
+struct Buf<'a>(pub &'a mut [u8], pub usize);
+
+impl<'a> Composer for Buf<'a> {}
+
+impl<'a> OctetsBuilder for Buf<'a> {
+    type AppendError = ShortBuf;
+
+    fn append_slice(&mut self, slice: &[u8]) -> Result<(), Self::AppendError> {
+        if self.1 + slice.len() <= self.0.len() {
+            let end = self.1 + slice.len();
+            self.0[self.1..end].copy_from_slice(slice);
+            self.1 = end;
+
+            Ok(())
+        } else {
+            Err(ShortBuf)
+        }
+    }
+}
+
+impl<'a> Truncate for Buf<'a> {
+    fn truncate(&mut self, len: usize) {
+        self.1 = len;
+    }
+}
+
+impl<'a> AsMut<[u8]> for Buf<'a> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.0[..self.1]
+    }
+}
+
+impl<'a> AsRef<[u8]> for Buf<'a> {
+    fn as_ref(&self) -> &[u8] {
+        &self.0[..self.1]
+    }
 }
