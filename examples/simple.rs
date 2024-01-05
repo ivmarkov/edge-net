@@ -1,19 +1,27 @@
-use async_io::block_on;
 use embedded_io_async::{Read, Write};
-use embedded_nal_async::TcpConnect;
 
-use edge_net::asynch::stdnal::StdTcpConnect;
+use embedded_nal_async::{IpAddr, Ipv4Addr, SocketAddr, TcpConnect};
+
+use log::*;
+
+use std_embedded_nal_async::Stack;
 
 fn main() {
-    block_on(read()).unwrap();
+    env_logger::init_from_env(
+        env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
+    );
+
+    let stack: Stack = Default::default();
+
+    futures_lite::future::block_on(read(&stack)).unwrap();
 }
 
-async fn read() -> anyhow::Result<()> {
-    println!("About to open a TCP connection to 1.1.1.1 port 80");
+async fn read<T: TcpConnect>(stack: &T) -> Result<(), T::Error> {
+    info!("About to open a TCP connection to 1.1.1.1 port 80");
 
-    let connector = StdTcpConnect::new();
-
-    let mut connection = connector.connect("1.1.1.1:80".parse().unwrap()).await?;
+    let mut connection = stack
+        .connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 80))
+        .await?;
 
     connection
         .write_all("GET / HTTP/1.0\n\n".as_bytes())
@@ -33,9 +41,9 @@ async fn read() -> anyhow::Result<()> {
         }
     }
 
-    println!(
+    info!(
         "1.1.1.1 returned:\n=================\n{}\n=================\nSince it returned something, all seems OK!",
-        std::str::from_utf8(&result)?);
+        core::str::from_utf8(&result).unwrap());
 
     Ok(())
 }

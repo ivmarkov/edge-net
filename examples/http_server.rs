@@ -1,6 +1,3 @@
-#![allow(stable_features)]
-#![feature(async_fn_in_trait)]
-
 use core::future::pending;
 
 use async_io::block_on;
@@ -19,11 +16,9 @@ use embassy_sync::blocking_mutex::raw::RawMutex;
 use embedded_io_async::{Read, Write};
 
 fn main() {
-    simple_logger::SimpleLogger::new()
-        .with_level(LevelFilter::Info)
-        .env()
-        .init()
-        .unwrap();
+    env_logger::init_from_env(
+        env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
+    );
 
     block_on(accept());
 }

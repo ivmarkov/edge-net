@@ -13,6 +13,7 @@ rust-version = "1.75"
 
 [patch.crates-io]
 embedded-svc = { git = "https://github.com/esp-rs/embedded-svc", branch = "rust-stable" }
+std-embedded-nal-async = { git = "https://gitlab.com/ivmarkov/std-embedded-nal" }
 
 [features]
 default = ["io"]
@@ -33,24 +34,29 @@ edge-std-nal-async = { workspace = true, optional = true }
 embedded-nal-async-xtra = { workspace = true, optional = true }
 
 [dev-dependencies]
+log = "0.4"
 anyhow = "1"
-simple_logger = "2.2"
+env_logger = "0.10"
+embedded-io-async = "0.6"
+embedded-nal-async = "0.7"
+std-embedded-nal-async = "0.1"
+futures-lite = "1"
 
 [[example]]
 name = "captive_portal"
-required-features = ["std", "domain"]
+required-features = ["io", "std"]
 
 [[example]]
 name = "simple"
-required-features = ["std"]
+required-features = ["io", "std"]
 
 [[example]]
 name = "http_client"
-required-features = ["std"]
+required-features = ["io", "std"]
 
 [[example]]
 name = "http_server"
-required-features = ["std"]
+required-features = ["io", "std", "turnoff"]
 
 [workspace]
 members = [
