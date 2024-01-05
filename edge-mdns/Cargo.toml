@@ -5,6 +5,7 @@ edition = "2021"
 
 [features]
 default = ["io"]
+std = []
 io = ["embassy-futures", "embassy-sync", "embassy-time", "embedded-nal-async", "embedded-nal-async-xtra"]
 
 [dependencies]

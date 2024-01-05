@@ -16,7 +16,7 @@ embedded-svc = { git = "https://github.com/esp-rs/embedded-svc", branch = "rust-
 
 [features]
 default = ["io"]
-std = ["edge-http/std", "edge-captive/std", "edge-mqtt", "edge-std-nal-async"]
+std = ["edge-http/std", "edge-captive/std", "edge-mdns/std", "edge-mqtt", "edge-std-nal-async"]
 io = ["edge-captive/io", "edge-dhcp/io", "edge-http/io", "edge-mdns/io", "edge-raw/io", "edge-ws/io", "embedded-nal-async-xtra"]
 nightly = []
 embedded-svc = ["edge-http/embedded-svc", "edge-mqtt/embedded-svc", "edge-ws/embedded-svc"]

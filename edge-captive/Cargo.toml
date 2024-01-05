@@ -5,11 +5,12 @@ edition = "2021"
 rust-version = "1.75"
 
 [features]
+std = [] # TODO
 default = ["io"]
-io = [] # TODO
-std = ["domain/std"]
+io = ["embedded-nal-async"]
 
 [dependencies]
 log = { workspace = true }
 domain = { workspace = true }
 octseq = { workspace = true }
+embedded-nal-async = { workspace = true, optional = true }

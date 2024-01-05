@@ -18,6 +18,8 @@ use super::*;
 
 mod split;
 
+pub const DEFAULT_SOCKET: SocketAddr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), PORT);
+
 const IP_BROADCAST_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 const IPV6_BROADCAST_ADDR: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0x00fb);
 
@@ -58,6 +60,7 @@ pub async fn run<T, S>(
     interface: Option<u32>,
     services: T,
     stack: &S,
+    socket: SocketAddr,
     udp_buffer: &mut UdpSplitBuffer,
     buffers: &mut MdnsRunBuffers,
 ) -> Result<(), MdnsIoError<S::Error>>
@@ -67,7 +70,7 @@ where
     S::UniquelyBound: Multicast<Error = S::Error>,
 {
     let (local_addr, mut udp) = stack
-        .bind_single(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), PORT))
+        .bind_single(socket)
         .await
         .map_err(MdnsIoError::IoError)?;
 

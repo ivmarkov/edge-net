@@ -1,155 +1,70 @@
-#[cfg(feature = "std")]
-pub mod server {
-    use std::{
-        io, mem,
-        net::{Ipv4Addr, SocketAddrV4, UdpSocket},
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
-        },
-        thread::{self, JoinHandle},
-        time::Duration,
-    };
+use core::time::Duration;
 
-    use log::*;
+use embedded_nal_async::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpStack, UnconnectedUdp};
 
-    #[derive(Clone, Debug)]
-    pub struct DnsConf {
-        pub bind_ip: Ipv4Addr,
-        pub bind_port: u16,
-        pub ip: Ipv4Addr,
-        pub ttl: Duration,
+use log::*;
+
+use super::*;
+
+pub const DEFAULT_SOCKET: SocketAddr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), PORT);
+
+const PORT: u16 = 5353;
+
+#[derive(Debug)]
+pub enum DnsIoError<E> {
+    DnsError(DnsError),
+    IoError(E),
+}
+
+impl<E> From<DnsError> for DnsIoError<E> {
+    fn from(err: DnsError) -> Self {
+        Self::DnsError(err)
     }
+}
 
-    impl DnsConf {
-        pub fn new(ip: Ipv4Addr) -> Self {
-            Self {
-                bind_ip: Ipv4Addr::new(0, 0, 0, 0),
-                bind_port: 53,
-                ip,
-                ttl: Duration::from_secs(60),
-            }
-        }
-    }
+pub async fn run<S>(
+    stack: &S,
+    socket: SocketAddr,
+    tx_buf: &mut [u8],
+    rx_buf: &mut [u8],
+    ip: Ipv4Addr,
+    ttl: Duration,
+) -> Result<(), DnsIoError<S::Error>>
+where
+    S: UdpStack,
+{
+    let (_, mut udp) = stack
+        .bind_single(socket)
+        .await
+        .map_err(DnsIoError::IoError)?;
 
-    #[derive(Debug)]
-    pub enum Status {
-        Stopped,
-        Started,
-        Error(io::Error),
-    }
+    loop {
+        debug!("Waiting for data");
 
-    pub struct DnsServer {
-        conf: DnsConf,
-        status: Status,
-        running: Arc<AtomicBool>,
-        handle: Option<JoinHandle<Result<(), io::Error>>>,
-    }
+        let (len, local, remote) = udp
+            .receive_into(rx_buf)
+            .await
+            .map_err(DnsIoError::IoError)?;
 
-    impl DnsServer {
-        pub fn new(conf: DnsConf) -> Self {
-            Self {
-                conf,
-                status: Status::Stopped,
-                running: Arc::new(AtomicBool::new(false)),
-                handle: None,
-            }
-        }
+        let request = &rx_buf[..len];
 
-        pub fn get_status(&mut self) -> &Status {
-            self.cleanup();
-            &self.status
-        }
+        debug!("Received {} bytes from {remote}", request.len());
 
-        pub fn start(&mut self) -> Result<(), io::Error> {
-            if matches!(self.get_status(), Status::Started) {
-                return Ok(());
-            }
-            let socket_address = SocketAddrV4::new(self.conf.bind_ip, self.conf.bind_port);
-            let running = self.running.clone();
-            let ip = self.conf.ip;
-            let ttl = self.conf.ttl;
+        let len = match crate::reply(request, &ip.octets(), ttl, tx_buf) {
+            Ok(len) => len,
+            Err(err) => match err {
+                DnsError::InvalidMessage => {
+                    warn!("Got invalid message from {remote}, skipping");
+                    continue;
+                }
+                other => Err(other)?,
+            },
+        };
 
-            self.running.store(true, Ordering::Relaxed);
-            self.handle = Some(
-                thread::Builder::new()
-                    // default stack size is not enough
-                    // 9000 was found via trial and error
-                    .stack_size(9000)
-                    .spawn(move || {
-                        // Socket is not movable across thread bounds
-                        // Otherwise we run into an assertion error here: https://github.com/espressif/esp-idf/blob/master/components/lwip/port/esp32/freertos/sys_arch.c#L103
-                        let socket = UdpSocket::bind(socket_address)?;
-                        socket.set_read_timeout(Some(Duration::from_secs(1)))?;
-                        let result = Self::run(&running, ip, ttl, socket);
+        udp.send(local, remote, &tx_buf[..len])
+            .await
+            .map_err(DnsIoError::IoError)?;
 
-                        running.store(false, Ordering::Relaxed);
-
-                        result
-                    })
-                    .unwrap(),
-            );
-
-            Ok(())
-        }
-
-        pub fn stop(&mut self) -> Result<(), io::Error> {
-            if matches!(self.get_status(), Status::Stopped) {
-                return Ok(());
-            }
-
-            self.running.store(false, Ordering::Relaxed);
-            self.cleanup();
-
-            let mut status = Status::Stopped;
-            mem::swap(&mut self.status, &mut status);
-
-            match status {
-                Status::Error(e) => Err(e),
-                _ => Ok(()),
-            }
-        }
-
-        fn cleanup(&mut self) {
-            if !self.running.load(Ordering::Relaxed) && self.handle.is_some() {
-                self.status = match mem::take(&mut self.handle).unwrap().join().unwrap() {
-                    Ok(_) => Status::Stopped,
-                    Err(e) => Status::Error(e),
-                };
-            }
-        }
-
-        fn run(
-            running: &AtomicBool,
-            ip: Ipv4Addr,
-            ttl: Duration,
-            socket: UdpSocket,
-        ) -> Result<(), io::Error> {
-            while running.load(Ordering::Relaxed) {
-                let mut request_arr = [0_u8; 512];
-                debug!("Waiting for data");
-                let (request_len, source_addr) = match socket.recv_from(&mut request_arr) {
-                    Ok(value) => value,
-                    Err(err) => match err.kind() {
-                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => continue,
-                        _ => return Err(err),
-                    },
-                };
-
-                let request = &request_arr[..request_len];
-
-                debug!("Received {} bytes from {source_addr}", request.len());
-
-                let mut reply_arr = [0_u8; 1280];
-                let len = crate::reply(request, &ip.octets(), ttl, &mut reply_arr)
-                    .map_err(|_| io::ErrorKind::Other)?;
-
-                socket.send_to(&reply_arr[..len], source_addr)?;
-
-                debug!("Sent {len} bytes to {source_addr}");
-            }
-
-            Ok(())
-        }
+        debug!("Sent {len} bytes to {remote}");
     }
 }
