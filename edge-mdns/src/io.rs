@@ -10,7 +10,7 @@ use embedded_nal_async::{
 };
 use embedded_nal_async_xtra::Multicast;
 
-use log::info;
+use log::{info, warn};
 
 use self::split::{UdpSplit, UdpSplitBuffer, UdpSplitReceive, UdpSplitSend};
 
@@ -159,7 +159,16 @@ where
         let mut guard = send.lock().await;
         let (send, send_buf) = &mut *guard;
 
-        let len = host.respond(&services, &recv_buf[..len], send_buf, 60)?;
+        let len = match host.respond(&services, &recv_buf[..len], send_buf, 60) {
+            Ok(len) => len,
+            Err(err) => match err {
+                MdnsError::InvalidMessage => {
+                    warn!("Got invalid message from {remote}, skipping");
+                    continue;
+                }
+                other => Err(other)?,
+            },
+        };
 
         if len > 0 {
             info!("Replying to mDNS query from {}", remote);
