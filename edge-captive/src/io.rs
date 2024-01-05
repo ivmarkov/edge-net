@@ -8,7 +8,7 @@ use super::*;
 
 pub const DEFAULT_SOCKET: SocketAddr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), PORT);
 
-const PORT: u16 = 5353;
+const PORT: u16 = 53;
 
 #[derive(Debug)]
 pub enum DnsIoError<E> {
