@@ -1,6 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use core::fmt;
+use core::fmt::{self, Display};
 use core::time::Duration;
 
 use log::debug;
@@ -21,53 +21,46 @@ use domain::{
 pub mod io;
 
 #[derive(Debug)]
-pub struct InnerError<T: fmt::Debug + fmt::Display>(T);
-
-#[derive(Debug)]
 pub enum DnsError {
-    ShortBuf(InnerError<ShortBuf>),
-    ShortMessage(InnerError<ShortMessage>),
-    ParseError(InnerError<ParseError>),
-    PushError(InnerError<PushError>),
+    ShortBuf,
+    InvalidMessage,
 }
 
-impl fmt::Display for DnsError {
+impl Display for DnsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DnsError::ShortBuf(e) => e.0.fmt(f),
-            DnsError::ShortMessage(e) => e.0.fmt(f),
-            DnsError::ParseError(e) => e.0.fmt(f),
-            DnsError::PushError(e) => e.0.fmt(f),
+            Self::ShortBuf => write!(f, "ShortBuf"),
+            Self::InvalidMessage => write!(f, "InvalidMessage"),
         }
-    }
-}
-
-impl From<ShortBuf> for DnsError {
-    fn from(e: ShortBuf) -> Self {
-        Self::ShortBuf(InnerError(e))
-    }
-}
-
-impl From<ShortMessage> for DnsError {
-    fn from(e: ShortMessage) -> Self {
-        Self::ShortMessage(InnerError(e))
-    }
-}
-
-impl From<ParseError> for DnsError {
-    fn from(e: ParseError) -> Self {
-        Self::ParseError(InnerError(e))
-    }
-}
-
-impl From<PushError> for DnsError {
-    fn from(e: PushError) -> Self {
-        Self::PushError(InnerError(e))
     }
 }
 
 #[cfg(feature = "std")]
 impl std::error::Error for DnsError {}
+
+impl From<ShortBuf> for DnsError {
+    fn from(_: ShortBuf) -> Self {
+        Self::ShortBuf
+    }
+}
+
+impl From<PushError> for DnsError {
+    fn from(_: PushError) -> Self {
+        Self::ShortBuf
+    }
+}
+
+impl From<ShortMessage> for DnsError {
+    fn from(_: ShortMessage) -> Self {
+        Self::InvalidMessage
+    }
+}
+
+impl From<ParseError> for DnsError {
+    fn from(_: ParseError) -> Self {
+        Self::InvalidMessage
+    }
+}
 
 pub fn process_dns_request(
     request: &[u8],
