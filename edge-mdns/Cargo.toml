@@ -5,9 +5,16 @@ edition = "2021"
 
 [features]
 default = ["io"]
-io = [] # TODO
+io = ["embassy-futures", "embassy-sync", "embassy-time", "embedded-nal-async", "embedded-nal-async-xtra"]
 
 [dependencies]
 log = { workspace = true }
 heapless = { workspace = true }
-domain = { version = "0.7", default-features = false }
+domain = { workspace = true }
+octseq = { workspace = true }
+heapless07 = { package = "heapless", version = "0.7" }
+embassy-futures = { workspace = true, optional = true }
+embassy-sync = { workspace = true, optional = true }
+embassy-time = { workspace = true, optional = true }
+embedded-nal-async = { workspace = true, optional = true }
+embedded-nal-async-xtra = { workspace = true, optional = true }

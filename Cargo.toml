@@ -76,6 +76,8 @@ embedded-svc = { version = "0.26", default-features = false }
 log = { version = "0.4", default-features = false }
 heapless = { version = "0.8", default-features = false }
 no-std-net = { version = "0.6", default-features = false }
+domain = { version = "0.9.3", default-features = false, features = ["heapless"] }
+octseq = { version = "0.3.2", default-features = false }
 
 edge-captive = { version = "0.1.0", path = "edge-captive", default-features = false }
 edge-dhcp = { version = "0.1.0", path = "edge-dhcp", default-features = false }

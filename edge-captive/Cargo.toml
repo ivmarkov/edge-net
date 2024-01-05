@@ -11,5 +11,5 @@ std = ["domain/std"]
 
 [dependencies]
 log = { workspace = true }
-domain = { version = "0.9.3", default-features = false, features = ["heapless"] }
+domain = { workspace = true }
 heapless07 = { package = "heapless", version = "0.7" }

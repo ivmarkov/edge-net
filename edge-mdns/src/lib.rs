@@ -1,38 +1,87 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use core::fmt::Write;
-use core::str::FromStr;
+use core::fmt::{self, Display, Write};
 
 use domain::{
     base::{
         header::Flags,
         iana::Class,
-        message_builder::AnswerBuilder,
+        message::ShortMessage,
+        message_builder::{AnswerBuilder, PushError},
         name::FromStrError,
-        octets::{Octets256, Octets64, OctetsBuilder, ParseError},
-        Dname, Message, MessageBuilder, Record, Rtype, ShortBuf, ToDname,
+        wire::{Composer, ParseError},
+        Dname, Message, MessageBuilder, Rtype, ToDname,
     },
+    dep::octseq::{OctetsBuilder, ShortBuf},
     rdata::{Aaaa, Ptr, Srv, Txt, A},
 };
 use log::trace;
+use octseq::Truncate;
+
+#[cfg(feature = "io")]
+pub mod io;
+
+#[derive(Debug)]
+pub enum MdnsError {
+    ShortBuf,
+    InvalidMessage,
+}
+
+impl Display for MdnsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ShortBuf => write!(f, "ShortBuf"),
+            Self::InvalidMessage => write!(f, "InvalidMessage"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for MdnsError {}
+
+impl From<ShortBuf> for MdnsError {
+    fn from(_: ShortBuf) -> Self {
+        Self::ShortBuf
+    }
+}
+
+impl From<PushError> for MdnsError {
+    fn from(_: PushError) -> Self {
+        Self::ShortBuf
+    }
+}
+
+impl From<FromStrError> for MdnsError {
+    fn from(_: FromStrError) -> Self {
+        Self::InvalidMessage
+    }
+}
+
+impl From<ShortMessage> for MdnsError {
+    fn from(_: ShortMessage) -> Self {
+        Self::InvalidMessage
+    }
+}
+
+impl From<ParseError> for MdnsError {
+    fn from(_: ParseError) -> Self {
+        Self::InvalidMessage
+    }
+}
 
 pub trait Services {
-    type Error: From<ShortBuf> + From<ParseError> + From<FromStrError>;
-
-    fn for_each<F>(&self, callback: F) -> Result<(), Self::Error>
+    fn for_each<F>(&self, callback: F) -> Result<(), MdnsError>
     where
-        F: FnMut(&Service) -> Result<(), Self::Error>;
+        F: FnMut(&Service) -> Result<(), MdnsError>;
 }
 
 impl<T> Services for &mut T
 where
     T: Services,
 {
-    type Error = T::Error;
-
-    fn for_each<F>(&self, callback: F) -> Result<(), Self::Error>
+    fn for_each<F>(&self, callback: F) -> Result<(), MdnsError>
     where
-        F: FnMut(&Service) -> Result<(), Self::Error>,
+        F: FnMut(&Service) -> Result<(), MdnsError>,
     {
         (**self).for_each(callback)
     }
@@ -42,11 +91,9 @@ impl<T> Services for &T
 where
     T: Services,
 {
-    type Error = T::Error;
-
-    fn for_each<F>(&self, callback: F) -> Result<(), Self::Error>
+    fn for_each<F>(&self, callback: F) -> Result<(), MdnsError>
     where
-        F: FnMut(&Service) -> Result<(), Self::Error>,
+        F: FnMut(&Service) -> Result<(), MdnsError>,
     {
         (**self).for_each(callback)
     }
@@ -65,7 +112,7 @@ impl<'a> Host<'a> {
         services: T,
         buf: &mut [u8],
         ttl_sec: u32,
-    ) -> Result<usize, T::Error> {
+    ) -> Result<usize, MdnsError> {
         let buf = Buf(buf, 0);
 
         let message = MessageBuilder::from_target(buf)?;
@@ -85,7 +132,7 @@ impl<'a> Host<'a> {
         data: &[u8],
         buf: &mut [u8],
         ttl_sec: u32,
-    ) -> Result<usize, T::Error> {
+    ) -> Result<usize, MdnsError> {
         let buf = Buf(buf, 0);
 
         let message = MessageBuilder::from_target(buf)?;
@@ -106,9 +153,9 @@ impl<'a> Host<'a> {
         services: F,
         answer: &mut AnswerBuilder<T>,
         ttl_sec: u32,
-    ) -> Result<(), F::Error>
+    ) -> Result<(), MdnsError>
     where
-        T: OctetsBuilder + AsMut<[u8]>,
+        T: Composer,
         F: Services,
     {
         self.set_header(answer);
@@ -134,9 +181,9 @@ impl<'a> Host<'a> {
         services: F,
         answer: &mut AnswerBuilder<T>,
         ttl_sec: u32,
-    ) -> Result<bool, F::Error>
+    ) -> Result<bool, MdnsError>
     where
-        T: OctetsBuilder + AsMut<[u8]>,
+        T: Composer,
         F: Services,
     {
         self.set_header(answer);
@@ -257,7 +304,7 @@ impl<'a> Host<'a> {
         Ok(replied)
     }
 
-    fn set_header<T: OctetsBuilder + AsMut<[u8]>>(&self, answer: &mut AnswerBuilder<T>) {
+    fn set_header<T: Composer>(&self, answer: &mut AnswerBuilder<T>) {
         let header = answer.header_mut();
         header.set_id(self.id);
         header.set_opcode(domain::base::iana::Opcode::Query);
@@ -269,12 +316,12 @@ impl<'a> Host<'a> {
         header.set_flags(flags);
     }
 
-    fn add_ipv4<T: OctetsBuilder + AsMut<[u8]>>(
+    fn add_ipv4<T: Composer>(
         &self,
         answer: &mut AnswerBuilder<T>,
         ttl_sec: u32,
-    ) -> Result<(), ShortBuf> {
-        answer.push(Record::<Dname<Octets64>, A>::new(
+    ) -> Result<(), PushError> {
+        answer.push((
             Self::host_fqdn(self.hostname, false).unwrap(),
             Class::In,
             ttl_sec,
@@ -282,13 +329,13 @@ impl<'a> Host<'a> {
         ))
     }
 
-    fn add_ipv6<T: OctetsBuilder + AsMut<[u8]>>(
+    fn add_ipv6<T: Composer>(
         &self,
         answer: &mut AnswerBuilder<T>,
         ttl_sec: u32,
-    ) -> Result<(), ShortBuf> {
+    ) -> Result<(), PushError> {
         if let Some(ip) = &self.ipv6 {
-            answer.push(Record::<Dname<Octets64>, Aaaa>::new(
+            answer.push((
                 Self::host_fqdn(self.hostname, false).unwrap(),
                 Class::In,
                 ttl_sec,
@@ -299,13 +346,13 @@ impl<'a> Host<'a> {
         }
     }
 
-    fn host_fqdn(hostname: &str, suffix: bool) -> Result<Dname<Octets64>, FromStrError> {
+    fn host_fqdn(hostname: &str, suffix: bool) -> Result<impl ToDname, FromStrError> {
         let suffix = if suffix { "." } else { "" };
 
-        let mut host_fqdn = heapless::String::<60>::new();
+        let mut host_fqdn = heapless07::String::<60>::new();
         write!(host_fqdn, "{}.local{}", hostname, suffix,).unwrap();
 
-        Dname::from_str(&host_fqdn)
+        Dname::<heapless07::Vec<u8, 64>>::from_chars(host_fqdn.chars())
     }
 }
 
@@ -319,13 +366,13 @@ pub struct Service<'a> {
 }
 
 impl<'a> Service<'a> {
-    fn add_service<T: OctetsBuilder + AsMut<[u8]>>(
+    fn add_service<T: Composer>(
         &self,
         answer: &mut AnswerBuilder<T>,
         hostname: &str,
         ttl_sec: u32,
-    ) -> Result<(), ShortBuf> {
-        answer.push(Record::<Dname<Octets64>, Srv<_>>::new(
+    ) -> Result<(), PushError> {
+        answer.push((
             self.service_fqdn(false).unwrap(),
             Class::In,
             ttl_sec,
@@ -333,19 +380,19 @@ impl<'a> Service<'a> {
         ))
     }
 
-    fn add_service_type<T: OctetsBuilder + AsMut<[u8]>>(
+    fn add_service_type<T: Composer>(
         &self,
         answer: &mut AnswerBuilder<T>,
         ttl_sec: u32,
-    ) -> Result<(), ShortBuf> {
-        answer.push(Record::<Dname<Octets64>, Ptr<_>>::new(
+    ) -> Result<(), PushError> {
+        answer.push((
             Self::dns_sd_fqdn(false).unwrap(),
             Class::In,
             ttl_sec,
             Ptr::new(self.service_type_fqdn(false).unwrap()),
         ))?;
 
-        answer.push(Record::<Dname<Octets64>, Ptr<_>>::new(
+        answer.push((
             self.service_type_fqdn(false).unwrap(),
             Class::In,
             ttl_sec,
@@ -353,11 +400,11 @@ impl<'a> Service<'a> {
         ))
     }
 
-    fn add_service_subtypes<T: OctetsBuilder + AsMut<[u8]>>(
+    fn add_service_subtypes<T: Composer>(
         &self,
         answer: &mut AnswerBuilder<T>,
         ttl_sec: u32,
-    ) -> Result<(), ShortBuf> {
+    ) -> Result<(), PushError> {
         for service_subtype in self.service_subtypes {
             self.add_service_subtype(answer, service_subtype, ttl_sec)?;
         }
@@ -365,20 +412,20 @@ impl<'a> Service<'a> {
         Ok(())
     }
 
-    fn add_service_subtype<T: OctetsBuilder + AsMut<[u8]>>(
+    fn add_service_subtype<T: Composer>(
         &self,
         answer: &mut AnswerBuilder<T>,
         service_subtype: &str,
         ttl_sec: u32,
-    ) -> Result<(), ShortBuf> {
-        answer.push(Record::<Dname<Octets64>, Ptr<_>>::new(
+    ) -> Result<(), PushError> {
+        answer.push((
             Self::dns_sd_fqdn(false).unwrap(),
             Class::In,
             ttl_sec,
             Ptr::new(self.service_subtype_fqdn(service_subtype, false).unwrap()),
         ))?;
 
-        answer.push(Record::<Dname<Octets64>, Ptr<_>>::new(
+        answer.push((
             self.service_subtype_fqdn(service_subtype, false).unwrap(),
             Class::In,
             ttl_sec,
@@ -386,14 +433,14 @@ impl<'a> Service<'a> {
         ))
     }
 
-    fn add_txt<T: OctetsBuilder + AsMut<[u8]>>(
+    fn add_txt<T: Composer>(
         &self,
         answer: &mut AnswerBuilder<T>,
         ttl_sec: u32,
-    ) -> Result<(), ShortBuf> {
+    ) -> Result<(), PushError> {
         // only way I found to create multiple parts in a Txt
         // each slice is the length and then the data
-        let mut octets = Octets256::new();
+        let mut octets = heapless07::Vec::<_, 256>::new();
         //octets.append_slice(&[1u8, b'X'])?;
         //octets.append_slice(&[2u8, b'A', b'B'])?;
         //octets.append_slice(&[0u8])?;
@@ -406,18 +453,13 @@ impl<'a> Service<'a> {
 
         let txt = Txt::from_octets(&mut octets).unwrap();
 
-        answer.push(Record::<Dname<Octets64>, Txt<_>>::new(
-            self.service_fqdn(false).unwrap(),
-            Class::In,
-            ttl_sec,
-            txt,
-        ))
+        answer.push((self.service_fqdn(false).unwrap(), Class::In, ttl_sec, txt))
     }
 
-    fn service_fqdn(&self, suffix: bool) -> Result<Dname<Octets64>, FromStrError> {
+    fn service_fqdn(&self, suffix: bool) -> Result<impl ToDname, FromStrError> {
         let suffix = if suffix { "." } else { "" };
 
-        let mut service_fqdn = heapless::String::<60>::new();
+        let mut service_fqdn = heapless07::String::<60>::new();
         write!(
             service_fqdn,
             "{}.{}.{}.local{}",
@@ -425,13 +467,13 @@ impl<'a> Service<'a> {
         )
         .unwrap();
 
-        Dname::from_str(&service_fqdn)
+        Dname::<heapless07::Vec<u8, 64>>::from_chars(service_fqdn.chars())
     }
 
-    fn service_type_fqdn(&self, suffix: bool) -> Result<Dname<Octets64>, FromStrError> {
+    fn service_type_fqdn(&self, suffix: bool) -> Result<impl ToDname, FromStrError> {
         let suffix = if suffix { "." } else { "" };
 
-        let mut service_type_fqdn = heapless::String::<60>::new();
+        let mut service_type_fqdn = heapless07::String::<60>::new();
         write!(
             service_type_fqdn,
             "{}.{}.local{}",
@@ -439,17 +481,17 @@ impl<'a> Service<'a> {
         )
         .unwrap();
 
-        Dname::from_str(&service_type_fqdn)
+        Dname::<heapless07::Vec<u8, 64>>::from_chars(service_type_fqdn.chars())
     }
 
     fn service_subtype_fqdn(
         &self,
         service_subtype: &str,
         suffix: bool,
-    ) -> Result<Dname<Octets64>, FromStrError> {
+    ) -> Result<impl ToDname, FromStrError> {
         let suffix = if suffix { "." } else { "" };
 
-        let mut service_subtype_fqdn = heapless::String::<40>::new();
+        let mut service_subtype_fqdn = heapless07::String::<40>::new();
         write!(
             service_subtype_fqdn,
             "{}._sub.{}.{}.local{}",
@@ -457,24 +499,29 @@ impl<'a> Service<'a> {
         )
         .unwrap();
 
-        Dname::from_str(&service_subtype_fqdn)
+        Dname::<heapless07::Vec<u8, 64>>::from_chars(service_subtype_fqdn.chars())
     }
 
-    fn dns_sd_fqdn(suffix: bool) -> Result<Dname<Octets64>, FromStrError> {
-        if suffix {
-            Dname::from_str("_services._dns-sd._udp.local.")
-        } else {
-            Dname::from_str("_services._dns-sd._udp.local")
-        }
+    fn dns_sd_fqdn(suffix: bool) -> Result<impl ToDname, FromStrError> {
+        Dname::<heapless07::Vec<u8, 64>>::from_chars(
+            if suffix {
+                "_services._dns-sd._udp.local."
+            } else {
+                "_services._dns-sd._udp.local"
+            }
+            .chars(),
+        )
     }
 }
 
 struct Buf<'a>(pub &'a mut [u8], pub usize);
 
-impl<'a> OctetsBuilder for Buf<'a> {
-    type Octets = Self;
+impl<'a> Composer for Buf<'a> {}
 
-    fn append_slice(&mut self, slice: &[u8]) -> Result<(), ShortBuf> {
+impl<'a> OctetsBuilder for Buf<'a> {
+    type AppendError = ShortBuf;
+
+    fn append_slice(&mut self, slice: &[u8]) -> Result<(), Self::AppendError> {
         if self.1 + slice.len() <= self.0.len() {
             let end = self.1 + slice.len();
             self.0[self.1..end].copy_from_slice(slice);
@@ -485,26 +532,22 @@ impl<'a> OctetsBuilder for Buf<'a> {
             Err(ShortBuf)
         }
     }
+}
 
+impl<'a> Truncate for Buf<'a> {
     fn truncate(&mut self, len: usize) {
         self.1 = len;
-    }
-
-    fn freeze(self) -> Self::Octets {
-        self
-    }
-
-    fn len(&self) -> usize {
-        self.1
-    }
-
-    fn is_empty(&self) -> bool {
-        self.1 == 0
     }
 }
 
 impl<'a> AsMut<[u8]> for Buf<'a> {
     fn as_mut(&mut self) -> &mut [u8] {
         &mut self.0[..self.1]
+    }
+}
+
+impl<'a> AsRef<[u8]> for Buf<'a> {
+    fn as_ref(&self) -> &[u8] {
+        &self.0[..self.1]
     }
 }
