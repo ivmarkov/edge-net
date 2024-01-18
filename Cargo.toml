@@ -12,7 +12,7 @@ readme = "README.md"
 rust-version = "1.75"
 
 [patch.crates-io]
-embedded-svc = { git = "https://github.com/esp-rs/embedded-svc", branch = "rust-stable" }
+embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
 std-embedded-nal-async = { git = "https://gitlab.com/ivmarkov/std-embedded-nal" }
 
 [features]
