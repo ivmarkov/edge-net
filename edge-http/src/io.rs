@@ -592,13 +592,21 @@ where
         }
     }
 
+    pub fn needs_close(&self) -> bool {
+        !self.is_complete() || matches!(self, Self::Close(_))
+    }
+
     pub async fn finish(&mut self) -> Result<(), Error<W::Error>>
     where
         W: Write,
     {
         match self {
             Self::Close(_) => (),
-            Self::ContentLen(_) => (),
+            Self::ContentLen(w) => {
+                if !w.is_complete() {
+                    return Err(Error::IncompleteBody);
+                }
+            }
             Self::Chunked(w) => w.finish().await?,
         }
 

@@ -1,4 +1,4 @@
-use core::fmt::{self, Debug, Display, Write as _};
+use core::fmt::Debug;
 use core::future::Future;
 use core::mem;
 use core::pin::pin;
@@ -17,45 +17,6 @@ use super::{
 pub use embedded_svc_compat::*;
 
 const COMPLETION_BUF_SIZE: usize = 64;
-
-pub type HandlerErrorString = heapless::String<64>;
-
-pub struct HandlerError(HandlerErrorString);
-
-impl HandlerError {
-    pub fn new(message: &str) -> Self {
-        Self(message.try_into().unwrap())
-    }
-
-    pub fn message(&self) -> &str {
-        &self.0
-    }
-
-    pub fn release(self) -> HandlerErrorString {
-        self.0
-    }
-}
-
-impl<E> From<E> for HandlerError
-where
-    E: Debug,
-{
-    fn from(e: E) -> Self {
-        let mut string: HandlerErrorString = "".try_into().unwrap();
-
-        if write!(&mut string, "{e:?}").is_err() {
-            string = "(Error string too big to serve)".try_into().unwrap();
-        }
-
-        Self(string)
-    }
-}
-
-impl Display for HandlerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
 
 pub enum ServerConnection<'b, const N: usize, T> {
     Transition(TransitionState),
@@ -114,6 +75,46 @@ where
         matches!(self, Self::Response(_))
     }
 
+    pub async fn complete_ok(&mut self) -> Result<(), Error<T::Error>> {
+        if self.is_request_initiated() {
+            self.complete_request(Some(200), Some("OK"), &[]).await?;
+        }
+
+        if self.is_response_initiated() {
+            self.complete_response().await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn complete_err(&mut self, err: &str) -> Result<(), Error<T::Error>> {
+        let result = self.request_mut();
+
+        match result {
+            Ok(_) => {
+                let headers = [("Connection", "Close"), ("Content-Type", "text/plain")];
+
+                self.complete_request(Some(500), Some("Internal Error"), &headers)
+                    .await?;
+
+                let response = self.response_mut()?;
+
+                response.write_all(err.as_bytes()).await?;
+                response.finish().await?;
+
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn needs_close(&self) -> bool {
+        match self {
+            Self::Response(response) => response.needs_close(),
+            _ => true,
+        }
+    }
+
     pub fn raw_connection(&mut self) -> Result<&mut T, Error<T::Error>> {
         Ok(self.io_mut())
     }
@@ -158,26 +159,6 @@ where
         self.response_mut()?.finish().await?;
 
         Ok(())
-    }
-
-    async fn complete_err<'a>(&'a mut self, err_str: &'a str) -> Result<(), Error<T::Error>> {
-        if self.request_mut().is_ok() {
-            let err_str_len: heapless::String<5> =
-                (err_str.as_bytes().len() as u16).try_into().unwrap();
-
-            let headers = [
-                ("Content-Length", err_str_len.as_str()),
-                ("Content-Type", "text/plain"),
-            ];
-
-            self.complete_request(Some(500), Some("Internal Error"), &headers)
-                .await?;
-            self.response_mut()?.write_all(err_str.as_bytes()).await?;
-
-            Ok(())
-        } else {
-            Err(Error::InvalidState)
-        }
     }
 
     fn unbind_mut(&mut self) -> T {
@@ -262,21 +243,25 @@ pub struct RequestState<'b, const N: usize, T> {
 
 pub type ResponseState<T> = SendBody<T>;
 
-pub trait Handler<'b, const N: usize, T> {
+pub trait Handler<'b, const N: usize, T>
+where
+    T: ErrorType,
+{
+    type Error: Debug;
+
     async fn handle<'a>(
         &'a self,
         path: &'a str,
         method: Method,
         connection: &'a mut ServerConnection<'b, N, T>,
-    ) -> Result<(), HandlerError>;
+    ) -> Result<(), Self::Error>;
 }
 
 pub async fn handle_connection<const N: usize, const B: usize, T, H>(
     mut io: T,
     handler_id: usize,
     handler: &H,
-) -> Error<T::Error>
-where
+) where
     H: for<'b> Handler<'b, N, &'b mut T>,
     T: Read + Write,
 {
@@ -285,16 +270,41 @@ where
     loop {
         warn!("Handler {}: Waiting for new request", handler_id);
 
-        if let Err(e) = handle_request::<N, _, _>(&mut buf, &mut io, handler).await {
-            info!(
-                "Handler {}: Error when handling request: {:?}",
-                handler_id, e
-            );
+        let result = handle_request::<N, _, _>(&mut buf, &mut io, handler).await;
 
-            return e;
+        match result {
+            Err(e) => {
+                info!(
+                    "Handler {}: Error when handling request: {:?}",
+                    handler_id, e
+                );
+
+                break;
+            }
+            Ok(needs_close) => {
+                if needs_close {
+                    warn!(
+                        "Handler {}: Request complete; closing connection",
+                        handler_id
+                    );
+                    break;
+                } else {
+                    warn!("Handler {}: Request complete", handler_id);
+                }
+            }
         }
+    }
+}
 
-        warn!("Handler {}: Request complete", handler_id);
+#[derive(Debug)]
+pub enum HandleRequestError<C, E> {
+    Connection(Error<C>),
+    Handler(E),
+}
+
+impl<T, E> From<Error<T>> for HandleRequestError<T, E> {
+    fn from(e: Error<T>) -> Self {
+        Self::Connection(e)
     }
 }
 
@@ -302,7 +312,7 @@ pub async fn handle_request<'b, const N: usize, H, T>(
     buf: &'b mut [u8],
     io: T,
     handler: &H,
-) -> Result<(), Error<T::Error>>
+) -> Result<bool, HandleRequestError<T::Error, H::Error>>
 where
     H: Handler<'b, N, T>,
     T: Read + Write,
@@ -312,22 +322,20 @@ where
     let path = connection.headers()?.path.unwrap_or("");
     let method = connection.headers()?.method.unwrap_or(Method::Get);
 
-    match handler.handle(path, method, &mut connection).await {
-        Result::Ok(_) => {
-            if connection.is_request_initiated() {
-                connection
-                    .complete_request(Some(200), Some("OK"), &[])
-                    .await?;
-            }
+    let result = handler.handle(path, method, &mut connection).await;
 
-            if connection.is_response_initiated() {
-                connection.complete_response().await?;
-            }
+    match result {
+        Result::Ok(_) => connection.complete_ok().await?,
+        Result::Err(e) => {
+            warn!("Handler: Error when handling request: {e:?}");
+            connection
+                .complete_err("INTERNAL ERROR")
+                .await
+                .map_err(|_| HandleRequestError::Handler(e))?
         }
-        Result::Err(e) => connection.complete_err(e.message()).await?,
     }
 
-    Ok(())
+    Ok(connection.needs_close())
 }
 
 pub struct Server<const N: usize, const B: usize, A, H> {
@@ -375,12 +383,7 @@ where
                         let io = channel.receive().await;
                         warn!("Handler {}: Got connection request", handler_id);
 
-                        let err = handle_connection::<N, B, _, _>(io, handler_id, handler).await;
-
-                        warn!(
-                            "Handler {}: Connection closed because of error: {:?}",
-                            handler_id, err
-                        );
+                        handle_connection::<N, B, _, _>(io, handler_id, handler).await;
                     }
                 })
                 .map_err(|_| ())
@@ -505,15 +508,15 @@ mod embedded_svc_compat {
     where
         T: Read + Write,
     {
+        type Error = Error<T::Error>;
+
         async fn handle<'a>(
             &'a self,
             _path: &'a str,
             _method: Method,
             connection: &'a mut ServerConnection<'b, N, T>,
-        ) -> Result<(), HandlerError> {
-            connection.initiate_response(404, None, &[]).await?;
-
-            Ok(())
+        ) -> Result<(), Self::Error> {
+            connection.initiate_response(404, None, &[]).await
         }
     }
 
@@ -521,21 +524,24 @@ mod embedded_svc_compat {
     where
         H: embedded_svc::http::server::asynch::Handler<ServerConnection<'b, N, T>>,
         Q: Handler<'b, N, T>,
+        Q::Error: Into<H::Error>,
         T: Read + Write + 'b,
     {
+        type Error = H::Error;
+
         async fn handle<'a>(
             &'a self,
             path: &'a str,
             method: Method,
             connection: &'a mut ServerConnection<'b, N, T>,
-        ) -> Result<(), HandlerError> {
+        ) -> Result<(), Self::Error> {
             if self.path == path && self.method == method.into() {
-                self.handler
-                    .handle(connection)
-                    .await
-                    .map_err(|e| HandlerError(e.release()))
+                self.handler.handle(connection).await
             } else {
-                self.next.handle(path, method, connection).await
+                self.next
+                    .handle(path, method, connection)
+                    .await
+                    .map_err(Into::into)
             }
         }
     }

@@ -5,8 +5,8 @@ edition = "2021"
 rust-version = "1.75"
 
 [features]
-default = ["io"]
-std = []
+default = ["std"]
+std = ["io"]
 io = ["embedded-io-async", "embedded-nal-async", "embedded-nal-async-xtra", "embassy-sync", "embassy-futures"]
 
 [dependencies]
