@@ -8,6 +8,8 @@ Async + `no_std` + no-alloc implementation of the HTTP protocol.
 
 The implementation is based on the splendid [httparse](https://github.com/seanmonstar/httparse) library.
 
+For other protocols, look at the [edge-net](https://github.com/ivmarkov/edge-net) aggregator crate documentation.
+
 ## Examples
 
 ### HTTP client

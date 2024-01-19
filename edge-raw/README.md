@@ -10,6 +10,8 @@ The `edge_raw::io` module contains implementations of the `embedded_nal_async_xt
 These are useful in the context of protocols like DHCP, which - while working on top of UDP - need to be capable of receiving
 and sending packets to peers that do not have an IP address assigned yet.
 
+For other protocols, look at the [edge-net](https://github.com/ivmarkov/edge-net) aggregator crate documentation.
+
 ## Examples
 
 Look at the [edge-dhcp](../edge-dhcp) crate as to how to utilize the capabilities of `edge-raw`.

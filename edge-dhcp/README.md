@@ -6,6 +6,8 @@
 
 Async + `no_std` + no-alloc implementation of the DHCP protocol.
 
+For other protocols, look at the [edge-net](https://github.com/ivmarkov/edge-net) aggregator crate documentation.
+
 ## Examples
 
 ### DHCP client

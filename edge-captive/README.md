@@ -8,6 +8,8 @@ Async + `no_std` + no-alloc implementation of a Captive Portal DNS (i.e. a DNS s
 
 The implementation is based on the splendid [domain](https://github.com/NLnetLabs/domain) library.
 
+For other protocols, look at the [edge-net](https://github.com/ivmarkov/edge-net) aggregator crate documentation.
+
 ## Example
 
 ```rust
