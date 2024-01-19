@@ -12,9 +12,10 @@ Supported protocols:
 * [Websocket client and server](edge-ws)
 * [HTTP client and server](edge-http)
 * [MQTT client](edge-mqtt) (just a slim wrapper around `rumqttc`, so currently needs STD)
-* [DHCP cient and server](edge-dhcp)
 * [DNS Captive Portal](edge-captive)
-* [MDNS responder](edge-mdns)
+* [mDNS responder](edge-mdns)
+* [DHCP cient and server](edge-dhcp)
+* [Raw IP & UDP packet sender/receiver](edge-raw) (useful in combination with the DHCP client and server)
 
 Needs testing & bugfixing:
 * HTTP chunked-transfer decoder
