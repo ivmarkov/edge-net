@@ -11,6 +11,8 @@ Async + `no_std` + no-alloc implementation of the DHCP protocol.
 ### DHCP client
 
 ```rust
+/// NOTE: Run this example with `sudo` to be able to bind to the interface, as it uses raw sockets which require root privileges.
+
 use edge_raw::io::Udp2RawStack;
 use edge_std_nal_async::StdRawStack;
 
@@ -60,6 +62,8 @@ async fn run(if_index: u32, if_mac: [u8; 6]) -> Result<(), anyhow::Error> {
 ### DHCP server
 
 ```rust
+/// NOTE: Run this example with `sudo` to be able to bind to the interface, as it uses raw sockets which require root privileges.
+
 use edge_raw::io::Udp2RawStack;
 use edge_std_nal_async::StdRawStack;
 

@@ -1,3 +1,4 @@
+/// NOTE: Run this example with `sudo` to be able to bind to the interface, as it uses raw sockets which require root privileges.
 use edge_raw::io::Udp2RawStack;
 use edge_std_nal_async::StdRawStack;
 
