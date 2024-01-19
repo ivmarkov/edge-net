@@ -23,9 +23,7 @@ async fn read<T: TcpConnect>(stack: &T) -> Result<(), T::Error> {
         .connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 80))
         .await?;
 
-    connection
-        .write_all("GET / HTTP/1.0\n\n".as_bytes())
-        .await?;
+    connection.write_all(b"GET / HTTP/1.0\n\n").await?;
 
     let mut result = Vec::new();
 

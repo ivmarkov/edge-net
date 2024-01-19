@@ -713,18 +713,30 @@ where
 
 pub struct ChunkedWrite<W> {
     output: W,
+    finished: bool,
 }
 
 impl<W> ChunkedWrite<W> {
     pub const fn new(output: W) -> Self {
-        Self { output }
+        Self {
+            output,
+            finished: false,
+        }
     }
 
     pub async fn finish(&mut self) -> Result<(), Error<W::Error>>
     where
         W: Write,
     {
-        self.output.write_all(b"\r\n").await.map_err(Error::Io)
+        if !self.finished {
+            self.output
+                .write_all(b"0\r\n\r\n")
+                .await
+                .map_err(Error::Io)?;
+            self.finished = true;
+        }
+
+        Ok(())
     }
 
     pub fn release(self) -> W {
@@ -744,19 +756,20 @@ where
     W: Write,
 {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        if !buf.is_empty() {
-            let mut len_str = heapless::String::<10>::new();
-            write!(&mut len_str, "{:X}\r\n", buf.len()).unwrap();
+        if self.finished {
+            Err(Error::InvalidState)
+        } else if !buf.is_empty() {
+            let mut len_str = heapless::String::<8>::new();
+            write!(&mut len_str, "{:x}", buf.len()).unwrap();
+
             self.output
                 .write_all(len_str.as_bytes())
                 .await
                 .map_err(Error::Io)?;
 
+            self.output.write_all(b"\r\n").await.map_err(Error::Io)?;
             self.output.write_all(buf).await.map_err(Error::Io)?;
-            self.output
-                .write_all("\r\n".as_bytes())
-                .await
-                .map_err(Error::Io)?;
+            self.output.write_all(b"\r\n").await.map_err(Error::Io)?;
 
             Ok(buf.len())
         } else {

@@ -68,7 +68,7 @@ impl SimpleHandler {
                     )
                     .await?;
 
-                connection.write_all("Hello!\r\n\r\n".as_bytes()).await?;
+                connection.write_all(b"Hello!\r\n\r\n").await?;
             } else {
                 connection.initiate_response(405, None, &[]).await?;
             }

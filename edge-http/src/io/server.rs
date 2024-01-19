@@ -5,7 +5,7 @@ use core::pin::pin;
 
 use embedded_io_async::{ErrorType, Read, Write};
 
-use log::{info, warn};
+use log::{debug, info, warn};
 
 use super::{
     send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, RequestHeaders,
@@ -268,7 +268,7 @@ pub async fn handle_connection<const N: usize, const B: usize, T, H>(
     let mut buf = [0_u8; B];
 
     loop {
-        warn!("Handler {}: Waiting for new request", handler_id);
+        debug!("Handler {}: Waiting for new request", handler_id);
 
         let result = handle_request::<N, _, _>(&mut buf, &mut io, handler).await;
 
@@ -283,13 +283,13 @@ pub async fn handle_connection<const N: usize, const B: usize, T, H>(
             }
             Ok(needs_close) => {
                 if needs_close {
-                    warn!(
+                    debug!(
                         "Handler {}: Request complete; closing connection",
                         handler_id
                     );
                     break;
                 } else {
-                    warn!("Handler {}: Request complete", handler_id);
+                    debug!("Handler {}: Request complete", handler_id);
                 }
             }
         }
@@ -327,7 +327,7 @@ where
     match result {
         Result::Ok(_) => connection.complete_ok().await?,
         Result::Err(e) => {
-            warn!("Handler: Error when handling request: {e:?}");
+            warn!("Error when handling request: {e:?}");
             connection
                 .complete_err("INTERNAL ERROR")
                 .await
@@ -364,10 +364,10 @@ where
     ) -> Result<(), Error<A::Error>> {
         let mut quit = pin!(quit);
 
-        warn!("Creating queue for {} requests", W);
+        info!("Creating queue for {} requests", W);
         let channel = embassy_sync::channel::Channel::<R, _, W>::new();
 
-        warn!("Creating {} handlers", P);
+        debug!("Creating {} handlers", P);
         let mut handlers = heapless::Vec::<_, P>::new();
 
         for index in 0..P {
@@ -378,10 +378,10 @@ where
             handlers
                 .push(async move {
                     loop {
-                        warn!("Handler {}: Waiting for connection", handler_id);
+                        debug!("Handler {}: Waiting for connection", handler_id);
 
                         let io = channel.receive().await;
-                        warn!("Handler {}: Got connection request", handler_id);
+                        debug!("Handler {}: Got connection request", handler_id);
 
                         handle_connection::<N, B, _, _>(io, handler_id, handler).await;
                     }
@@ -392,16 +392,16 @@ where
 
         let mut accept = pin!(async {
             loop {
-                warn!("Acceptor: waiting for new connection");
+                debug!("Acceptor: waiting for new connection");
 
                 match self.acceptor.accept().await.map_err(Error::Io) {
                     Ok(io) => {
-                        warn!("Acceptor: got new connection");
+                        debug!("Acceptor: got new connection");
                         channel.send(io).await;
-                        warn!("Acceptor: connection sent");
+                        debug!("Acceptor: connection sent");
                     }
                     Err(e) => {
-                        warn!("Got error when accepting a new connection: {:?}", e);
+                        debug!("Got error when accepting a new connection: {:?}", e);
                     }
                 }
             }
@@ -414,7 +414,7 @@ where
         )
         .await;
 
-        warn!("Server processing loop quit");
+        info!("Server processing loop quit");
 
         Ok(())
     }
