@@ -48,12 +48,12 @@ where
         Ok(())
     }
 
-    pub async fn initiate_request<'a>(
-        &'a mut self,
+    pub async fn initiate_request(
+        &mut self,
         http11: bool,
         method: Method,
-        uri: &'a str,
-        headers: &'a [(&'a str, &'a str)],
+        uri: &str,
+        headers: &[(&str, &str)],
     ) -> Result<(), Error<T::Error>> {
         self.start_request(http11, method, uri, headers).await
     }
@@ -70,12 +70,12 @@ where
         matches!(self, Self::Response(_))
     }
 
-    pub async fn initiate_ws_upgrade_request<'a>(
-        &'a mut self,
-        host: Option<&'a str>,
-        origin: Option<&'a str>,
-        uri: &'a str,
-        version: Option<&'a str>,
+    pub async fn initiate_ws_upgrade_request(
+        &mut self,
+        host: Option<&str>,
+        origin: Option<&str>,
+        uri: &str,
+        version: Option<&str>,
         nonce: &[u8; NONCE_LEN],
     ) -> Result<(), Error<T::Error>>
     where
@@ -128,12 +128,12 @@ where
         Ok(self.io_mut())
     }
 
-    async fn start_request<'a>(
-        &'a mut self,
+    async fn start_request(
+        &mut self,
         http11: bool,
         method: Method,
-        uri: &'a str,
-        headers: &'a [(&'a str, &'a str)],
+        uri: &str,
+        headers: &[(&str, &str)],
     ) -> Result<(), Error<T::Error>> {
         let _ = self.complete().await;
 
@@ -259,7 +259,7 @@ where
         }
     }
 
-    async fn complete_response<'a>(&mut self) -> Result<(), Error<T::Error>> {
+    async fn complete_response(&mut self) -> Result<(), Error<T::Error>> {
         if self.request_mut().is_ok() {
             self.complete_request().await?;
         }

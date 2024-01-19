@@ -40,33 +40,34 @@ env_logger = "0.10"
 embedded-io-async = "0.6"
 embedded-nal-async = "0.7"
 std-embedded-nal-async = "0.1"
+embassy-time = { version = "0.3", features = ["std", "generic-queue"] }
+embassy-sync = "0.5"
 futures-lite = "1"
 rand = "0.8"
-embassy-time = { version = "0.3", features = ["std", "generic-queue"] }
 
 [[example]]
 name = "captive_portal"
-required-features = ["io", "std"]
+required-features = ["std"]
 
 [[example]]
 name = "simple"
-required-features = ["io", "std"]
+required-features = ["std"]
 
 [[example]]
 name = "dhcp_client"
-required-features = ["io", "std"]
+required-features = ["std"]
 
 [[example]]
 name = "dhcp_server"
-required-features = ["io", "std"]
+required-features = ["std"]
 
 [[example]]
 name = "http_client"
-required-features = ["io", "std"]
+required-features = ["std"]
 
-#[[example]]
-#name = "http_server"
-#required-features = ["io", "std", "turnoff"]
+[[example]]
+name = "http_server"
+required-features = ["std"]
 
 [workspace]
 members = [

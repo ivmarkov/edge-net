@@ -1,8 +1,8 @@
 use core::fmt::{self, Debug};
-use core::future::Future;
 use core::mem;
 use core::pin::pin;
 
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embedded_io_async::{ErrorType, Read, Write};
 
 use log::{debug, info, warn};
@@ -62,11 +62,11 @@ where
         Ok(&self.request_ref()?.request)
     }
 
-    pub async fn initiate_response<'a>(
-        &'a mut self,
+    pub async fn initiate_response(
+        &mut self,
         status: u16,
-        message: Option<&'a str>,
-        headers: &'a [(&'a str, &'a str)],
+        message: Option<&str>,
+        headers: &[(&str, &str)],
     ) -> Result<(), Error<T::Error>> {
         self.complete_request(Some(status), message, headers).await
     }
@@ -75,7 +75,7 @@ where
         matches!(self, Self::Response(_))
     }
 
-    pub async fn complete_ok(&mut self) -> Result<(), Error<T::Error>> {
+    pub async fn complete(&mut self) -> Result<(), Error<T::Error>> {
         if self.is_request_initiated() {
             self.complete_request(Some(200), Some("OK"), &[]).await?;
         }
@@ -119,11 +119,11 @@ where
         Ok(self.io_mut())
     }
 
-    async fn complete_request<'a>(
-        &'a mut self,
+    async fn complete_request(
+        &mut self,
         status: Option<u16>,
-        reason: Option<&'a str>,
-        headers: &'a [(&'a str, &'a str)],
+        reason: Option<&str>,
+        headers: &[(&str, &str)],
     ) -> Result<(), Error<T::Error>> {
         let request = self.request_mut()?;
 
@@ -136,7 +136,7 @@ where
 
         let result = async {
             send_status(http11, status, reason, &mut io).await?;
-            let body_type = send_headers(
+            let mut body_type = send_headers(
                 headers.iter().filter(|(k, v)| {
                     http11
                         || !k.eq_ignore_ascii_case("Transfer-Encoding")
@@ -145,6 +145,15 @@ where
                 &mut io,
             )
             .await?;
+
+            if matches!(body_type, BodyType::Unknown) {
+                if http11 {
+                    send_headers(&[("Transfer-Encoding", "Chunked")], &mut io).await?;
+                    body_type = BodyType::Chunked;
+                } else {
+                    body_type = BodyType::Close;
+                }
+            };
 
             send_headers_end(&mut io).await?;
 
@@ -263,12 +272,29 @@ where
 {
     type Error: Debug;
 
-    async fn handle<'a>(
-        &'a self,
-        path: &'a str,
+    async fn handle(
+        &self,
+        path: &str,
         method: Method,
-        connection: &'a mut ServerConnection<'b, N, T>,
+        connection: &mut ServerConnection<'b, N, T>,
     ) -> Result<(), Self::Error>;
+}
+
+impl<'b, const N: usize, T, H> Handler<'b, N, T> for &H
+where
+    H: Handler<'b, N, T>,
+    T: Read + Write,
+{
+    type Error = H::Error;
+
+    async fn handle(
+        &self,
+        path: &str,
+        method: Method,
+        connection: &mut ServerConnection<'b, N, T>,
+    ) -> Result<(), Self::Error> {
+        (**self).handle(path, method, connection).await
+    }
 }
 
 pub async fn handle_connection<const N: usize, const B: usize, T, H>(
@@ -360,7 +386,7 @@ where
     let result = handler.handle(path, method, &mut connection).await;
 
     match result {
-        Result::Ok(_) => connection.complete_ok().await?,
+        Result::Ok(_) => connection.complete().await?,
         Result::Err(e) => {
             warn!("Error when handling request: {e:?}");
             connection
@@ -388,21 +414,11 @@ where
         Self { acceptor, handler }
     }
 
-    pub async fn process<
-        const P: usize,
-        const W: usize,
-        R: embassy_sync::blocking_mutex::raw::RawMutex,
-        Q: Future<Output = ()>,
-    >(
-        &mut self,
-        quit: Q,
-    ) -> Result<(), Error<A::Error>> {
-        let mut quit = pin!(quit);
+    pub async fn process<const P: usize, const W: usize>(&mut self) -> Result<(), Error<A::Error>> {
+        info!("Creating queue for {W} requests");
+        let channel = embassy_sync::channel::Channel::<NoopRawMutex, _, W>::new();
 
-        info!("Creating queue for {} requests", W);
-        let channel = embassy_sync::channel::Channel::<R, _, W>::new();
-
-        debug!("Creating {} handlers", P);
+        debug!("Creating {P} handlers");
         let mut handlers = heapless::Vec::<_, P>::new();
 
         for index in 0..P {
@@ -442,8 +458,7 @@ where
             }
         });
 
-        embassy_futures::select::select3(
-            &mut quit,
+        embassy_futures::select::select(
             &mut accept,
             embassy_futures::select::select_slice(&mut handlers),
         )
@@ -545,11 +560,11 @@ mod embedded_svc_compat {
     {
         type Error = Error<T::Error>;
 
-        async fn handle<'a>(
-            &'a self,
-            _path: &'a str,
+        async fn handle(
+            &self,
+            _path: &str,
             _method: Method,
-            connection: &'a mut ServerConnection<'b, N, T>,
+            connection: &mut ServerConnection<'b, N, T>,
         ) -> Result<(), Self::Error> {
             connection.initiate_response(404, None, &[]).await
         }
@@ -564,11 +579,11 @@ mod embedded_svc_compat {
     {
         type Error = H::Error;
 
-        async fn handle<'a>(
-            &'a self,
-            path: &'a str,
+        async fn handle(
+            &self,
+            path: &str,
             method: Method,
-            connection: &'a mut ServerConnection<'b, N, T>,
+            connection: &mut ServerConnection<'b, N, T>,
         ) -> Result<(), Self::Error> {
             if self.path == path && self.method == method.into() {
                 self.handler.handle(connection).await
