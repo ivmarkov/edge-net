@@ -17,14 +17,14 @@ pub use embedded_svc_compat::*;
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
-pub enum ServerConnection<'b, const N: usize, T> {
+pub enum Connection<'b, T, const N: usize = 128> {
     Transition(TransitionState),
     Unbound(T),
-    Request(RequestState<'b, N, T>),
+    Request(RequestState<'b, T, N>),
     Response(ResponseState<T>),
 }
 
-impl<'b, const N: usize, T> ServerConnection<'b, N, T>
+impl<'b, T, const N: usize> Connection<'b, T, N>
 where
     T: Read + Write,
 {
@@ -32,7 +32,7 @@ where
     pub async fn new(
         buf: &'b mut [u8],
         mut io: T,
-    ) -> Result<ServerConnection<'b, N, T>, Error<T::Error>> {
+    ) -> Result<Connection<'b, T, N>, Error<T::Error>> {
         let mut request = RequestHeaders::new();
 
         let (buf, read_len) = request.receive(buf, &mut io).await?;
@@ -193,7 +193,7 @@ where
         }
     }
 
-    fn request_mut(&mut self) -> Result<&mut RequestState<'b, N, T>, Error<T::Error>> {
+    fn request_mut(&mut self) -> Result<&mut RequestState<'b, T, N>, Error<T::Error>> {
         if let Self::Request(request) = self {
             Ok(request)
         } else {
@@ -201,7 +201,7 @@ where
         }
     }
 
-    fn request_ref(&self) -> Result<&RequestState<'b, N, T>, Error<T::Error>> {
+    fn request_ref(&self) -> Result<&RequestState<'b, T, N>, Error<T::Error>> {
         if let Self::Request(request) = self {
             Ok(request)
         } else {
@@ -227,14 +227,14 @@ where
     }
 }
 
-impl<'b, const N: usize, T> ErrorType for ServerConnection<'b, N, T>
+impl<'b, T, const N: usize> ErrorType for Connection<'b, T, N>
 where
     T: ErrorType,
 {
     type Error = Error<T::Error>;
 }
 
-impl<'b, const N: usize, T> Read for ServerConnection<'b, N, T>
+impl<'b, T, const N: usize> Read for Connection<'b, T, N>
 where
     T: Read + Write,
 {
@@ -243,7 +243,7 @@ where
     }
 }
 
-impl<'b, const N: usize, T> Write for ServerConnection<'b, N, T>
+impl<'b, T, const N: usize> Write for Connection<'b, T, N>
 where
     T: Read + Write,
 {
@@ -258,30 +258,30 @@ where
 
 pub struct TransitionState(());
 
-pub struct RequestState<'b, const N: usize, T> {
+pub struct RequestState<'b, T, const N: usize> {
     request: RequestHeaders<'b, N>,
     io: Body<'b, T>,
 }
 
 pub type ResponseState<T> = SendBody<T>;
 
-pub trait Handler<'b, const N: usize, T>
+pub trait Handler<'b, T, const N: usize>
 where
     T: ErrorType,
 {
     type Error: Debug;
 
-    async fn handle(&self, connection: &mut ServerConnection<'b, N, T>) -> Result<(), Self::Error>;
+    async fn handle(&self, connection: &mut Connection<'b, T, N>) -> Result<(), Self::Error>;
 }
 
-impl<'b, const N: usize, T, H> Handler<'b, N, T> for &H
+impl<'b, const N: usize, T, H> Handler<'b, T, N> for &H
 where
-    H: Handler<'b, N, T>,
+    H: Handler<'b, T, N>,
     T: Read + Write,
 {
     type Error = H::Error;
 
-    async fn handle(&self, connection: &mut ServerConnection<'b, N, T>) -> Result<(), Self::Error> {
+    async fn handle(&self, connection: &mut Connection<'b, T, N>) -> Result<(), Self::Error> {
         (**self).handle(connection).await
     }
 }
@@ -291,7 +291,7 @@ pub async fn handle_connection<const N: usize, const B: usize, T, H>(
     handler_id: usize,
     handler: &H,
 ) where
-    H: for<'b> Handler<'b, N, &'b mut T>,
+    H: for<'b> Handler<'b, &'b mut T, N>,
     T: Read + Write,
 {
     let mut buf = [0_u8; B];
@@ -364,10 +364,10 @@ pub async fn handle_request<'b, const N: usize, H, T>(
     handler: &H,
 ) -> Result<bool, HandleRequestError<T::Error, H::Error>>
 where
-    H: Handler<'b, N, T>,
+    H: Handler<'b, T, N>,
     T: Read + Write,
 {
-    let mut connection = ServerConnection::<N, _>::new(buf, io).await?;
+    let mut connection = Connection::<_, N>::new(buf, io).await?;
 
     let result = handler.handle(&mut connection).await;
 
@@ -385,15 +385,15 @@ where
     Ok(connection.needs_close())
 }
 
-pub struct Server<const N: usize, const B: usize, A, H> {
+pub struct Server<A, H, const N: usize = 128, const B: usize = 2048> {
     acceptor: A,
     handler: H,
 }
 
-impl<const N: usize, const B: usize, A, H> Server<N, B, A, H>
+impl<A, H, const N: usize, const B: usize> Server<A, H, N, B>
 where
     A: embedded_nal_async_xtra::TcpAccept,
-    H: for<'b, 't> Handler<'b, N, &'b mut A::Connection<'t>>,
+    H: for<'b, 't> Handler<'b, &'b mut A::Connection<'t>, N>,
 {
     #[inline(always)]
     pub const fn new(acceptor: A, handler: H) -> Self {
@@ -468,7 +468,7 @@ mod embedded_svc_compat {
 
     use super::*;
 
-    impl<'b, const N: usize, T> Headers for ServerConnection<'b, N, T>
+    impl<'b, T, const N: usize> Headers for super::Connection<'b, T, N>
     where
         T: Read + Write,
     {
@@ -480,7 +480,7 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize, T> Query for ServerConnection<'b, N, T>
+    impl<'b, T, const N: usize> Query for super::Connection<'b, T, N>
     where
         T: Read + Write,
     {
@@ -499,7 +499,7 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize, T> Connection for ServerConnection<'b, N, T>
+    impl<'b, T, const N: usize> Connection for super::Connection<'b, T, N>
     where
         T: Read + Write + 'b,
     {
@@ -512,12 +512,8 @@ mod embedded_svc_compat {
         type RawConnection = T;
 
         fn split(&mut self) -> (&Self::Headers, &mut Self::Read) {
-            ServerConnection::split(self)
+            super::Connection::split(self)
         }
-
-        // fn headers(&self) -> Result<&Self::Headers, Self::Error> {
-        //     ServerConnection::headers(self)
-        // }
 
         async fn initiate_response(
             &mut self,
@@ -525,11 +521,11 @@ mod embedded_svc_compat {
             message: Option<&str>,
             headers: &[(&str, &str)],
         ) -> Result<(), Self::Error> {
-            ServerConnection::initiate_response(self, status, message, headers).await
+            super::Connection::initiate_response(self, status, message, headers).await
         }
 
         fn is_response_initiated(&self) -> bool {
-            ServerConnection::is_response_initiated(self)
+            super::Connection::is_response_initiated(self)
         }
 
         fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {
@@ -540,7 +536,7 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize, T> Handler<'b, N, T> for ChainRoot
+    impl<'b, T, const N: usize> Handler<'b, T, N> for ChainRoot
     where
         T: Read + Write,
     {
@@ -548,16 +544,16 @@ mod embedded_svc_compat {
 
         async fn handle(
             &self,
-            connection: &mut ServerConnection<'b, N, T>,
+            connection: &mut super::Connection<'b, T, N>,
         ) -> Result<(), Self::Error> {
             connection.initiate_response(404, None, &[]).await
         }
     }
 
-    impl<'b, const N: usize, T, H, Q> Handler<'b, N, T> for ChainHandler<H, Q>
+    impl<'b, const N: usize, T, H, Q> Handler<'b, T, N> for ChainHandler<H, Q>
     where
-        H: embedded_svc::http::server::asynch::Handler<ServerConnection<'b, N, T>>,
-        Q: Handler<'b, N, T>,
+        H: embedded_svc::http::server::asynch::Handler<super::Connection<'b, T, N>>,
+        Q: Handler<'b, T, N>,
         Q::Error: Into<H::Error>,
         T: Read + Write + 'b,
     {
@@ -565,7 +561,7 @@ mod embedded_svc_compat {
 
         async fn handle(
             &self,
-            connection: &mut ServerConnection<'b, N, T>,
+            connection: &mut super::Connection<'b, T, N>,
         ) -> Result<(), Self::Error> {
             let headers = connection.headers().ok();
 

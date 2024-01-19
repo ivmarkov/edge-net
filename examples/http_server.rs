@@ -1,4 +1,4 @@
-use edge_http::io::server::{Handler, Server, ServerConnection};
+use edge_http::io::server::{Connection, Handler, Server};
 use edge_http::Method;
 
 use edge_std_nal_async::StdTcpListen;
@@ -21,12 +21,9 @@ pub async fn run() -> Result<(), anyhow::Error> {
 
     info!("Running HTTP server on {addr}");
 
-    let acceptor = StdTcpListen::new()
-        .listen(addr.parse().unwrap())
-        .await
-        .unwrap();
+    let acceptor = StdTcpListen::new().listen(addr.parse().unwrap()).await?;
 
-    let mut server = Server::<128, 2048, _, _>::new(acceptor, HttpHandler);
+    let mut server: Server<_, _> = Server::new(acceptor, HttpHandler);
 
     server.process::<4, 4>().await?;
 
@@ -35,14 +32,14 @@ pub async fn run() -> Result<(), anyhow::Error> {
 
 struct HttpHandler;
 
-impl<'b, const N: usize, T> Handler<'b, N, T> for HttpHandler
+impl<'b, T, const N: usize> Handler<'b, T, N> for HttpHandler
 where
     T: Read + Write,
-    T::Error: Send + Sync + 'static + std::error::Error,
+    T::Error: Send + Sync + std::error::Error + 'static,
 {
     type Error = anyhow::Error;
 
-    async fn handle(&self, conn: &mut ServerConnection<'b, N, T>) -> Result<(), Self::Error> {
+    async fn handle(&self, conn: &mut Connection<'b, T, N>) -> Result<(), Self::Error> {
         let headers = conn.headers()?;
 
         if !matches!(headers.method, Some(Method::Get)) {

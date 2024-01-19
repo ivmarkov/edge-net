@@ -1,7 +1,7 @@
 use embedded_io_async::Read;
 use embedded_nal_async::{AddrType, Dns, SocketAddr, TcpConnect};
 
-use edge_http::io::{client::ClientConnection, Error};
+use edge_http::io::{client::Connection, Error};
 use edge_http::Method;
 
 use std_embedded_nal_async::Stack;
@@ -31,30 +31,30 @@ where
 
     let mut buf = [0_u8; 8192];
 
-    let mut connection = ClientConnection::<1024, _>::new(&mut buf, stack, SocketAddr::new(ip, 80));
+    let mut conn: Connection<_> = Connection::new(&mut buf, stack, SocketAddr::new(ip, 80));
 
     for uri in ["/ip", "/headers"] {
-        request(&mut connection, uri).await?;
+        request(&mut conn, uri).await?;
     }
 
     Ok(())
 }
 
 async fn request<'b, const N: usize, T: TcpConnect>(
-    connection: &mut ClientConnection<'b, N, T>,
+    conn: &mut Connection<'b, T, N>,
     uri: &str,
 ) -> Result<(), Error<T::Error>> {
-    connection
-        .initiate_request(true, Method::Get, uri, &[("Host", "httpbin.org")])
+    conn.initiate_request(true, Method::Get, uri, &[("Host", "httpbin.org")])
         .await?;
-    connection.initiate_response().await?;
+
+    conn.initiate_response().await?;
 
     let mut result = Vec::new();
 
     let mut buf = [0_u8; 1024];
 
     loop {
-        let len = connection.read(&mut buf).await?;
+        let len = conn.read(&mut buf).await?;
 
         if len > 0 {
             result.extend_from_slice(&buf[0..len]);

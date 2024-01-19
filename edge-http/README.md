@@ -18,7 +18,7 @@ For other protocols, look at the [edge-net](https://github.com/ivmarkov/edge-net
 use embedded_io_async::Read;
 use embedded_nal_async::{AddrType, Dns, SocketAddr, TcpConnect};
 
-use edge_http::io::{client::ClientConnection, Error};
+use edge_http::io::{client::Connection, Error};
 use edge_http::Method;
 
 use std_embedded_nal_async::Stack;
@@ -48,30 +48,30 @@ where
 
     let mut buf = [0_u8; 8192];
 
-    let mut connection = ClientConnection::<1024, _>::new(&mut buf, stack, SocketAddr::new(ip, 80));
+    let mut conn: Connection<_> = Connection::new(&mut buf, stack, SocketAddr::new(ip, 80));
 
     for uri in ["/ip", "/headers"] {
-        request(&mut connection, uri).await?;
+        request(&mut conn, uri).await?;
     }
 
     Ok(())
 }
 
 async fn request<'b, const N: usize, T: TcpConnect>(
-    connection: &mut ClientConnection<'b, N, T>,
+    conn: &mut Connection<'b, T, N>,
     uri: &str,
 ) -> Result<(), Error<T::Error>> {
-    connection
-        .initiate_request(true, Method::Get, uri, &[("Host", "httpbin.org")])
+    conn.initiate_request(true, Method::Get, uri, &[("Host", "httpbin.org")])
         .await?;
-    connection.initiate_response().await?;
+
+    conn.initiate_response().await?;
 
     let mut result = Vec::new();
 
     let mut buf = [0_u8; 1024];
 
     loop {
-        let len = connection.read(&mut buf).await?;
+        let len = conn.read(&mut buf).await?;
 
         if len > 0 {
             result.extend_from_slice(&buf[0..len]);
@@ -92,7 +92,7 @@ async fn request<'b, const N: usize, T: TcpConnect>(
 ### HTTP server
 
 ```rust
-use edge_http::io::server::{Handler, Server, ServerConnection};
+use edge_http::io::server::{Connection, Handler, Server};
 use edge_http::Method;
 
 use edge_std_nal_async::StdTcpListen;
@@ -115,12 +115,9 @@ pub async fn run() -> Result<(), anyhow::Error> {
 
     info!("Running HTTP server on {addr}");
 
-    let acceptor = StdTcpListen::new()
-        .listen(addr.parse().unwrap())
-        .await
-        .unwrap();
+    let acceptor = StdTcpListen::new().listen(addr.parse().unwrap()).await?;
 
-    let mut server = Server::<128, 2048, _, _>::new(acceptor, HttpHandler);
+    let mut server: Server<_, _> = Server::new(acceptor, HttpHandler);
 
     server.process::<4, 4>().await?;
 
@@ -129,14 +126,14 @@ pub async fn run() -> Result<(), anyhow::Error> {
 
 struct HttpHandler;
 
-impl<'b, const N: usize, T> Handler<'b, N, T> for HttpHandler
+impl<'b, T, const N: usize> Handler<'b, T, N> for HttpHandler
 where
     T: Read + Write,
-    T::Error: Send + Sync + 'static + std::error::Error,
+    T::Error: Send + Sync + std::error::Error + 'static,
 {
     type Error = anyhow::Error;
 
-    async fn handle(&self, conn: &mut ServerConnection<'b, N, T>) -> Result<(), Self::Error> {
+    async fn handle(&self, conn: &mut Connection<'b, T, N>) -> Result<(), Self::Error> {
         let headers = conn.headers()?;
 
         if !matches!(headers.method, Some(Method::Get)) {

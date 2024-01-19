@@ -18,17 +18,17 @@ use super::Method;
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
-pub enum ClientConnection<'b, const N: usize, T>
+pub enum Connection<'b, T, const N: usize = 128>
 where
     T: TcpConnect,
 {
     Transition(TransitionState),
-    Unbound(UnboundState<'b, N, T>),
-    Request(RequestState<'b, N, T>),
-    Response(ResponseState<'b, N, T>),
+    Unbound(UnboundState<'b, T, N>),
+    Request(RequestState<'b, T, N>),
+    Response(ResponseState<'b, T, N>),
 }
 
-impl<'b, const N: usize, T> ClientConnection<'b, N, T>
+impl<'b, T, const N: usize> Connection<'b, T, N>
 where
     T: TcpConnect,
 {
@@ -274,7 +274,7 @@ where
         Ok(())
     }
 
-    fn unbind(&mut self) -> UnboundState<'b, N, T> {
+    fn unbind(&mut self) -> UnboundState<'b, T, N> {
         let state = mem::replace(self, Self::Transition(TransitionState(())));
 
         let unbound = match state {
@@ -305,7 +305,7 @@ where
         unbound
     }
 
-    fn unbound_mut(&mut self) -> Result<&mut UnboundState<'b, N, T>, Error<T::Error>> {
+    fn unbound_mut(&mut self) -> Result<&mut UnboundState<'b, T, N>, Error<T::Error>> {
         if let Self::Unbound(new) = self {
             Ok(new)
         } else {
@@ -313,7 +313,7 @@ where
         }
     }
 
-    fn request_mut(&mut self) -> Result<&mut RequestState<'b, N, T>, Error<T::Error>> {
+    fn request_mut(&mut self) -> Result<&mut RequestState<'b, T, N>, Error<T::Error>> {
         if let Self::Request(request) = self {
             Ok(request)
         } else {
@@ -321,7 +321,7 @@ where
         }
     }
 
-    fn response_mut(&mut self) -> Result<&mut ResponseState<'b, N, T>, Error<T::Error>> {
+    fn response_mut(&mut self) -> Result<&mut ResponseState<'b, T, N>, Error<T::Error>> {
         if let Self::Response(response) = self {
             Ok(response)
         } else {
@@ -329,7 +329,7 @@ where
         }
     }
 
-    fn response_ref(&self) -> Result<&ResponseState<'b, N, T>, Error<T::Error>> {
+    fn response_ref(&self) -> Result<&ResponseState<'b, T, N>, Error<T::Error>> {
         if let Self::Response(response) = self {
             Ok(response)
         } else {
@@ -347,14 +347,14 @@ where
     }
 }
 
-impl<'b, const N: usize, T> ErrorType for ClientConnection<'b, N, T>
+impl<'b, T, const N: usize> ErrorType for Connection<'b, T, N>
 where
     T: TcpConnect,
 {
     type Error = Error<T::Error>;
 }
 
-impl<'b, const N: usize, T> Read for ClientConnection<'b, N, T>
+impl<'b, T, const N: usize> Read for Connection<'b, T, N>
 where
     T: TcpConnect + 'b,
 {
@@ -363,7 +363,7 @@ where
     }
 }
 
-impl<'b, const N: usize, T> Write for ClientConnection<'b, N, T>
+impl<'b, T, const N: usize> Write for Connection<'b, T, N>
 where
     T: TcpConnect + 'b,
 {
@@ -378,7 +378,7 @@ where
 
 pub struct TransitionState(());
 
-pub struct UnboundState<'b, const N: usize, T>
+pub struct UnboundState<'b, T, const N: usize>
 where
     T: TcpConnect,
 {
@@ -388,7 +388,7 @@ where
     io: Option<T::Connection<'b>>,
 }
 
-pub struct RequestState<'b, const N: usize, T>
+pub struct RequestState<'b, T, const N: usize>
 where
     T: TcpConnect,
 {
@@ -398,7 +398,7 @@ where
     io: SendBody<T::Connection<'b>>,
 }
 
-pub struct ResponseState<'b, const N: usize, T>
+pub struct ResponseState<'b, T, const N: usize>
 where
     T: TcpConnect,
 {
@@ -415,7 +415,7 @@ mod embedded_svc_compat {
 
     use embedded_svc::http::client::asynch::{Connection, Headers, Method, Status};
 
-    impl<'b, const N: usize, T> Headers for ClientConnection<'b, N, T>
+    impl<'b, T, const N: usize> Headers for super::Connection<'b, T, N>
     where
         T: TcpConnect + 'b,
     {
@@ -426,7 +426,7 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize, T> Status for ClientConnection<'b, N, T>
+    impl<'b, T, const N: usize> Status for super::Connection<'b, T, N>
     where
         T: TcpConnect + 'b,
     {
@@ -443,7 +443,7 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize, T> Connection for ClientConnection<'b, N, T>
+    impl<'b, T, const N: usize> Connection for super::Connection<'b, T, N>
     where
         T: TcpConnect + 'b,
     {
@@ -461,23 +461,23 @@ mod embedded_svc_compat {
             uri: &str,
             headers: &[(&str, &str)],
         ) -> Result<(), Self::Error> {
-            ClientConnection::initiate_request(self, true, method.into(), uri, headers).await
+            super::Connection::initiate_request(self, true, method.into(), uri, headers).await
         }
 
         fn is_request_initiated(&self) -> bool {
-            ClientConnection::is_request_initiated(self)
+            super::Connection::is_request_initiated(self)
         }
 
         async fn initiate_response(&mut self) -> Result<(), Self::Error> {
-            ClientConnection::initiate_response(self).await
+            super::Connection::initiate_response(self).await
         }
 
         fn is_response_initiated(&self) -> bool {
-            ClientConnection::is_response_initiated(self)
+            super::Connection::is_response_initiated(self)
         }
 
         fn split(&mut self) -> (&Self::Headers, &mut Self::Read) {
-            ClientConnection::split(self)
+            super::Connection::split(self)
         }
 
         fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {
