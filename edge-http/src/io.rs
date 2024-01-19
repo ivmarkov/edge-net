@@ -75,7 +75,135 @@ where
 #[cfg(feature = "std")]
 impl<E> std::error::Error for Error<E> where E: std::error::Error {}
 
-pub async fn send_request<W>(
+impl<'b, const N: usize> RequestHeaders<'b, N> {
+    pub async fn receive<R>(
+        &mut self,
+        buf: &'b mut [u8],
+        mut input: R,
+    ) -> Result<(&'b mut [u8], usize), Error<R::Error>>
+    where
+        R: Read,
+    {
+        let (read_len, headers_len) = match read_reply_buf::<N, _>(&mut input, buf, true).await {
+            Ok(read_len) => read_len,
+            Err(e) => return Err(e),
+        };
+
+        let mut parser = httparse::Request::new(&mut self.headers.0);
+
+        let (headers_buf, body_buf) = buf.split_at_mut(headers_len);
+
+        let status = match parser.parse(headers_buf) {
+            Ok(status) => status,
+            Err(e) => return Err(e.into()),
+        };
+
+        if let Status::Complete(headers_len2) = status {
+            if headers_len != headers_len2 {
+                unreachable!("Should not happen. HTTP header parsing is indeterminate.")
+            }
+
+            self.http11 = if let Some(version) = parser.version {
+                if version > 1 {
+                    Err(Error::InvalidHeaders)?;
+                }
+
+                Some(version == 1)
+            } else {
+                None
+            };
+
+            self.method = parser.method.and_then(Method::new);
+            self.path = parser.path;
+
+            trace!("Received:\n{}", self);
+
+            Ok((body_buf, read_len - headers_len))
+        } else {
+            unreachable!("Secondary parse of already loaded buffer failed.")
+        }
+    }
+
+    pub async fn send<W>(&self, mut output: W) -> Result<BodyType, Error<W::Error>>
+    where
+        W: Write,
+    {
+        send_request(
+            self.http11.unwrap_or(false),
+            self.method,
+            self.path,
+            &mut output,
+        )
+        .await?;
+        let body_type = self.headers.send(&mut output).await?;
+        send_headers_end(output).await?;
+
+        Ok(body_type)
+    }
+}
+
+impl<'b, const N: usize> ResponseHeaders<'b, N> {
+    pub async fn receive<R>(
+        &mut self,
+        buf: &'b mut [u8],
+        mut input: R,
+    ) -> Result<(&'b mut [u8], usize), Error<R::Error>>
+    where
+        R: Read,
+    {
+        let (read_len, headers_len) = read_reply_buf::<N, _>(&mut input, buf, false).await?;
+
+        let mut parser = httparse::Response::new(&mut self.headers.0);
+
+        let (headers_buf, body_buf) = buf.split_at_mut(headers_len);
+
+        let status = parser.parse(headers_buf).map_err(Error::from)?;
+
+        if let Status::Complete(headers_len2) = status {
+            if headers_len != headers_len2 {
+                unreachable!("Should not happen. HTTP header parsing is indeterminate.")
+            }
+
+            self.http11 = if let Some(version) = parser.version {
+                if version > 1 {
+                    Err(Error::InvalidHeaders)?;
+                }
+
+                Some(version == 1)
+            } else {
+                None
+            };
+
+            self.code = parser.code;
+            self.reason = parser.reason;
+
+            trace!("Received:\n{}", self);
+
+            Ok((body_buf, read_len - headers_len))
+        } else {
+            unreachable!("Secondary parse of already loaded buffer failed.")
+        }
+    }
+
+    pub async fn send<W>(&self, mut output: W) -> Result<BodyType, Error<W::Error>>
+    where
+        W: Write,
+    {
+        send_status(
+            self.http11.unwrap_or(false),
+            self.code,
+            self.reason,
+            &mut output,
+        )
+        .await?;
+        let body_type = self.headers.send(&mut output).await?;
+        send_headers_end(output).await?;
+
+        Ok(body_type)
+    }
+}
+
+pub(crate) async fn send_request<W>(
     http11: bool,
     method: Option<Method>,
     path: Option<&str>,
@@ -94,7 +222,7 @@ where
     .await
 }
 
-pub async fn send_status<W>(
+pub(crate) async fn send_status<W>(
     http11: bool,
     status: Option<u16>,
     reason: Option<&str>,
@@ -115,7 +243,7 @@ where
     .await
 }
 
-pub async fn send_headers<'a, H, W>(headers: H, output: W) -> Result<BodyType, Error<W::Error>>
+pub(crate) async fn send_headers<'a, H, W>(headers: H, output: W) -> Result<BodyType, Error<W::Error>>
 where
     W: Write,
     H: IntoIterator<Item = &'a (&'a str, &'a str)>,
@@ -129,7 +257,7 @@ where
     .await
 }
 
-pub async fn send_raw_headers<'a, H, W>(
+pub(crate) async fn send_raw_headers<'a, H, W>(
     headers: H,
     mut output: W,
 ) -> Result<BodyType, Error<W::Error>>
@@ -153,7 +281,7 @@ where
     Ok(body)
 }
 
-pub async fn send_headers_end<W>(mut output: W) -> Result<(), Error<W::Error>>
+pub(crate) async fn send_headers_end<W>(mut output: W) -> Result<(), Error<W::Error>>
 where
     W: Write,
 {
@@ -161,7 +289,7 @@ where
 }
 
 impl<'b, const N: usize> Headers<'b, N> {
-    pub async fn send<W>(&self, output: W) -> Result<BodyType, Error<W::Error>>
+    pub(crate) async fn send<W>(&self, output: W) -> Result<BodyType, Error<W::Error>>
     where
         W: Write,
     {
@@ -169,6 +297,7 @@ impl<'b, const N: usize> Headers<'b, N> {
     }
 }
 
+#[allow(private_interfaces)]
 pub enum Body<'b, R> {
     Close(PartiallyRead<'b, R>),
     ContentLen(ContentLenRead<PartiallyRead<'b, R>>),
@@ -243,7 +372,7 @@ where
     }
 }
 
-pub struct PartiallyRead<'b, R> {
+pub(crate) struct PartiallyRead<'b, R> {
     buf: &'b [u8],
     read_len: usize,
     input: R,
@@ -258,13 +387,13 @@ impl<'b, R> PartiallyRead<'b, R> {
         }
     }
 
-    pub fn buf_len(&self) -> usize {
-        self.buf.len()
-    }
+    // pub fn buf_len(&self) -> usize {
+    //     self.buf.len()
+    // }
 
-    pub fn as_raw_reader(&mut self) -> &mut R {
-        &mut self.input
-    }
+    // pub fn as_raw_reader(&mut self) -> &mut R {
+    //     &mut self.input
+    // }
 
     pub fn release(self) -> R {
         self.input
@@ -296,7 +425,7 @@ where
     }
 }
 
-pub struct ContentLenRead<R> {
+pub(crate) struct ContentLenRead<R> {
     content_len: u64,
     read_len: u64,
     input: R,
@@ -348,7 +477,7 @@ where
     }
 }
 
-pub struct ChunkedRead<'b, R> {
+pub(crate) struct ChunkedRead<'b, R> {
     buf: &'b mut [u8],
     buf_offset: usize,
     buf_len: usize,
@@ -574,6 +703,7 @@ where
     }
 }
 
+#[allow(private_interfaces)]
 pub enum SendBody<W> {
     Close(W),
     ContentLen(ContentLenWrite<W>),
@@ -670,7 +800,7 @@ where
     }
 }
 
-pub struct ContentLenWrite<W> {
+pub(crate) struct ContentLenWrite<W> {
     content_len: u64,
     write_len: u64,
     output: W,
@@ -721,7 +851,7 @@ where
     }
 }
 
-pub struct ChunkedWrite<W> {
+pub(crate) struct ChunkedWrite<W> {
     output: W,
     finished: bool,
 }
@@ -792,133 +922,6 @@ where
     }
 }
 
-impl<'b, const N: usize> RequestHeaders<'b, N> {
-    pub async fn receive<R>(
-        &mut self,
-        buf: &'b mut [u8],
-        mut input: R,
-    ) -> Result<(&'b mut [u8], usize), Error<R::Error>>
-    where
-        R: Read,
-    {
-        let (read_len, headers_len) = match read_reply_buf::<N, _>(&mut input, buf, true).await {
-            Ok(read_len) => read_len,
-            Err(e) => return Err(e),
-        };
-
-        let mut parser = httparse::Request::new(&mut self.headers.0);
-
-        let (headers_buf, body_buf) = buf.split_at_mut(headers_len);
-
-        let status = match parser.parse(headers_buf) {
-            Ok(status) => status,
-            Err(e) => return Err(e.into()),
-        };
-
-        if let Status::Complete(headers_len2) = status {
-            if headers_len != headers_len2 {
-                unreachable!("Should not happen. HTTP header parsing is indeterminate.")
-            }
-
-            self.http11 = if let Some(version) = parser.version {
-                if version > 1 {
-                    Err(Error::InvalidHeaders)?;
-                }
-
-                Some(version == 1)
-            } else {
-                None
-            };
-
-            self.method = parser.method.and_then(Method::new);
-            self.path = parser.path;
-
-            trace!("Received:\n{}", self);
-
-            Ok((body_buf, read_len - headers_len))
-        } else {
-            unreachable!("Secondary parse of already loaded buffer failed.")
-        }
-    }
-
-    pub async fn send<W>(&self, mut output: W) -> Result<BodyType, Error<W::Error>>
-    where
-        W: Write,
-    {
-        send_request(
-            self.http11.unwrap_or(false),
-            self.method,
-            self.path,
-            &mut output,
-        )
-        .await?;
-        let body_type = self.headers.send(&mut output).await?;
-        send_headers_end(output).await?;
-
-        Ok(body_type)
-    }
-}
-
-impl<'b, const N: usize> ResponseHeaders<'b, N> {
-    pub async fn receive<R>(
-        &mut self,
-        buf: &'b mut [u8],
-        mut input: R,
-    ) -> Result<(&'b mut [u8], usize), Error<R::Error>>
-    where
-        R: Read,
-    {
-        let (read_len, headers_len) = read_reply_buf::<N, _>(&mut input, buf, false).await?;
-
-        let mut parser = httparse::Response::new(&mut self.headers.0);
-
-        let (headers_buf, body_buf) = buf.split_at_mut(headers_len);
-
-        let status = parser.parse(headers_buf).map_err(Error::from)?;
-
-        if let Status::Complete(headers_len2) = status {
-            if headers_len != headers_len2 {
-                unreachable!("Should not happen. HTTP header parsing is indeterminate.")
-            }
-
-            self.http11 = if let Some(version) = parser.version {
-                if version > 1 {
-                    Err(Error::InvalidHeaders)?;
-                }
-
-                Some(version == 1)
-            } else {
-                None
-            };
-
-            self.code = parser.code;
-            self.reason = parser.reason;
-
-            trace!("Received:\n{}", self);
-
-            Ok((body_buf, read_len - headers_len))
-        } else {
-            unreachable!("Secondary parse of already loaded buffer failed.")
-        }
-    }
-
-    pub async fn send<W>(&self, mut output: W) -> Result<BodyType, Error<W::Error>>
-    where
-        W: Write,
-    {
-        send_status(
-            self.http11.unwrap_or(false),
-            self.code,
-            self.reason,
-            &mut output,
-        )
-        .await?;
-        let body_type = self.headers.send(&mut output).await?;
-        send_headers_end(output).await?;
-
-        Ok(body_type)
-    }
-}
 
 async fn read_reply_buf<const N: usize, R>(
     mut input: R,
