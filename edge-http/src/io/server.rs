@@ -1,4 +1,4 @@
-use core::fmt::Debug;
+use core::fmt::{self, Debug};
 use core::future::Future;
 use core::mem;
 use core::pin::pin;
@@ -320,6 +320,27 @@ impl<T, E> From<Error<T>> for HandleRequestError<T, E> {
     fn from(e: Error<T>) -> Self {
         Self::Connection(e)
     }
+}
+
+impl<C, E> fmt::Display for HandleRequestError<C, E>
+where
+    C: fmt::Display,
+    E: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Connection(e) => write!(f, "Connection error: {}", e),
+            Self::Handler(e) => write!(f, "Handler error: {}", e),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<C, E> std::error::Error for HandleRequestError<C, E>
+where
+    C: std::error::Error,
+    E: std::error::Error,
+{
 }
 
 pub async fn handle_request<'b, const N: usize, H, T>(
