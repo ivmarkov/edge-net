@@ -1,3 +1,18 @@
+# edge-http
+
+[![CI](https://github.com/ivmarkov/edge-net/actions/workflows/ci.yml/badge.svg)](https://github.com/ivmarkov/edge-net/actions/workflows/ci.yml)
+![crates.io](https://img.shields.io/crates/v/edge-net.svg)
+[![Documentation](https://docs.rs/edge-net/badge.svg)](https://docs.rs/edge-net)
+
+Async + `no_std` + no-alloc implementation of the HTTP protocol.
+
+The implementation is based on the splendid [httparse](https://github.com/seanmonstar/httparse) library.
+
+## Examples
+
+### HTTP client
+
+```rust
 use embedded_io_async::Read;
 use embedded_nal_async::{AddrType, Dns, SocketAddr, TcpConnect};
 
@@ -70,3 +85,10 @@ async fn request<'b, const N: usize, T: TcpConnect>(
 
     Ok(())
 }
+```
+
+### HTTP server
+
+```rust
+// TODO
+```
