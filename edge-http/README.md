@@ -16,8 +16,8 @@ The implementation is based on the splendid [httparse](https://github.com/seanmo
 use embedded_io_async::Read;
 use embedded_nal_async::{AddrType, Dns, SocketAddr, TcpConnect};
 
-use edge_net::http::io::{client::ClientConnection, Error};
-use edge_net::http::Method;
+use edge_http::io::{client::ClientConnection, Error};
+use edge_http::Method;
 
 use std_embedded_nal_async::Stack;
 

@@ -13,7 +13,7 @@ The implementation is based on the splendid [domain](https://github.com/NLnetLab
 ```rust
 use core::time::Duration;
 
-use edge_net::captive::io::run;
+use edge_captive::io::run;
 
 use embedded_nal_async::{IpAddr, Ipv4Addr, SocketAddr};
 
