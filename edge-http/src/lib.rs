@@ -416,6 +416,7 @@ impl BodyType {
 
 #[derive(Default, Debug)]
 pub struct RequestHeaders<'b, const N: usize> {
+    pub http11: Option<bool>,
     pub method: Option<Method>,
     pub path: Option<&'b str>,
     pub headers: Headers<'b, N>,
@@ -424,6 +425,7 @@ pub struct RequestHeaders<'b, const N: usize> {
 impl<'b, const N: usize> RequestHeaders<'b, N> {
     pub const fn new() -> Self {
         Self {
+            http11: Some(true),
             method: None,
             path: None,
             headers: Headers::<N>::new(),
@@ -433,12 +435,12 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
 
 impl<'b, const N: usize> Display for RequestHeaders<'b, N> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // if let Some(version) = self.version {
-        //     writeln!(f, "Version {}", version)?;
-        // }
+        if let Some(http11) = self.http11 {
+            write!(f, "{} ", if http11 { "HTTP/1.1" } else { "HTTP/1.0" })?;
+        }
 
         if let Some(method) = self.method {
-            writeln!(f, "{} {}", method, self.path.unwrap_or(""))?;
+            writeln!(f, "{method} {}", self.path.unwrap_or(""))?;
         }
 
         for (name, value) in self.headers.iter() {
@@ -455,6 +457,7 @@ impl<'b, const N: usize> Display for RequestHeaders<'b, N> {
 
 #[derive(Default, Debug)]
 pub struct ResponseHeaders<'b, const N: usize> {
+    pub http11: Option<bool>,
     pub code: Option<u16>,
     pub reason: Option<&'b str>,
     pub headers: Headers<'b, N>,
@@ -463,6 +466,7 @@ pub struct ResponseHeaders<'b, const N: usize> {
 impl<'b, const N: usize> ResponseHeaders<'b, N> {
     pub const fn new() -> Self {
         Self {
+            http11: Some(true),
             code: None,
             reason: None,
             headers: Headers::<N>::new(),
@@ -472,12 +476,12 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
 
 impl<'b, const N: usize> Display for ResponseHeaders<'b, N> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // if let Some(version) = self.version {
-        //     writeln!(f, "Version {}", version)?;
-        // }
+        if let Some(http11) = self.http11 {
+            writeln!(f, "{} ", if http11 { "HTTP/1.1 " } else { "HTTP/1.0" })?;
+        }
 
         if let Some(code) = self.code {
-            writeln!(f, "{} {}", code, self.reason.unwrap_or(""))?;
+            writeln!(f, "{code} {}", self.reason.unwrap_or(""))?;
         }
 
         for (name, value) in self.headers.iter() {

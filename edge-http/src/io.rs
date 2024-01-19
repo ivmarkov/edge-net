@@ -76,6 +76,7 @@ where
 impl<E> std::error::Error for Error<E> where E: std::error::Error {}
 
 pub async fn send_request<W>(
+    http11: bool,
     method: Option<Method>,
     path: Option<&str>,
     output: W,
@@ -83,10 +84,18 @@ pub async fn send_request<W>(
 where
     W: Write,
 {
-    send_status_line(true, method.map(|method| method.as_str()), path, output).await
+    send_status_line(
+        true,
+        http11,
+        method.map(|method| method.as_str()),
+        path,
+        output,
+    )
+    .await
 }
 
 pub async fn send_status<W>(
+    http11: bool,
     status: Option<u16>,
     reason: Option<&str>,
     output: W,
@@ -98,6 +107,7 @@ where
 
     send_status_line(
         false,
+        http11,
         status_str.as_ref().map(|status| status.as_str()),
         reason,
         output,
@@ -810,6 +820,16 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
                 unreachable!("Should not happen. HTTP header parsing is indeterminate.")
             }
 
+            self.http11 = if let Some(version) = parser.version {
+                if version > 1 {
+                    Err(Error::InvalidHeaders)?;
+                }
+
+                Some(version == 1)
+            } else {
+                None
+            };
+
             self.method = parser.method.and_then(Method::new);
             self.path = parser.path;
 
@@ -825,7 +845,13 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
     where
         W: Write,
     {
-        send_request(self.method, self.path, &mut output).await?;
+        send_request(
+            self.http11.unwrap_or(false),
+            self.method,
+            self.path,
+            &mut output,
+        )
+        .await?;
         let body_type = self.headers.send(&mut output).await?;
         send_headers_end(output).await?;
 
@@ -855,6 +881,16 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
                 unreachable!("Should not happen. HTTP header parsing is indeterminate.")
             }
 
+            self.http11 = if let Some(version) = parser.version {
+                if version > 1 {
+                    Err(Error::InvalidHeaders)?;
+                }
+
+                Some(version == 1)
+            } else {
+                None
+            };
+
             self.code = parser.code;
             self.reason = parser.reason;
 
@@ -870,7 +906,13 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
     where
         W: Write,
     {
-        send_status(self.code, self.reason, &mut output).await?;
+        send_status(
+            self.http11.unwrap_or(false),
+            self.code,
+            self.reason,
+            &mut output,
+        )
+        .await?;
         let body_type = self.headers.send(&mut output).await?;
         send_headers_end(output).await?;
 
@@ -913,6 +955,7 @@ where
 
 async fn send_status_line<W>(
     request: bool,
+    http11: bool,
     token: Option<&str>,
     extra: Option<&str>,
     mut output: W,
@@ -923,7 +966,7 @@ where
     let mut written = false;
 
     if !request {
-        output.write_all(b"HTTP/1.1").await.map_err(Error::Io)?;
+        send_version(&mut output, http11).await?;
         written = true;
     }
 
@@ -958,10 +1001,20 @@ where
             output.write_all(b" ").await.map_err(Error::Io)?;
         }
 
-        output.write_all(b"HTTP/1.1").await.map_err(Error::Io)?;
+        send_version(&mut output, http11).await?;
     }
 
     output.write_all(b"\r\n").await.map_err(Error::Io)?;
 
     Ok(())
+}
+
+async fn send_version<W>(mut output: W, http11: bool) -> Result<(), Error<W::Error>>
+where
+    W: Write,
+{
+    output
+        .write_all(if http11 { b"HTTP/1.1" } else { b"HTTP/1.0" })
+        .await
+        .map_err(Error::Io)
 }

@@ -130,11 +130,22 @@ where
         let mut buf = [0; COMPLETION_BUF_SIZE];
         while request.io.read(&mut buf).await? > 0 {}
 
+        let http11 = request.request.http11.unwrap_or(false);
+
         let mut io = self.unbind_mut();
 
         let result = async {
-            send_status(status, reason, &mut io).await?;
-            let body_type = send_headers(headers.iter(), &mut io).await?;
+            send_status(http11, status, reason, &mut io).await?;
+            let body_type = send_headers(
+                headers.iter().filter(|(k, v)| {
+                    http11
+                        || !k.eq_ignore_ascii_case("Transfer-Encoding")
+                        || !v.eq_ignore_ascii_case("Chunked")
+                }),
+                &mut io,
+            )
+            .await?;
+
             send_headers_end(&mut io).await?;
 
             Ok(body_type)
@@ -143,7 +154,10 @@ where
 
         match result {
             Ok(body_type) => {
-                *self = Self::Response(SendBody::new(body_type, io));
+                *self = Self::Response(SendBody::new(
+                    if http11 { body_type } else { BodyType::Close },
+                    io,
+                ));
 
                 Ok(())
             }

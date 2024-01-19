@@ -50,11 +50,12 @@ where
 
     pub async fn initiate_request<'a>(
         &'a mut self,
+        http11: bool,
         method: Method,
         uri: &'a str,
         headers: &'a [(&'a str, &'a str)],
     ) -> Result<(), Error<T::Error>> {
-        self.start_request(method, uri, headers).await
+        self.start_request(http11, method, uri, headers).await
     }
 
     pub fn is_request_initiated(&self) -> bool {
@@ -84,7 +85,8 @@ where
 
         let headers = upgrade_request_headers(host, origin, version, nonce, &mut nonce_base64_buf);
 
-        self.initiate_request(Method::Get, uri, &headers).await
+        self.initiate_request(true, Method::Get, uri, &headers)
+            .await
     }
 
     pub fn is_ws_upgrade_accepted(&self, _nonce: &[u8; NONCE_LEN]) -> Result<bool, Error<T::Error>>
@@ -128,6 +130,7 @@ where
 
     async fn start_request<'a>(
         &'a mut self,
+        http11: bool,
         method: Method,
         uri: &'a str,
         headers: &'a [(&'a str, &'a str)],
@@ -146,7 +149,7 @@ where
         let mut state = self.unbind();
 
         let result = async {
-            match send_request(Some(method), Some(uri), state.io.as_mut().unwrap()).await {
+            match send_request(http11, Some(method), Some(uri), state.io.as_mut().unwrap()).await {
                 Ok(_) => (),
                 Err(Error::Io(_)) => {
                     if !fresh_connection {
@@ -154,7 +157,8 @@ where
                         state.io = None;
                         state.io = Some(state.socket.connect(state.addr).await.map_err(Error::Io)?);
 
-                        send_request(Some(method), Some(uri), state.io.as_mut().unwrap()).await?;
+                        send_request(http11, Some(method), Some(uri), state.io.as_mut().unwrap())
+                            .await?;
                     }
                 }
                 Err(other) => Err(other)?,
@@ -457,7 +461,7 @@ mod embedded_svc_compat {
             uri: &str,
             headers: &[(&str, &str)],
         ) -> Result<(), Self::Error> {
-            ClientConnection::initiate_request(self, method.into(), uri, headers).await
+            ClientConnection::initiate_request(self, true, method.into(), uri, headers).await
         }
 
         fn is_request_initiated(&self) -> bool {
