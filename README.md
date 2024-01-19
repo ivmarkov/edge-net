@@ -6,7 +6,7 @@
 
 This crate ships async + `no_std` + no-alloc implementations of various network protocols.
 
-Suitable for MCU development, bare-metal in particular.
+Suitable for microcontrollers and embedded systems in general.
 
 Supported protocols:
 * [Websocket client and server](edge-ws)
