@@ -243,7 +243,10 @@ where
     .await
 }
 
-pub(crate) async fn send_headers<'a, H, W>(headers: H, output: W) -> Result<BodyType, Error<W::Error>>
+pub(crate) async fn send_headers<'a, H, W>(
+    headers: H,
+    output: W,
+) -> Result<BodyType, Error<W::Error>>
 where
     W: Write,
     H: IntoIterator<Item = &'a (&'a str, &'a str)>,
@@ -921,7 +924,6 @@ where
         self.output.flush().await.map_err(Error::Io)
     }
 }
-
 
 async fn read_reply_buf<const N: usize, R>(
     mut input: R,
