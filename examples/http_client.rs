@@ -22,7 +22,7 @@ async fn read<T: TcpConnect + Dns>(stack: &T) -> Result<(), Error<<T as TcpConne
 where
     <T as Dns>::Error: Into<<T as TcpConnect>::Error>,
 {
-    println!("About to open an HTTP connection to httpbin.org port 80");
+    info!("About to open an HTTP connection to httpbin.org port 80");
 
     let ip = stack
         .get_host_by_name("httpbin.org", AddrType::IPv4)

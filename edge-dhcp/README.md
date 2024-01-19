@@ -73,6 +73,10 @@ use edge_dhcp::server::{Server, ServerOptions};
 use embedded_nal_async::{Ipv4Addr, SocketAddrV4};
 
 fn main() {
+    env_logger::init_from_env(
+        env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
+    );
+
     futures_lite::future::block_on(run(
         0, // The interface index of the interface (e.g. eno0) to use; run `ip addr` to see it
     ))
