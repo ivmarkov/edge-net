@@ -42,16 +42,13 @@ where
 {
     type Error = anyhow::Error;
 
-    async fn handle(
-        &self,
-        path: &str,
-        method: Method,
-        conn: &mut ServerConnection<'b, N, T>,
-    ) -> Result<(), Self::Error> {
-        if method != Method::Get {
+    async fn handle(&self, conn: &mut ServerConnection<'b, N, T>) -> Result<(), Self::Error> {
+        let headers = conn.headers()?;
+
+        if !matches!(headers.method, Some(Method::Get)) {
             conn.initiate_response(405, Some("Method Not Allowed"), &[])
                 .await?;
-        } else if path != "/" {
+        } else if !matches!(headers.path, Some("/")) {
             conn.initiate_response(404, Some("Not Found"), &[]).await?;
         } else {
             conn.initiate_response(200, Some("OK"), &[("Content-Type", "text/plain")])

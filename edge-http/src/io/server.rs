@@ -8,8 +8,7 @@ use embedded_io_async::{ErrorType, Read, Write};
 use log::{debug, info, warn};
 
 use super::{
-    send_headers, send_headers_end, send_status, Body, BodyType, Error, Method, RequestHeaders,
-    SendBody,
+    send_headers, send_headers_end, send_status, Body, BodyType, Error, RequestHeaders, SendBody,
 };
 
 #[allow(unused_imports)]
@@ -272,12 +271,7 @@ where
 {
     type Error: Debug;
 
-    async fn handle(
-        &self,
-        path: &str,
-        method: Method,
-        connection: &mut ServerConnection<'b, N, T>,
-    ) -> Result<(), Self::Error>;
+    async fn handle(&self, connection: &mut ServerConnection<'b, N, T>) -> Result<(), Self::Error>;
 }
 
 impl<'b, const N: usize, T, H> Handler<'b, N, T> for &H
@@ -287,13 +281,8 @@ where
 {
     type Error = H::Error;
 
-    async fn handle(
-        &self,
-        path: &str,
-        method: Method,
-        connection: &mut ServerConnection<'b, N, T>,
-    ) -> Result<(), Self::Error> {
-        (**self).handle(path, method, connection).await
+    async fn handle(&self, connection: &mut ServerConnection<'b, N, T>) -> Result<(), Self::Error> {
+        (**self).handle(connection).await
     }
 }
 
@@ -380,10 +369,7 @@ where
 {
     let mut connection = ServerConnection::<N, _>::new(buf, io).await?;
 
-    let path = connection.headers()?.path.unwrap_or("");
-    let method = connection.headers()?.method.unwrap_or(Method::Get);
-
-    let result = handler.handle(path, method, &mut connection).await;
+    let result = handler.handle(&mut connection).await;
 
     match result {
         Result::Ok(_) => connection.complete().await?,
@@ -478,7 +464,7 @@ mod embedded_svc_compat {
     use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
     use crate::io::Body;
-    use crate::{Method, RequestHeaders};
+    use crate::RequestHeaders;
 
     use super::*;
 
@@ -562,8 +548,6 @@ mod embedded_svc_compat {
 
         async fn handle(
             &self,
-            _path: &str,
-            _method: Method,
             connection: &mut ServerConnection<'b, N, T>,
         ) -> Result<(), Self::Error> {
             connection.initiate_response(404, None, &[]).await
@@ -581,18 +565,22 @@ mod embedded_svc_compat {
 
         async fn handle(
             &self,
-            path: &str,
-            method: Method,
             connection: &mut ServerConnection<'b, N, T>,
         ) -> Result<(), Self::Error> {
-            if self.path == path && self.method == method.into() {
-                self.handler.handle(connection).await
-            } else {
-                self.next
-                    .handle(path, method, connection)
-                    .await
-                    .map_err(Into::into)
+            let headers = connection.headers().ok();
+
+            if let Some(headers) = headers {
+                if headers.path.map(|path| self.path == path).unwrap_or(false)
+                    && headers
+                        .method
+                        .map(|method| self.method == method.into())
+                        .unwrap_or(false)
+                {
+                    return self.handler.handle(connection).await;
+                }
             }
+
+            self.next.handle(connection).await.map_err(Into::into)
         }
     }
 }
