@@ -12,4 +12,4 @@ and sending packets to peers that do not have an IP address assigned yet.
 
 ## Examples
 
-Look at the [edge-dhcp](../edge-dhcp) crate as to how to utilize the capabilities of this crate.
+Look at the [edge-dhcp](../edge-dhcp) crate as to how to utilize the capabilities of `edge-raw`.
