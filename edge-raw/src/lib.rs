@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(async_fn_in_trait)]
 
+use core::fmt;
+
 use no_std_net::{Ipv4Addr, SocketAddrV4};
 
 use self::udp::UdpPacketHeader;
@@ -31,6 +33,22 @@ impl From<bytes::Error> for Error {
         }
     }
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let str = match self {
+            Self::DataUnderflow => "Data underflow",
+            Self::BufferOverflow => "Buffer overflow",
+            Self::InvalidFormat => "Invalid format",
+            Self::InvalidChecksum => "Invalid checksum",
+        };
+
+        write!(f, "{}", str)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
 #[allow(clippy::type_complexity)]
 pub fn ip_udp_decode(

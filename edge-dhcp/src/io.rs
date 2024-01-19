@@ -1,4 +1,4 @@
-use core::fmt::Debug;
+use core::fmt::{self, Debug};
 
 use embedded_nal_async::{SocketAddr, SocketAddrV4, UdpStack, UnconnectedUdp};
 use embedded_nal_async_xtra::UnconnectedUdpWithMac;
@@ -22,6 +22,21 @@ impl<E> From<dhcp::Error> for Error<E> {
         Self::Format(value)
     }
 }
+
+impl<E> fmt::Display for Error<E>
+where
+    E: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(err) => write!(f, "IO error: {err}"),
+            Self::Format(err) => write!(f, "Format error: {err}"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<E> std::error::Error for Error<E> where E: std::error::Error {}
 
 /// A fallback implementation of `UnconnectedUdpWithMac` that does not support MAC addresses.
 /// Might or might not work depending on the DHCP client.

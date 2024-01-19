@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(async_fn_in_trait)]
 
+use core::fmt;
+
 pub type Fragmented = bool;
 pub type Final = bool;
 
@@ -59,6 +61,24 @@ impl Error<()> {
         }
     }
 }
+
+impl<E> fmt::Display for Error<E>
+where
+    E: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Incomplete(size) => write!(f, "Incomplete: {} bytes missing", size),
+            Self::Invalid => write!(f, "Invalid"),
+            Self::BufferOverflow => write!(f, "Buffer overflow"),
+            Self::InvalidLen => write!(f, "Invalid length"),
+            Self::Io(err) => write!(f, "IO error: {}", err),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<E> std::error::Error for Error<E> where E: std::error::Error {}
 
 #[derive(Clone, Debug)]
 pub struct FrameHeader {

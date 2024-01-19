@@ -11,35 +11,46 @@ Async + `no_std` + no-alloc implementation of the DHCP protocol.
 ### DHCP client
 
 ```rust
-use edge_raw::{StdRawStack, Udp2RawStack};
-use edge_dhcp::{DEFAULT_CLIENT_PORT, Client, io::Lease, io::Error};
+use edge_raw::io::Udp2RawStack;
+use edge_std_nal_async::StdRawStack;
 
-use embedded_nal_async::Ipv4Addr;
+use edge_dhcp::client::Client;
+use edge_dhcp::io::{self, client::Lease, client::DEFAULT_CLIENT_PORT};
+
+use embedded_nal_async::{Ipv4Addr, SocketAddrV4};
+
+use log::info;
 
 fn main() {
-    futures_lite::task::block_on(0, run([0; 6]/* Your MAC addr here */)).unwrap();
+    env_logger::init_from_env(
+        env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
+    );
+
+    futures_lite::future::block_on(run(
+        2, // The interface index of the interface (e.g. eno0) to use; run `ip addr` to see it
+        [0x4c, 0xcc, 0x6a, 0xa2, 0x23, 0xf5], // Your MAC addr here; run `ip addr` to see it
+    ))
+    .unwrap();
 }
 
-async fn run(if_index: u8, if_mac: [u8; 6]) -> Result<(), impl Debug> {
-    let mut client = Client::new(thread_rng(), if_mac);
+async fn run(if_index: u32, if_mac: [u8; 6]) -> Result<(), anyhow::Error> {
+    let mut client = Client::new(rand::thread_rng(), if_mac);
 
     let stack: Udp2RawStack<_> = Udp2RawStack::new(StdRawStack::new(if_index));
     let mut buf = [0; 1500];
 
     loop {
-        let mut socket = bind(
+        let mut socket = io::bind(
             &stack,
-            SocketAddrV4::new(
-                Ipv4Addr::UNSPECIFIED,
-                DEFAULT_CLIENT_PORT,
-            ),
+            SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_CLIENT_PORT),
         )
         .await?;
 
-        let (mut lease, options) =
-            Lease::new(&mut client, &mut socket, &mut buf).await?;
+        let (mut lease, options) = Lease::new(&mut client, &mut socket, &mut buf).await?;
 
         info!("Got lease {lease:?} with options {options:?}");
+
+        info!("Entering an endless loop to keep the lease...");
 
         lease.keep(&mut client, &mut socket, &mut buf).await?;
     }
@@ -49,16 +60,22 @@ async fn run(if_index: u8, if_mac: [u8; 6]) -> Result<(), impl Debug> {
 ### DHCP server
 
 ```rust
-use edge_raw::{StdRawStack, Udp2RawStack};
-use edge_dhcp::{self, DEFAULT_SERVER_PORT, Server, ServerOptions, io::Error};
+use edge_raw::io::Udp2RawStack;
+use edge_std_nal_async::StdRawStack;
+
+use edge_dhcp::io::{self, DEFAULT_SERVER_PORT};
+use edge_dhcp::server::{Server, ServerOptions};
 
 use embedded_nal_async::{Ipv4Addr, SocketAddrV4};
 
 fn main() {
-    futures_lite::task::block_on(run(0)).unwrap();
+    futures_lite::future::block_on(run(
+        0, // The interface index of the interface (e.g. eno0) to use; run `ip addr` to see it
+    ))
+    .unwrap();
 }
 
-async fn run(if_index: u8) -> Result<(), impl Debug> {
+async fn run(if_index: u32) -> Result<(), anyhow::Error> {
     let stack: Udp2RawStack<_> = Udp2RawStack::new(StdRawStack::new(if_index));
 
     let mut buf = [0; 1500];
@@ -69,12 +86,14 @@ async fn run(if_index: u8) -> Result<(), impl Debug> {
 
     let mut gw_buf = [Ipv4Addr::UNSPECIFIED];
 
-    io::run(
+    io::server::run(
         &mut Server::<64>::new(ip), // Will give IP addresses in the rage 192.168.0.50 - 192.168.0.200, subnet 255.255.255.0
         &ServerOptions::new(ip, Some(&mut gw_buf)),
         &mut socket,
         &mut buf,
     )
-    .await
+    .await?;
+
+    Ok(())
 }
 ```

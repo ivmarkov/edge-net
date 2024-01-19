@@ -1,3 +1,4 @@
+use core::fmt;
 use core::pin::pin;
 
 use embassy_futures::select::{select, Either};
@@ -39,6 +40,21 @@ impl<E> From<MdnsError> for MdnsIoError<E> {
         Self::MdnsError(err)
     }
 }
+
+impl<E> fmt::Display for MdnsIoError<E>
+where
+    E: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MdnsError(err) => write!(f, "mDNS error: {}", err),
+            Self::IoError(err) => write!(f, "IO error: {}", err),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<E> std::error::Error for MdnsIoError<E> where E: std::error::Error {}
 
 pub struct MdnsRunBuffers {
     tx_buf: core::mem::MaybeUninit<[u8; MAX_TX_BUF_SIZE]>,

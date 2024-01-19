@@ -1,3 +1,4 @@
+use core::fmt;
 use core::time::Duration;
 
 use embedded_nal_async::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpStack, UnconnectedUdp};
@@ -21,6 +22,21 @@ impl<E> From<DnsError> for DnsIoError<E> {
         Self::DnsError(err)
     }
 }
+
+impl<E> fmt::Display for DnsIoError<E>
+where
+    E: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DnsError(err) => write!(f, "DNS error: {}", err),
+            Self::IoError(err) => write!(f, "IO error: {}", err),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<E> std::error::Error for DnsIoError<E> where E: std::error::Error {}
 
 pub async fn run<S>(
     stack: &S,

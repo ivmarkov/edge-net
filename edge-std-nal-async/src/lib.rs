@@ -29,10 +29,7 @@ impl TcpConnect for StdTcpConnect {
 
     type Connection<'a> = StdTcpConnection where Self: 'a;
 
-    async fn connect<'a>(
-        &'a self,
-        remote: SocketAddr,
-    ) -> Result<Self::Connection<'a>, Self::Error> {
+    async fn connect(&self, remote: SocketAddr) -> Result<Self::Connection<'_>, Self::Error> {
         let connection = Async::<TcpStream>::connect(to_std_addr(remote)).await?;
 
         Ok(StdTcpConnection(connection))
@@ -424,7 +421,7 @@ impl RawStack for StdRawStack {
 fn as_sockaddr_ll(storage: &libc::sockaddr_storage, len: usize) -> io::Result<&libc::sockaddr_ll> {
     match storage.ss_family as core::ffi::c_int {
         libc::AF_PACKET => {
-            assert!(len as usize >= core::mem::size_of::<libc::sockaddr_ll>());
+            assert!(len >= core::mem::size_of::<libc::sockaddr_ll>());
             Ok(unsafe { (storage as *const _ as *const libc::sockaddr_ll).as_ref() }.unwrap())
         }
         _ => Err(io::Error::new(ErrorKind::InvalidInput, "invalid argument")),

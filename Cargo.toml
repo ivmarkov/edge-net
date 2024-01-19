@@ -16,8 +16,8 @@ embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
 std-embedded-nal-async = { git = "https://gitlab.com/ivmarkov/std-embedded-nal" }
 
 [features]
-default = ["io"]
-std = ["edge-http/std", "edge-captive/std", "edge-mdns/std", "edge-mqtt", "edge-std-nal-async"]
+default = ["std"]
+std = ["io", "edge-captive/std", "edge-dhcp/std", "edge-http/std", "edge-mdns/std", "edge-raw/std", "edge-mqtt", "edge-ws/std", "edge-std-nal-async"]
 io = ["edge-captive/io", "edge-dhcp/io", "edge-http/io", "edge-mdns/io", "edge-raw/io", "edge-ws/io", "embedded-nal-async-xtra"]
 nightly = []
 embedded-svc = ["edge-http/embedded-svc", "edge-mqtt/embedded-svc", "edge-ws/embedded-svc"]
@@ -41,6 +41,8 @@ embedded-io-async = "0.6"
 embedded-nal-async = "0.7"
 std-embedded-nal-async = "0.1"
 futures-lite = "1"
+rand = "0.8"
+embassy-time = { version = "0.3", features = ["std", "generic-queue"] }
 
 [[example]]
 name = "captive_portal"
@@ -51,12 +53,20 @@ name = "simple"
 required-features = ["io", "std"]
 
 [[example]]
-name = "http_client"
+name = "dhcp_client"
 required-features = ["io", "std"]
 
 [[example]]
-name = "http_server"
-required-features = ["io", "std", "turnoff"]
+name = "dhcp_server"
+required-features = ["io", "std"]
+
+[[example]]
+name = "http_client"
+required-features = ["io", "std"]
+
+#[[example]]
+#name = "http_server"
+#required-features = ["io", "std", "turnoff"]
 
 [workspace]
 members = [

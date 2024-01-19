@@ -1,4 +1,5 @@
-use core::{fmt::Debug, mem::MaybeUninit};
+use core::fmt::{self, Debug};
+use core::mem::MaybeUninit;
 
 use embedded_io_async::ErrorKind;
 
@@ -33,6 +34,22 @@ where
         }
     }
 }
+
+impl<E> fmt::Display for Error<E>
+where
+    E: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(err) => write!(f, "IO error: {err}"),
+            Self::UnsupportedProtocol => write!(f, "Unsupported protocol"),
+            Self::RawError(err) => write!(f, "Raw error: {err}"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<E> std::error::Error for Error<E> where E: std::error::Error {}
 
 pub struct ConnectedUdp2RawSocket<T, const N: usize>(T, SocketAddrV4, SocketAddrV4);
 

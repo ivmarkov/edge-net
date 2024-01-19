@@ -45,7 +45,7 @@ async fn request<'b, const N: usize, T: TcpConnect>(
     uri: &str,
 ) -> Result<(), Error<T::Error>> {
     connection
-        .initiate_request(Method::Get, uri, &[("Host", "httpbin.org")])
+        .initiate_request(true, Method::Get, uri, &[("Host", "httpbin.org")])
         .await?;
     connection.initiate_response().await?;
 

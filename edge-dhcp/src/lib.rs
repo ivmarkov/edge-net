@@ -1,7 +1,7 @@
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 
-use core::fmt;
 /// This code is a `no_std` and no-alloc modification of https://github.com/krolaw/dhcp4r
+use core::fmt;
 use core::str::Utf8Error;
 
 pub use no_std_net::Ipv4Addr;
@@ -36,6 +36,25 @@ impl From<bytes::Error> for Error {
         }
     }
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let str = match self {
+            Self::DataUnderflow => "Data underflow",
+            Self::BufferOverflow => "Buffer overflow",
+            Self::InvalidPacket => "Invalid packet",
+            Self::InvalidUtf8Str(_) => "Invalid Utf8 string",
+            Self::InvalidMessageType => "Invalid message type",
+            Self::MissingCookie => "Missing cookie",
+            Self::InvalidHlen => "Invalid hlen",
+        };
+
+        write!(f, "{}", str)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
 ///
 /// DHCP Message Type.
