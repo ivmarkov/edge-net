@@ -80,10 +80,7 @@ where
         uri: &str,
         version: Option<&str>,
         nonce: &[u8; NONCE_LEN],
-    ) -> Result<(), Error<T::Error>>
-    where
-        T: TcpConnect,
-    {
+    ) -> Result<(), Error<T::Error>> {
         let mut nonce_base64_buf = [0_u8; MAX_BASE64_KEY_LEN];
 
         let headers = upgrade_request_headers(host, origin, version, nonce, &mut nonce_base64_buf);
@@ -92,26 +89,8 @@ where
             .await
     }
 
-    pub fn is_ws_upgrade_accepted(&self, _nonce: &[u8; NONCE_LEN]) -> Result<bool, Error<T::Error>>
-    where
-        T: TcpConnect,
-    {
-        let headers = self.headers()?;
-
-        let succeeded = matches!(headers.code, Some(101))
-            && headers
-                .headers
-                .connection()
-                .map(|v| v.eq_ignore_ascii_case("Upgrade"))
-                .unwrap_or(false)
-            && headers
-                .headers
-                .upgrade()
-                .map(|v| v.eq_ignore_ascii_case("websocket"))
-                .unwrap_or(false)
-            && headers.headers.get("Sec-WebSocket-Accept").is_some();
-
-        Ok(succeeded)
+    pub fn is_ws_upgrade_accepted(&self, nonce: &[u8; NONCE_LEN]) -> Result<bool, Error<T::Error>> {
+        Ok(self.headers()?.is_ws_upgrade_accepted(nonce))
     }
 
     #[allow(clippy::type_complexity)]

@@ -8,6 +8,7 @@ use httparse::Status;
 
 use log::trace;
 
+use crate::ws::UpgradeError;
 use crate::{BodyType, Headers, Method, RequestHeaders, ResponseHeaders};
 
 pub mod client;
@@ -24,6 +25,7 @@ pub enum Error<E> {
     IncompleteHeaders,
     IncompleteBody,
     InvalidState,
+    WsUpgradeError(UpgradeError),
     Io(E),
 }
 
@@ -38,6 +40,12 @@ impl<E> From<httparse::Error> for Error<E> {
             httparse::Error::TooManyHeaders => Self::TooManyHeaders,
             httparse::Error::Version => Self::InvalidHeaders,
         }
+    }
+}
+
+impl<E> From<UpgradeError> for Error<E> {
+    fn from(e: UpgradeError) -> Self {
+        Self::WsUpgradeError(e)
     }
 }
 
@@ -67,6 +75,7 @@ where
             Self::IncompleteHeaders => write!(f, "HTTP headers section is incomplete"),
             Self::IncompleteBody => write!(f, "HTTP body is incomplete"),
             Self::InvalidState => write!(f, "Connection is not in requested state"),
+            Self::WsUpgradeError(e) => write!(f, "WebSocket upgrade error: {e}"),
             Self::Io(e) => write!(f, "{e}"),
         }
     }

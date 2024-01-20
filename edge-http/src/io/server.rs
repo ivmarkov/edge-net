@@ -7,6 +7,7 @@ use embedded_io_async::{ErrorType, Read, Write};
 
 use log::{debug, info, warn};
 
+use crate::ws::{upgrade_response_headers, MAX_BASE64_KEY_RESPONSE_LEN};
 use crate::DEFAULT_MAX_HEADERS_COUNT;
 
 const DEFAULT_HANDLERS_COUNT: usize = 4;
@@ -66,6 +67,10 @@ where
         Ok(&self.request_ref()?.request)
     }
 
+    pub fn is_ws_upgrade_request(&self) -> Result<bool, Error<T::Error>> {
+        Ok(self.headers()?.is_ws_upgrade_request())
+    }
+
     pub async fn initiate_response(
         &mut self,
         status: u16,
@@ -73,6 +78,18 @@ where
         headers: &[(&str, &str)],
     ) -> Result<(), Error<T::Error>> {
         self.complete_request(Some(status), message, headers).await
+    }
+
+    pub async fn initiate_ws_upgrade_response(&mut self) -> Result<(), Error<T::Error>> {
+        let mut sec_key_response_base64_buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
+
+        let headers = upgrade_response_headers(
+            self.headers()?.headers.iter(),
+            None,
+            &mut sec_key_response_base64_buf,
+        )?;
+
+        self.initiate_response(101, None, &headers).await
     }
 
     pub fn is_response_initiated(&self) -> bool {

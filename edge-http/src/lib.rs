@@ -5,6 +5,7 @@ use core::fmt::Display;
 use core::str;
 
 use httparse::{Header, EMPTY_HEADER};
+use ws::{is_upgrade_accepted, is_upgrade_request, NONCE_LEN};
 
 pub(crate) const DEFAULT_MAX_HEADERS_COUNT: usize = 64;
 
@@ -202,10 +203,6 @@ impl<'b, const N: usize> Headers<'b, N> {
 
     pub fn cache_control(&self) -> Option<&str> {
         self.get("Cache-Control")
-    }
-
-    pub fn is_ws_upgrade_request(&self) -> bool {
-        crate::ws::is_upgrade_request(self.iter())
     }
 
     pub fn upgrade(&self) -> Option<&str> {
@@ -433,6 +430,10 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
             headers: Headers::<N>::new(),
         }
     }
+
+    pub fn is_ws_upgrade_request(&self) -> bool {
+        is_upgrade_request(self.method, self.headers.iter())
+    }
 }
 
 impl<'b, const N: usize> Display for RequestHeaders<'b, N> {
@@ -474,6 +475,10 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
             headers: Headers::<N>::new(),
         }
     }
+
+    pub fn is_ws_upgrade_accepted(&self, nonce: &[u8; NONCE_LEN]) -> bool {
+        is_upgrade_accepted(self.code, self.headers.iter(), nonce)
+    }
 }
 
 impl<'b, const N: usize> Display for ResponseHeaders<'b, N> {
@@ -499,6 +504,10 @@ impl<'b, const N: usize> Display for ResponseHeaders<'b, N> {
 }
 
 pub mod ws {
+    use core::fmt;
+
+    use crate::Method;
+
     pub const NONCE_LEN: usize = 16;
     pub const MAX_BASE64_KEY_LEN: usize = 28;
     pub const MAX_BASE64_KEY_RESPONSE_LEN: usize = 33;
@@ -532,10 +541,14 @@ pub mod ws {
         ]
     }
 
-    pub fn is_upgrade_request<'a, H>(request_headers: H) -> bool
+    pub fn is_upgrade_request<'a, H>(method: Option<Method>, request_headers: H) -> bool
     where
         H: IntoIterator<Item = (&'a str, &'a str)>,
     {
+        if !matches!(method, Some(Method::Get)) {
+            return false;
+        }
+
         let mut connection = false;
         let mut upgrade = false;
 
@@ -557,6 +570,20 @@ pub mod ws {
         UnsupportedVersion,
         SecKeyTooLong,
     }
+
+    impl fmt::Display for UpgradeError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Self::NoVersion => write!(f, "No Sec-WebSocket-Version header"),
+                Self::NoSecKey => write!(f, "No Sec-WebSocket-Key header"),
+                Self::UnsupportedVersion => write!(f, "Unsupported Sec-WebSocket-Version"),
+                Self::SecKeyTooLong => write!(f, "Sec-WebSocket-Key too long"),
+            }
+        }
+    }
+
+    #[cfg(feature = "std")]
+    impl std::error::Error for UpgradeError {}
 
     pub fn upgrade_response_headers<'a, 'b, H>(
         request_headers: H,
@@ -620,6 +647,32 @@ pub mod ws {
         } else {
             Err(UpgradeError::NoVersion)
         }
+    }
+
+    pub fn is_upgrade_accepted<'a, H>(
+        code: Option<u16>,
+        response_headers: H,
+        _nonce: &[u8; NONCE_LEN], // TODO
+    ) -> bool
+    where
+        H: IntoIterator<Item = (&'a str, &'a str)>,
+    {
+        if !matches!(code, Some(101)) {
+            return false;
+        }
+
+        let mut connection = false;
+        let mut upgrade = false;
+
+        for (name, value) in response_headers {
+            if name.eq_ignore_ascii_case("Connection") {
+                connection = value.eq_ignore_ascii_case("Upgrade");
+            } else if name.eq_ignore_ascii_case("Upgrade") {
+                upgrade = value.eq_ignore_ascii_case("websocket");
+            }
+        }
+
+        connection && upgrade
     }
 }
 
