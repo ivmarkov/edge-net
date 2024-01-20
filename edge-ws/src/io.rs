@@ -96,18 +96,20 @@ impl FrameHeader {
         } else if self.mask_key.is_none() {
             write.write_all(payload).await.map_err(Error::Io)
         } else {
-            let mut buf = [0_u8; 64];
+            let mut buf = [0_u8; 32];
 
             let mut offset = 0;
 
             while offset < payload.len() {
                 let len = min(buf.len(), payload.len() - offset);
 
-                buf[..len].copy_from_slice(&payload[offset..offset + len]);
+                let buf = &mut buf[..len];
 
-                self.mask(&mut buf, offset);
+                buf.copy_from_slice(&payload[offset..offset + len]);
 
-                write.write_all(&buf).await.map_err(Error::Io)?;
+                self.mask(buf, offset);
+
+                write.write_all(buf).await.map_err(Error::Io)?;
 
                 offset += len;
             }
