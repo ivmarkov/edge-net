@@ -41,6 +41,19 @@ impl FrameType {
     }
 }
 
+impl fmt::Display for FrameType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text(fragmented) => write!(f, "Text{}", if *fragmented { " (fragmented)" } else { "" }),
+            Self::Binary(fragmented) => write!(f, "Binary{}", if *fragmented { " (fragmented)" } else { "" }),
+            Self::Ping => write!(f, "Ping"),
+            Self::Pong => write!(f, "Pong"),
+            Self::Close => write!(f, "Close"),
+            Self::Continue(ffinal) => write!(f, "Continue{}", if *ffinal { " (final)" } else { "" }),
+        }
+    }
+}
+
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Error<E> {
     Incomplete(usize),
@@ -159,17 +172,21 @@ impl FrameHeader {
                 None
             };
 
+            let frame_type = match opcode {
+                0 => FrameType::Continue(final_frame),
+                1 => FrameType::Text(!final_frame),
+                2 => FrameType::Binary(!final_frame),
+                8 => FrameType::Close,
+                9 => FrameType::Ping,
+                10 => FrameType::Pong,
+                _ => unreachable!(),
+            };
+
             let frame_header = FrameHeader {
-                frame_type: match opcode {
-                    0 => FrameType::Continue(final_frame),
-                    1 => FrameType::Text(!final_frame),
-                    2 => FrameType::Binary(!final_frame),
-                    8 => FrameType::Close,
-                    9 => FrameType::Ping,
-                    10 => FrameType::Pong,
-                    _ => unreachable!(),
-                },
-                payload_len,
+                frame_type,
+                payload_len: matches!(frame_type, FrameType::Binary(_) | FrameType::Text(_) | FrameType::Continue(_))
+                    .then(|| payload_len)
+                    .unwrap_or(0),
                 mask_key,
             };
 
@@ -263,6 +280,16 @@ impl FrameHeader {
                 *byte ^= mask_bytes[(payload_offset + offset) % 4];
             }
         }
+    }
+}
+
+impl fmt::Display for FrameHeader {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Frame {{ {}, payload len {}, mask {:?} }}",
+            self.frame_type, self.payload_len, self.mask_key
+        )
     }
 }
 

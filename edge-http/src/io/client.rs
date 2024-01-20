@@ -131,6 +131,14 @@ where
         Ok(self.io_mut())
     }
 
+    pub fn release(mut self) -> (T::Connection<'b>, &'b mut [u8]) {
+        let mut state = self.unbind();
+
+        let io = state.io.take().unwrap();
+
+        (io, state.buf)
+    }
+
     async fn start_request(
         &mut self,
         http11: bool,
