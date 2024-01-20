@@ -57,17 +57,17 @@ impl FrameHeader {
     }
 
     pub async fn recv_payload<'a, R>(
-        &'a self,
+        &self,
         mut read: R,
         payload_buf: &'a mut [u8],
-    ) -> Result<(), Error<R::Error>>
+    ) -> Result<&'a [u8], Error<R::Error>>
     where
         R: Read,
     {
         if (payload_buf.len() as u64) < self.payload_len {
             Err(Error::BufferOverflow)
         } else if self.payload_len == 0 {
-            Ok(())
+            Ok(&[])
         } else {
             let payload = &mut payload_buf[..self.payload_len as _];
 
@@ -75,7 +75,7 @@ impl FrameHeader {
 
             self.mask(payload, 0);
 
-            Ok(())
+            Ok(payload)
         }
     }
 
