@@ -9,15 +9,12 @@ This crate ships async + `no_std` + no-alloc implementations of various network 
 Suitable for microcontrollers and embedded systems in general.
 
 Supported protocols:
-* [Websocket client and server](edge-ws)
+* [Websocket send/receive](edge-ws)
 * [HTTP client and server](edge-http)
 * [MQTT client](edge-mqtt) (just a slim wrapper around `rumqttc`, so currently needs STD)
 * [DNS Captive Portal](edge-captive)
 * [mDNS responder](edge-mdns)
 * [DHCP cient and server](edge-dhcp)
-* [Raw IP & UDP packet sender/receiver](edge-raw) (useful in combination with the DHCP client and server)
-
-Needs testing & bugfixing:
-* HTTP chunked-transfer decoder
+* [Raw IP & UDP packet send/receive](edge-raw) (useful in combination with the DHCP client and server)
 
 PRs welcome!

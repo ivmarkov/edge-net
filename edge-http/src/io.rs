@@ -1023,3 +1023,70 @@ where
         .await
         .map_err(Error::Io)
 }
+
+#[cfg(test)]
+mod test {
+    use embedded_io_async::{ErrorType, Read};
+
+    use super::*;
+
+    struct SliceRead<'a>(&'a [u8]);
+
+    impl<'a> ErrorType for SliceRead<'a> {
+        type Error = core::convert::Infallible;
+    }
+
+    impl<'a> Read for SliceRead<'a> {
+        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+            let len = core::cmp::min(buf.len(), self.0.len());
+            buf[..len].copy_from_slice(&self.0[..len]);
+
+            self.0 = &self.0[len..];
+
+            Ok(len)
+        }
+    }
+
+    #[test]
+    fn test_chunked_bytes() {
+        // Normal
+        expect(b"A\r\nabcdefghij\r\n2\r\n42\r\n", Some(b"abcdefghij42"));
+        expect(b"a\r\nabc\r\nfghij\r\n2\r\n42\r\n", Some(b"abc\r\nfghij42"));
+
+        // Trailing headers
+        expect(b"4\r\nabcd\r\n0\r\n\r\n", Some(b"abcd"));
+        expect(b"4\r\nabcd\r\n0\r\nA: B\r\n\r\n", Some(b"abcd"));
+
+        // Empty
+        expect(b"", Some(b""));
+        expect(b"0\r\n\r\n", Some(b""));
+
+        // Erroneous
+        expect(b"h\r\n", None);
+        expect(b"\r\na", None);
+        expect(b"4\r\nabcdefg", None);
+    }
+
+    fn expect(input: &[u8], expected: Option<&[u8]>) {
+        embassy_futures::block_on(async move {
+            let mut buf1 = [0; 64];
+            let mut buf2 = [0; 64];
+
+            let stream = SliceRead(input);
+            let mut r = ChunkedRead::new(stream, &mut buf1, 0);
+
+            if let Some(expected) = expected {
+                assert!(r.read_exact(&mut buf2[..expected.len()]).await.is_ok());
+
+                assert_eq!(&buf2[..expected.len()], expected);
+
+                let len = r.read(&mut buf2).await;
+                assert!(len.is_ok());
+
+                assert_eq!(len.unwrap(), 0);
+            } else {
+                assert!(r.read(&mut buf2).await.is_err());
+            }
+        })
+    }
+}
