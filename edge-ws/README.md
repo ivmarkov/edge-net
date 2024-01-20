@@ -10,8 +10,8 @@ For other protocols, look at the [edge-net](https://github.com/ivmarkov/edge-net
 
 ## Examples
 
----
-** NOTE**
+**NOTE**
+
 To connect the Websocket client example to the Websocket server example - rather that to the public Websocket echo server, 
 just run it with some argument, i.e.
 
