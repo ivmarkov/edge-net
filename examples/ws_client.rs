@@ -103,5 +103,17 @@ where
         }
     }
 
+    // Inform the server we are closing the connection
+
+    let header = FrameHeader {
+        frame_type: FrameType::Close,
+        payload_len: 0,
+        mask_key: rng_source.next_u32().into(),
+    };
+
+    info!("Closing");
+
+    header.send(&mut socket).await?;
+
     Ok(())
 }

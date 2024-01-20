@@ -23,6 +23,7 @@ pub use embedded_svc_compat::*;
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
+#[allow(private_interfaces)]
 pub enum Connection<'b, T, const N: usize = DEFAULT_MAX_HEADERS_COUNT> {
     Transition(TransitionState),
     Unbound(T),
@@ -136,7 +137,10 @@ where
         }
     }
 
-    pub fn raw_connection(&mut self) -> Result<&mut T, Error<T::Error>> {
+    pub fn unbind(&mut self) -> Result<&mut T, Error<T::Error>> {
+        let io = self.unbind_mut();
+        *self = Self::Unbound(io);
+
         Ok(self.io_mut())
     }
 
@@ -211,6 +215,7 @@ where
         match state {
             Self::Request(request) => request.io.release(),
             Self::Response(response) => response.release(),
+            Self::Unbound(io) => io,
             _ => unreachable!(),
         }
     }
@@ -278,14 +283,14 @@ where
     }
 }
 
-pub struct TransitionState(());
+struct TransitionState(());
 
-pub struct RequestState<'b, T, const N: usize> {
+struct RequestState<'b, T, const N: usize> {
     request: RequestHeaders<'b, N>,
     io: Body<'b, T>,
 }
 
-pub type ResponseState<T> = SendBody<T>;
+type ResponseState<T> = SendBody<T>;
 
 pub trait Handler<'b, T, const N: usize>
 where
@@ -324,7 +329,7 @@ pub async fn handle_connection<const N: usize, T, H>(
 
         match result {
             Err(e) => {
-                info!(
+                warn!(
                     "Handler {}: Error when handling request: {:?}",
                     handler_id, e
                 );
@@ -394,13 +399,10 @@ where
 
     match result {
         Result::Ok(_) => connection.complete().await?,
-        Result::Err(e) => {
-            warn!("Error when handling request: {e:?}");
-            connection
-                .complete_err("INTERNAL ERROR")
-                .await
-                .map_err(|_| HandleRequestError::Handler(e))?
-        }
+        Result::Err(e) => connection
+            .complete_err("INTERNAL ERROR")
+            .await
+            .map_err(|_| HandleRequestError::Handler(e))?,
     }
 
     Ok(connection.needs_close())

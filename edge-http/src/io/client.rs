@@ -21,6 +21,7 @@ use super::Method;
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
+#[allow(private_interfaces)]
 pub enum Connection<'b, T, const N: usize = DEFAULT_MAX_HEADERS_COUNT>
 where
     T: TcpConnect,
@@ -366,9 +367,9 @@ where
     }
 }
 
-pub struct TransitionState(());
+struct TransitionState(());
 
-pub struct UnboundState<'b, T, const N: usize>
+struct UnboundState<'b, T, const N: usize>
 where
     T: TcpConnect,
 {
@@ -378,7 +379,7 @@ where
     io: Option<T::Connection<'b>>,
 }
 
-pub struct RequestState<'b, T, const N: usize>
+struct RequestState<'b, T, const N: usize>
 where
     T: TcpConnect,
 {
@@ -388,7 +389,7 @@ where
     io: SendBody<T::Connection<'b>>,
 }
 
-pub struct ResponseState<'b, T, const N: usize>
+struct ResponseState<'b, T, const N: usize>
 where
     T: TcpConnect,
 {

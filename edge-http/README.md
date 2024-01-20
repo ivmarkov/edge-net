@@ -15,15 +15,22 @@ For other protocols, look at the [edge-net](https://github.com/ivmarkov/edge-net
 ### HTTP client
 
 ```rust
-use embedded_io_async::Read;
+use anyhow::bail;
+use edge_http::ws::NONCE_LEN;
+use edge_ws::{FrameHeader, FrameType};
 use embedded_nal_async::{AddrType, Dns, SocketAddr, TcpConnect};
 
-use edge_http::io::{client::Connection, Error};
-use edge_http::Method;
+use edge_http::io::client::Connection;
+
+use rand::{thread_rng, RngCore};
 
 use std_embedded_nal_async::Stack;
 
 use log::*;
+
+// NOTE: HTTP-only echo WS servers seem to be hard to find, this one might or might not work...
+const PUBLIC_ECHO_SERVER: (&str, u16, &str) = ("websockets.chilkat.io", 80, "/wsChilkatEcho.ashx");
+const OUR_ECHO_SERVER: (&str, u16, &str) = ("127.0.0.1", 8881, "/");
 
 fn main() {
     env_logger::init_from_env(
@@ -34,59 +41,96 @@ fn main() {
 
     let mut buf = [0_u8; 8192];
 
-    futures_lite::future::block_on(read(&stack, &mut buf)).unwrap();
+    futures_lite::future::block_on(work(&stack, &mut buf)).unwrap();
 }
 
-async fn read<T: TcpConnect + Dns>(
-    stack: &T,
-    buf: &mut [u8],
-) -> Result<(), Error<<T as TcpConnect>::Error>>
+async fn work<T: TcpConnect + Dns>(stack: &T, buf: &mut [u8]) -> Result<(), anyhow::Error>
 where
-    <T as Dns>::Error: Into<<T as TcpConnect>::Error>,
+    <T as Dns>::Error: Send + Sync + std::error::Error + 'static,
+    <T as TcpConnect>::Error: Send + Sync + std::error::Error + 'static,
 {
-    info!("About to open an HTTP connection to httpbin.org port 80");
+    let mut args = std::env::args();
+    args.next(); // Skip the executable name
 
-    let ip = stack
-        .get_host_by_name("httpbin.org", AddrType::IPv4)
-        .await
-        .map_err(|e| Error::Io(e.into()))?;
+    let (fqdn, port, path) = if args.next().is_some() {
+        OUR_ECHO_SERVER
+    } else {
+        PUBLIC_ECHO_SERVER
+    };
 
-    let mut conn: Connection<_> = Connection::new(buf, stack, SocketAddr::new(ip, 80));
+    info!("About to open an HTTP connection to {fqdn} port {port}");
 
-    for uri in ["/ip", "/headers"] {
-        request(&mut conn, uri).await?;
-    }
+    let ip = stack.get_host_by_name(fqdn, AddrType::IPv4).await?;
 
-    Ok(())
-}
+    let mut conn: Connection<_> = Connection::new(buf, stack, SocketAddr::new(ip, port));
 
-async fn request<'b, const N: usize, T: TcpConnect>(
-    conn: &mut Connection<'b, T, N>,
-    uri: &str,
-) -> Result<(), Error<T::Error>> {
-    conn.initiate_request(true, Method::Get, uri, &[("Host", "httpbin.org")])
+    let mut rng_source = thread_rng();
+
+    let mut nonce = [0_u8; NONCE_LEN];
+    rng_source.fill_bytes(&mut nonce);
+
+    conn.initiate_ws_upgrade_request(Some(fqdn), Some("foo.com"), path, None, &nonce)
         .await?;
-
     conn.initiate_response().await?;
 
-    let mut result = Vec::new();
+    if !conn.is_ws_upgrade_accepted(&nonce)? {
+        bail!("WS upgrade failed");
+    }
 
-    let mut buf = [0_u8; 1024];
+    conn.complete().await?;
 
-    loop {
-        let len = conn.read(&mut buf).await?;
+    // Now we have the TCP socket in a state where it can be operated as a WS connection
+    // Send some traffic to a WS echo server and read it back
 
-        if len > 0 {
-            result.extend_from_slice(&buf[0..len]);
-        } else {
-            break;
+    let (mut socket, buf) = conn.release();
+
+    info!("Connection upgraded to WS, starting traffic now");
+
+    for payload in ["Hello world!", "How are you?", "I'm fine, thanks!"] {
+        let header = FrameHeader {
+            frame_type: FrameType::Text(false),
+            payload_len: payload.as_bytes().len() as _,
+            mask_key: rng_source.next_u32().into(),
+        };
+
+        info!("Sending {header}, with payload \"{payload}\"");
+        header.send(&mut socket).await?;
+        header.send_payload(&mut socket, payload.as_bytes()).await?;
+
+        let header = FrameHeader::recv(&mut socket).await?;
+        let payload = header.recv_payload(&mut socket, buf).await?;
+
+        match header.frame_type {
+            FrameType::Text(_) => {
+                info!(
+                    "Got {header}, with payload \"{}\"",
+                    core::str::from_utf8(payload).unwrap()
+                );
+            }
+            FrameType::Binary(_) => {
+                info!("Got {header}, with payload {payload:?}");
+            }
+            _ => {
+                bail!("Unexpected {}", header);
+            }
+        }
+
+        if !header.frame_type.is_final() {
+            bail!("Unexpected fragmented frame");
         }
     }
 
-    info!(
-        "Request to httpbin.org, URI \"{}\" returned:\nBody:\n=================\n{}\n=================\n\n\n\n",
-        uri,
-        core::str::from_utf8(&result).unwrap());
+    // Inform the server we are closing the connection
+
+    let header = FrameHeader {
+        frame_type: FrameType::Close,
+        payload_len: 0,
+        mask_key: rng_source.next_u32().into(),
+    };
+
+    info!("Closing");
+
+    header.send(&mut socket).await?;
 
     Ok(())
 }
@@ -99,6 +143,7 @@ use edge_http::io::server::{Connection, Handler, Server, ServerBuffers};
 use edge_http::Method;
 
 use edge_std_nal_async::StdTcpListen;
+use edge_ws::{FrameHeader, FrameType};
 use embedded_nal_async_xtra::TcpListen;
 
 use embedded_io_async::{Read, Write};
@@ -124,16 +169,16 @@ pub async fn run<const P: usize, const B: usize>(
 
     let acceptor = StdTcpListen::new().listen(addr.parse().unwrap()).await?;
 
-    let mut server: Server<_, _> = Server::new(acceptor, HttpHandler);
+    let mut server: Server<_, _> = Server::new(acceptor, WsHandler);
 
     server.process::<2, P, B>(buffers).await?;
 
     Ok(())
 }
 
-struct HttpHandler;
+struct WsHandler;
 
-impl<'b, T, const N: usize> Handler<'b, T, N> for HttpHandler
+impl<'b, T, const N: usize> Handler<'b, T, N> for WsHandler
 where
     T: Read + Write,
     T::Error: Send + Sync + std::error::Error + 'static,
@@ -148,11 +193,62 @@ where
                 .await?;
         } else if !matches!(headers.path, Some("/")) {
             conn.initiate_response(404, Some("Not Found"), &[]).await?;
-        } else {
+        } else if !conn.is_ws_upgrade_request()? {
             conn.initiate_response(200, Some("OK"), &[("Content-Type", "text/plain")])
                 .await?;
 
-            conn.write_all(b"Hello world!").await?;
+            conn.write_all(b"Initiate WS Upgrade request to switch this connection to WS")
+                .await?;
+        } else {
+            conn.initiate_ws_upgrade_response().await?;
+
+            conn.complete().await?;
+
+            info!("Connection upgraded to WS, starting a simple WS echo server now");
+
+            // Now we have the TCP socket in a state where it can be operated as a WS connection
+            // Run a simple WS echo server here
+
+            let mut socket = conn.unbind()?;
+
+            let mut buf = [0_u8; 8192];
+
+            loop {
+                let mut header = FrameHeader::recv(&mut socket).await?;
+                let payload = header.recv_payload(&mut socket, &mut buf).await?;
+
+                match header.frame_type {
+                    FrameType::Text(_) => {
+                        info!(
+                            "Got {header}, with payload \"{}\"",
+                            core::str::from_utf8(payload).unwrap()
+                        );
+                    }
+                    FrameType::Binary(_) => {
+                        info!("Got {header}, with payload {payload:?}");
+                    }
+                    FrameType::Close => {
+                        info!("Got {header}, client closed the connection cleanly");
+                        break;
+                    }
+                    _ => {
+                        info!("Got {header}");
+                    }
+                }
+
+                // Echo it back now
+
+                header.mask_key = None; // Servers never mask the payload
+
+                if matches!(header.frame_type, FrameType::Ping) {
+                    header.frame_type = FrameType::Pong;
+                }
+
+                info!("Echoing back as {header}");
+
+                header.send(&mut socket).await?;
+                header.send_payload(&mut socket, payload).await?;
+            }
         }
 
         Ok(())
