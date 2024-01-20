@@ -127,6 +127,18 @@ where
         }
     }
 
+    // Inform the server we are closing the connection
+
+    let header = FrameHeader {
+        frame_type: FrameType::Close,
+        payload_len: 0,
+        mask_key: rng_source.next_u32().into(),
+    };
+
+    info!("Closing");
+
+    header.send(&mut socket).await?;
+
     Ok(())
 }
 ```
@@ -204,7 +216,7 @@ where
             // Now we have the TCP socket in a state where it can be operated as a WS connection
             // Run a simple WS echo server here
 
-            let mut socket = conn.raw_connection()?;
+            let mut socket = conn.unbind()?;
 
             let mut buf = [0_u8; 8192];
 
@@ -223,7 +235,7 @@ where
                         info!("Got {header}, with payload {payload:?}");
                     }
                     FrameType::Close => {
-                        info!("Got {header}");
+                        info!("Got {header}, client closed the connection cleanly");
                         break;
                     }
                     _ => {
