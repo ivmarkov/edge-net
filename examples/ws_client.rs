@@ -12,8 +12,8 @@ use std_embedded_nal_async::Stack;
 use log::*;
 
 // NOTE: HTTP-only echo WS servers seem to be hard to find, this one might or might not work...
-const WS_FQDN: &str = "websockets.chilkat.io";
-const WS_PATH: &str = "/wsChilkatEcho.ashx";
+const PUBLIC_ECHO_SERVER: (&str, u16, &str) = ("websockets.chilkat.io", 80, "/wsChilkatEcho.ashx");
+const OUR_ECHO_SERVER: (&str, u16, &str) = ("127.0.0.1", 8881, "/");
 
 fn main() {
     env_logger::init_from_env(
@@ -32,61 +32,66 @@ where
     <T as Dns>::Error: Send + Sync + std::error::Error + 'static,
     <T as TcpConnect>::Error: Send + Sync + std::error::Error + 'static,
 {
-    info!("About to open an HTTP connection to echo.websocket.org port 80");
+    let mut args = std::env::args();
+    args.next(); // Skip the executable name
 
-    let ip = stack.get_host_by_name(WS_FQDN, AddrType::IPv4).await?;
+    let (fqdn, port, path) = if args.next().is_some() {
+        OUR_ECHO_SERVER
+    } else {
+        PUBLIC_ECHO_SERVER
+    };
 
-    let mut conn: Connection<_> = Connection::new(buf, stack, SocketAddr::new(ip, 80));
+    info!("About to open an HTTP connection to {fqdn} port {port}");
 
-    conn.initiate_ws_upgrade_request(
-        Some(WS_FQDN),
-        Some("foo.com"),
-        WS_PATH,
-        None,
-        &[13; NONCE_LEN],
-    )
-    .await?;
+    let ip = stack.get_host_by_name(fqdn, AddrType::IPv4).await?;
+
+    let mut conn: Connection<_> = Connection::new(buf, stack, SocketAddr::new(ip, port));
+
+    let mut rng_source = thread_rng();
+
+    let mut nonce = [0_u8; NONCE_LEN];
+    rng_source.fill_bytes(&mut nonce);
+
+    conn.initiate_ws_upgrade_request(Some(fqdn), Some("foo.com"), path, None, &nonce)
+        .await?;
     conn.initiate_response().await?;
 
-    let headers = conn.headers()?;
-
-    if headers.code != Some(101) {
-        bail!("Unexpected status code: {:?}", headers.code);
+    if !conn.is_ws_upgrade_accepted(&nonce)? {
+        bail!("WS upgrade failed");
     }
 
     conn.complete().await?;
 
+    // Now we have the TCP socket in a state where it can be operated as a WS connection
+    // Send some traffic to a WS echo server and read it back
+
+    let (mut socket, buf) = conn.release();
+
     info!("Connection upgraded to WS, starting traffic now");
-
-    let (mut tcp_conn, buf) = conn.release();
-
-    let mut mask_source = thread_rng();
 
     for payload in ["Hello world!", "How are you?", "I'm fine, thanks!"] {
         let header = FrameHeader {
             frame_type: FrameType::Text(false),
             payload_len: payload.as_bytes().len() as _,
-            mask_key: mask_source.next_u32().into(),
+            mask_key: rng_source.next_u32().into(),
         };
 
         info!("Sending {header}, with payload \"{payload}\"");
-        header.send(&mut tcp_conn).await?;
-        header
-            .send_payload(&mut tcp_conn, payload.as_bytes())
-            .await?;
+        header.send(&mut socket).await?;
+        header.send_payload(&mut socket, payload.as_bytes()).await?;
 
-        let header = FrameHeader::recv(&mut tcp_conn).await?;
-        header.recv_payload(&mut tcp_conn, buf).await?;
+        let header = FrameHeader::recv(&mut socket).await?;
+        let payload = header.recv_payload(&mut socket, buf).await?;
 
         match header.frame_type {
             FrameType::Text(_) => {
                 info!(
                     "Got {header}, with payload \"{}\"",
-                    core::str::from_utf8(buf[..header.payload_len as usize].as_ref()).unwrap()
+                    core::str::from_utf8(payload).unwrap()
                 );
             }
             FrameType::Binary(_) => {
-                info!("Got {header}, with payload {payload}");
+                info!("Got {header}, with payload {payload:?}");
             }
             _ => {
                 bail!("Unexpected {}", header);
