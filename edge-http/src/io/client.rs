@@ -4,7 +4,10 @@ use embedded_io_async::{ErrorType, Read, Write};
 
 use embedded_nal_async::{SocketAddr, TcpConnect};
 
-use crate::ws::{upgrade_request_headers, MAX_BASE64_KEY_LEN, NONCE_LEN};
+use crate::{
+    ws::{upgrade_request_headers, MAX_BASE64_KEY_LEN, NONCE_LEN},
+    DEFAULT_MAX_HEADERS_COUNT,
+};
 
 use super::{
     send_headers, send_headers_end, send_request, Body, BodyType, Error, ResponseHeaders, SendBody,
@@ -18,7 +21,7 @@ use super::Method;
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
-pub enum Connection<'b, T, const N: usize = 128>
+pub enum Connection<'b, T, const N: usize = DEFAULT_MAX_HEADERS_COUNT>
 where
     T: TcpConnect,
 {

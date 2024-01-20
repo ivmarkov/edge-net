@@ -1,11 +1,16 @@
 use core::fmt::{self, Debug};
-use core::mem;
+use core::mem::{self, MaybeUninit};
 use core::pin::pin;
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embedded_io_async::{ErrorType, Read, Write};
 
 use log::{debug, info, warn};
+
+use crate::DEFAULT_MAX_HEADERS_COUNT;
+
+const DEFAULT_HANDLERS_COUNT: usize = 4;
+const DEFAULT_BUF_SIZE: usize = 2048;
 
 use super::{
     send_headers, send_headers_end, send_status, Body, BodyType, Error, RequestHeaders, SendBody,
@@ -17,7 +22,7 @@ pub use embedded_svc_compat::*;
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
-pub enum Connection<'b, T, const N: usize = 128> {
+pub enum Connection<'b, T, const N: usize = DEFAULT_MAX_HEADERS_COUNT> {
     Transition(TransitionState),
     Unbound(T),
     Request(RequestState<'b, T, N>),
@@ -286,20 +291,19 @@ where
     }
 }
 
-pub async fn handle_connection<const N: usize, const B: usize, T, H>(
+pub async fn handle_connection<const N: usize, T, H>(
     mut io: T,
+    buf: &mut [u8],
     handler_id: usize,
     handler: &H,
 ) where
     H: for<'b> Handler<'b, &'b mut T, N>,
     T: Read + Write,
 {
-    let mut buf = [0_u8; B];
-
     loop {
         debug!("Handler {}: Waiting for new request", handler_id);
 
-        let result = handle_request::<N, _, _>(&mut buf, &mut io, handler).await;
+        let result = handle_request::<N, _, _>(buf, &mut io, handler).await;
 
         match result {
             Err(e) => {
@@ -385,12 +389,23 @@ where
     Ok(connection.needs_close())
 }
 
-pub struct Server<A, H, const N: usize = 128, const B: usize = 2048> {
+pub struct ServerBuffers<const P: usize = DEFAULT_HANDLERS_COUNT, const B: usize = DEFAULT_BUF_SIZE>(
+    [MaybeUninit<[u8; B]>; P],
+);
+
+impl<const P: usize, const B: usize> ServerBuffers<P, B> {
+    #[inline(always)]
+    pub const fn new() -> Self {
+        Self([MaybeUninit::uninit(); P])
+    }
+}
+
+pub struct Server<A, H, const N: usize = DEFAULT_MAX_HEADERS_COUNT> {
     acceptor: A,
     handler: H,
 }
 
-impl<A, H, const N: usize, const B: usize> Server<A, H, N, B>
+impl<A, H, const N: usize> Server<A, H, N>
 where
     A: embedded_nal_async_xtra::TcpAccept,
     H: for<'b, 't> Handler<'b, &'b mut A::Connection<'t>, N>,
@@ -400,7 +415,10 @@ where
         Self { acceptor, handler }
     }
 
-    pub async fn process<const P: usize, const W: usize>(&mut self) -> Result<(), Error<A::Error>> {
+    pub async fn process<const W: usize, const P: usize, const B: usize>(
+        &mut self,
+        bufs: &mut ServerBuffers<P, B>,
+    ) -> Result<(), Error<A::Error>> {
         info!("Creating queue for {W} requests");
         let channel = embassy_sync::channel::Channel::<NoopRawMutex, _, W>::new();
 
@@ -411,6 +429,7 @@ where
             let channel = &channel;
             let handler_id = index;
             let handler = &self.handler;
+            let buf = bufs.0[index].as_mut_ptr();
 
             handlers
                 .push(async move {
@@ -420,7 +439,13 @@ where
                         let io = channel.receive().await;
                         debug!("Handler {}: Got connection request", handler_id);
 
-                        handle_connection::<N, B, _, _>(io, handler_id, handler).await;
+                        handle_connection::<N, _, _>(
+                            io,
+                            unsafe { buf.as_mut() }.unwrap(),
+                            handler_id,
+                            handler,
+                        )
+                        .await;
                     }
                 })
                 .map_err(|_| ())

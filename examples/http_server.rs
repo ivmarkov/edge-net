@@ -1,4 +1,4 @@
-use edge_http::io::server::{Connection, Handler, Server};
+use edge_http::io::server::{Connection, Handler, Server, ServerBuffers};
 use edge_http::Method;
 
 use edge_std_nal_async::StdTcpListen;
@@ -13,10 +13,14 @@ fn main() {
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    futures_lite::future::block_on(run()).unwrap();
+    let mut buffers: ServerBuffers = ServerBuffers::new();
+
+    futures_lite::future::block_on(run(&mut buffers)).unwrap();
 }
 
-pub async fn run() -> Result<(), anyhow::Error> {
+pub async fn run<const P: usize, const B: usize>(
+    buffers: &mut ServerBuffers<P, B>,
+) -> Result<(), anyhow::Error> {
     let addr = "0.0.0.0:8881";
 
     info!("Running HTTP server on {addr}");
@@ -25,7 +29,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
 
     let mut server: Server<_, _> = Server::new(acceptor, HttpHandler);
 
-    server.process::<4, 4>().await?;
+    server.process::<2, P, B>(buffers).await?;
 
     Ok(())
 }

@@ -6,6 +6,8 @@ use core::str;
 
 use httparse::{Header, EMPTY_HEADER};
 
+pub(crate) const DEFAULT_MAX_HEADERS_COUNT: usize = 64;
+
 #[cfg(feature = "io")]
 pub mod io;
 
