@@ -32,10 +32,15 @@ fn main() {
 
     let stack: Stack = Default::default();
 
-    futures_lite::future::block_on(read(&stack)).unwrap();
+    let mut buf = [0_u8; 8192];
+
+    futures_lite::future::block_on(read(&stack, &mut buf)).unwrap();
 }
 
-async fn read<T: TcpConnect + Dns>(stack: &T) -> Result<(), Error<<T as TcpConnect>::Error>>
+async fn read<T: TcpConnect + Dns>(
+    stack: &T,
+    buf: &mut [u8],
+) -> Result<(), Error<<T as TcpConnect>::Error>>
 where
     <T as Dns>::Error: Into<<T as TcpConnect>::Error>,
 {
@@ -46,9 +51,7 @@ where
         .await
         .map_err(|e| Error::Io(e.into()))?;
 
-    let mut buf = [0_u8; 8192];
-
-    let mut conn: Connection<_> = Connection::new(&mut buf, stack, SocketAddr::new(ip, 80));
+    let mut conn: Connection<_> = Connection::new(buf, stack, SocketAddr::new(ip, 80));
 
     for uri in ["/ip", "/headers"] {
         request(&mut conn, uri).await?;
@@ -92,7 +95,7 @@ async fn request<'b, const N: usize, T: TcpConnect>(
 ### HTTP server
 
 ```rust
-use edge_http::io::server::{Connection, Handler, Server};
+use edge_http::io::server::{Connection, Handler, Server, ServerBuffers};
 use edge_http::Method;
 
 use edge_std_nal_async::StdTcpListen;
@@ -107,10 +110,14 @@ fn main() {
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    futures_lite::future::block_on(run()).unwrap();
+    let mut buffers: ServerBuffers = ServerBuffers::new();
+
+    futures_lite::future::block_on(run(&mut buffers)).unwrap();
 }
 
-pub async fn run() -> Result<(), anyhow::Error> {
+pub async fn run<const P: usize, const B: usize>(
+    buffers: &mut ServerBuffers<P, B>,
+) -> Result<(), anyhow::Error> {
     let addr = "0.0.0.0:8881";
 
     info!("Running HTTP server on {addr}");
@@ -119,7 +126,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
 
     let mut server: Server<_, _> = Server::new(acceptor, HttpHandler);
 
-    server.process::<4, 4>().await?;
+    server.process::<2, P, B>(buffers).await?;
 
     Ok(())
 }

@@ -15,10 +15,15 @@ fn main() {
 
     let stack: Stack = Default::default();
 
-    futures_lite::future::block_on(read(&stack)).unwrap();
+    let mut buf = [0_u8; 8192];
+
+    futures_lite::future::block_on(read(&stack, &mut buf)).unwrap();
 }
 
-async fn read<T: TcpConnect + Dns>(stack: &T) -> Result<(), Error<<T as TcpConnect>::Error>>
+async fn read<T: TcpConnect + Dns>(
+    stack: &T,
+    buf: &mut [u8],
+) -> Result<(), Error<<T as TcpConnect>::Error>>
 where
     <T as Dns>::Error: Into<<T as TcpConnect>::Error>,
 {
@@ -29,9 +34,7 @@ where
         .await
         .map_err(|e| Error::Io(e.into()))?;
 
-    let mut buf = [0_u8; 8192];
-
-    let mut conn: Connection<_> = Connection::new(&mut buf, stack, SocketAddr::new(ip, 80));
+    let mut conn: Connection<_> = Connection::new(buf, stack, SocketAddr::new(ip, 80));
 
     for uri in ["/ip", "/headers"] {
         request(&mut conn, uri).await?;
