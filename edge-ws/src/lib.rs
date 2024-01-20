@@ -44,12 +44,20 @@ impl FrameType {
 impl fmt::Display for FrameType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Text(fragmented) => write!(f, "Text{}", if *fragmented { " (fragmented)" } else { "" }),
-            Self::Binary(fragmented) => write!(f, "Binary{}", if *fragmented { " (fragmented)" } else { "" }),
+            Self::Text(fragmented) => {
+                write!(f, "Text{}", if *fragmented { " (fragmented)" } else { "" })
+            }
+            Self::Binary(fragmented) => write!(
+                f,
+                "Binary{}",
+                if *fragmented { " (fragmented)" } else { "" }
+            ),
             Self::Ping => write!(f, "Ping"),
             Self::Pong => write!(f, "Pong"),
             Self::Close => write!(f, "Close"),
-            Self::Continue(ffinal) => write!(f, "Continue{}", if *ffinal { " (final)" } else { "" }),
+            Self::Continue(ffinal) => {
+                write!(f, "Continue{}", if *ffinal { " (final)" } else { "" })
+            }
         }
     }
 }
@@ -184,9 +192,12 @@ impl FrameHeader {
 
             let frame_header = FrameHeader {
                 frame_type,
-                payload_len: matches!(frame_type, FrameType::Binary(_) | FrameType::Text(_) | FrameType::Continue(_))
-                    .then(|| payload_len)
-                    .unwrap_or(0),
+                payload_len: matches!(
+                    frame_type,
+                    FrameType::Binary(_) | FrameType::Text(_) | FrameType::Continue(_)
+                )
+                .then(|| payload_len)
+                .unwrap_or(0),
                 mask_key,
             };
 
