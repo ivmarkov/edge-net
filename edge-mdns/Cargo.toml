@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["std"]
+default = ["io"]
 std = ["io"]
 io = ["embassy-futures", "embassy-sync", "embassy-time", "embedded-nal-async", "embedded-nal-async-xtra"]
 

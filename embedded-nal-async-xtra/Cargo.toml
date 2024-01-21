@@ -4,8 +4,6 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 
-[features]
-
 [dependencies]
 embedded-io-async = { workspace = true }
 embedded-nal-async = { workspace = true }

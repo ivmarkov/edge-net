@@ -16,7 +16,7 @@ embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
 std-embedded-nal-async = { git = "https://gitlab.com/ivmarkov/std-embedded-nal" }
 
 [features]
-default = ["std"]
+default = ["io"]
 std = ["io", "edge-captive/std", "edge-dhcp/std", "edge-http/std", "edge-mdns/std", "edge-raw/std", "edge-mqtt", "edge-ws/std", "edge-std-nal-async"]
 io = ["edge-captive/io", "edge-dhcp/io", "edge-http/io", "edge-mdns/io", "edge-raw/io", "edge-ws/io", "embedded-nal-async-xtra"]
 nightly = []
@@ -50,10 +50,6 @@ name = "captive_portal"
 required-features = ["std"]
 
 [[example]]
-name = "simple"
-required-features = ["std"]
-
-[[example]]
 name = "dhcp_client"
 required-features = ["std"]
 
@@ -67,6 +63,22 @@ required-features = ["std"]
 
 [[example]]
 name = "http_server"
+required-features = ["std"]
+
+[[example]]
+name = "mdns_responder"
+required-features = ["std"]
+
+[[example]]
+name = "ws_client"
+required-features = ["std"]
+
+[[example]]
+name = "ws_server"
+required-features = ["std"]
+
+[[example]]
+name = "std_nal"
 required-features = ["std"]
 
 [workspace]
