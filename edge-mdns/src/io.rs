@@ -13,9 +13,11 @@ use embedded_nal_async_xtra::Multicast;
 
 use log::{info, warn};
 
-use self::split::{UdpSplit, UdpSplitBuffer, UdpSplitReceive, UdpSplitSend};
+use self::split::{UdpSplit, UdpSplitReceive, UdpSplitSend};
 
 use super::*;
+
+pub use split::UdpSplitBuffer;
 
 mod split;
 
@@ -71,7 +73,7 @@ impl MdnsRunBuffers {
     }
 }
 
-pub async fn run<T, S>(
+pub async fn run<'s, T, S>(
     host: &Host<'_>,
     interface: Option<u32>,
     services: T,
@@ -81,7 +83,7 @@ pub async fn run<T, S>(
     buffers: &mut MdnsRunBuffers,
 ) -> Result<(), MdnsIoError<S::Error>>
 where
-    T: Services,
+    T: IntoIterator<Item = Service<'s>> + Clone,
     S: UdpStack,
     S::UniquelyBound: Multicast<Error = S::Error>,
 {
@@ -106,8 +108,14 @@ where
 
     let send = Mutex::<NoopRawMutex, _>::new((send, send_buf));
 
-    let mut broadcast = pin!(broadcast(host, &services, local_addr, interface, &send));
-    let mut respond = pin!(respond(host, &services, recv, recv_buf, &send));
+    let mut broadcast = pin!(broadcast(
+        host,
+        services.clone(),
+        local_addr,
+        interface,
+        &send
+    ));
+    let mut respond = pin!(respond(host, services, recv, recv_buf, &send));
 
     let result = select(&mut broadcast, &mut respond).await;
 
@@ -117,7 +125,7 @@ where
     }
 }
 
-async fn broadcast<T, S, E>(
+async fn broadcast<'s, T, S, E>(
     host: &Host<'_>,
     services: T,
     local_addr: SocketAddr,
@@ -125,12 +133,10 @@ async fn broadcast<T, S, E>(
     send: &Mutex<impl RawMutex, (UdpSplitSend<'_, impl RawMutex, S>, &mut [u8])>,
 ) -> Result<(), MdnsIoError<E>>
 where
-    T: Services,
+    T: IntoIterator<Item = Service<'s>> + Clone,
     S: UnconnectedUdp<Error = E> + Multicast<Error = E>,
 {
     loop {
-        Timer::after(Duration::from_secs(30)).await;
-
         for remote_addr in
             core::iter::once(SocketAddr::V4(SocketAddrV4::new(IP_BROADCAST_ADDR, PORT))).chain(
                 interface
@@ -143,7 +149,7 @@ where
             let mut guard = send.lock().await;
             let (send, send_buf) = &mut *guard;
 
-            let len = host.broadcast(&services, send_buf, 60)?;
+            let len = host.broadcast(services.clone(), send_buf, 60)?;
 
             if len > 0 {
                 info!("Broadcasting mDNS entry to {remote_addr}");
@@ -152,10 +158,12 @@ where
                     .map_err(MdnsIoError::IoError)?;
             }
         }
+
+        Timer::after(Duration::from_secs(30)).await;
     }
 }
 
-async fn respond<T, S>(
+async fn respond<'s, T, S>(
     host: &Host<'_>,
     services: T,
     mut recv: UdpSplitReceive<'_, impl RawMutex, S>,
@@ -163,7 +171,7 @@ async fn respond<T, S>(
     send: &Mutex<impl RawMutex, (UdpSplitSend<'_, impl RawMutex, S>, &mut [u8])>,
 ) -> Result<(), MdnsIoError<S::Error>>
 where
-    T: Services,
+    T: IntoIterator<Item = Service<'s>> + Clone,
     S: UnconnectedUdp,
 {
     loop {
@@ -175,7 +183,7 @@ where
         let mut guard = send.lock().await;
         let (send, send_buf) = &mut *guard;
 
-        let len = match host.respond(&services, &recv_buf[..len], send_buf, 60) {
+        let len = match host.respond(services.clone(), &recv_buf[..len], send_buf, 60) {
             Ok(len) => len,
             Err(err) => match err {
                 MdnsError::InvalidMessage => {

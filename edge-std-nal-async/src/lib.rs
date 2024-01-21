@@ -14,7 +14,9 @@ use embedded_nal_async::{
     TcpConnect, UdpStack, UnconnectedUdp,
 };
 
-use embedded_nal_async_xtra::{RawSocket, RawStack, TcpAccept, TcpListen, TcpSplittableConnection};
+use embedded_nal_async_xtra::{
+    Multicast, RawSocket, RawStack, TcpAccept, TcpListen, TcpSplittableConnection,
+};
 
 pub struct StdTcpConnect(());
 
@@ -235,6 +237,40 @@ impl UnconnectedUdp for StdUdpSocket {
             to_nal_addr(self.0.as_ref().local_addr()?),
             to_nal_addr(addr),
         ))
+    }
+}
+
+impl Multicast for StdUdpSocket {
+    type Error = io::Error;
+
+    async fn join(&mut self, multicast_addr: IpAddr) -> Result<(), Self::Error> {
+        match multicast_addr {
+            IpAddr::V4(addr) => self
+                .0
+                .as_ref()
+                .join_multicast_v4(&addr.octets().into(), &std::net::Ipv4Addr::UNSPECIFIED)?,
+            IpAddr::V6(addr) => self
+                .0
+                .as_ref()
+                .join_multicast_v6(&addr.octets().into(), 0)?,
+        }
+
+        Ok(())
+    }
+
+    async fn leave(&mut self, multicast_addr: IpAddr) -> Result<(), Self::Error> {
+        match multicast_addr {
+            IpAddr::V4(addr) => self
+                .0
+                .as_ref()
+                .leave_multicast_v4(&addr.octets().into(), &std::net::Ipv4Addr::UNSPECIFIED)?,
+            IpAddr::V6(addr) => self
+                .0
+                .as_ref()
+                .leave_multicast_v6(&addr.octets().into(), 0)?,
+        }
+
+        Ok(())
     }
 }
 

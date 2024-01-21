@@ -69,36 +69,7 @@ impl From<ParseError> for MdnsError {
     }
 }
 
-pub trait Services {
-    fn for_each<F>(&self, callback: F) -> Result<(), MdnsError>
-    where
-        F: FnMut(&Service) -> Result<(), MdnsError>;
-}
-
-impl<T> Services for &mut T
-where
-    T: Services,
-{
-    fn for_each<F>(&self, callback: F) -> Result<(), MdnsError>
-    where
-        F: FnMut(&Service) -> Result<(), MdnsError>,
-    {
-        (**self).for_each(callback)
-    }
-}
-
-impl<T> Services for &T
-where
-    T: Services,
-{
-    fn for_each<F>(&self, callback: F) -> Result<(), MdnsError>
-    where
-        F: FnMut(&Service) -> Result<(), MdnsError>,
-    {
-        (**self).for_each(callback)
-    }
-}
-
+#[derive(Debug, Clone)]
 pub struct Host<'a> {
     pub id: u16,
     pub hostname: &'a str,
@@ -107,12 +78,15 @@ pub struct Host<'a> {
 }
 
 impl<'a> Host<'a> {
-    pub fn broadcast<T: Services>(
+    pub fn broadcast<'s, T>(
         &self,
         services: T,
         buf: &mut [u8],
         ttl_sec: u32,
-    ) -> Result<usize, MdnsError> {
+    ) -> Result<usize, MdnsError>
+    where
+        T: IntoIterator<Item = Service<'s>> + Clone,
+    {
         let buf = Buf(buf, 0);
 
         let message = MessageBuilder::from_target(buf)?;
@@ -126,13 +100,16 @@ impl<'a> Host<'a> {
         Ok(buf.1)
     }
 
-    pub fn respond<T: Services>(
+    pub fn respond<'s, T>(
         &self,
         services: T,
         data: &[u8],
         buf: &mut [u8],
         ttl_sec: u32,
-    ) -> Result<usize, MdnsError> {
+    ) -> Result<usize, MdnsError>
+    where
+        T: IntoIterator<Item = Service<'s>> + Clone,
+    {
         let buf = Buf(buf, 0);
 
         let message = MessageBuilder::from_target(buf)?;
@@ -148,7 +125,7 @@ impl<'a> Host<'a> {
         }
     }
 
-    fn set_broadcast<T, F>(
+    fn set_broadcast<'s, T, F>(
         &self,
         services: F,
         answer: &mut AnswerBuilder<T>,
@@ -156,26 +133,24 @@ impl<'a> Host<'a> {
     ) -> Result<(), MdnsError>
     where
         T: Composer,
-        F: Services,
+        F: IntoIterator<Item = Service<'s>> + Clone,
     {
         self.set_header(answer);
 
         self.add_ipv4(answer, ttl_sec)?;
         self.add_ipv6(answer, ttl_sec)?;
 
-        services.for_each(|service| {
+        for service in services.clone() {
             service.add_service(answer, self.hostname, ttl_sec)?;
             service.add_service_type(answer, ttl_sec)?;
             service.add_service_subtypes(answer, ttl_sec)?;
             service.add_txt(answer, ttl_sec)?;
-
-            Ok(())
-        })?;
+        }
 
         Ok(())
     }
 
-    fn set_response<T, F>(
+    fn set_response<'s, T, F>(
         &self,
         data: &[u8],
         services: F,
@@ -184,7 +159,7 @@ impl<'a> Host<'a> {
     ) -> Result<bool, MdnsError>
     where
         T: Composer,
-        F: Services,
+        F: IntoIterator<Item = Service<'s>> + Clone,
     {
         self.set_header(answer);
 
@@ -215,19 +190,17 @@ impl<'a> Host<'a> {
                     replied = true;
                 }
                 Rtype::Srv => {
-                    services.for_each(|service| {
+                    for service in services.clone() {
                         if question.qname().name_eq(&service.service_fqdn(true)?) {
                             self.add_ipv4(answer, ttl_sec)?;
                             self.add_ipv6(answer, ttl_sec)?;
                             service.add_service(answer, self.hostname, ttl_sec)?;
                             replied = true;
                         }
-
-                        Ok(())
-                    })?;
+                    }
                 }
                 Rtype::Ptr => {
-                    services.for_each(|service| {
+                    for service in services.clone() {
                         if question.qname().name_eq(&Service::dns_sd_fqdn(true)?) {
                             service.add_service_type(answer, ttl_sec)?;
                             replied = true;
@@ -241,19 +214,15 @@ impl<'a> Host<'a> {
                             service.add_txt(answer, ttl_sec)?;
                             replied = true;
                         }
-
-                        Ok(())
-                    })?;
+                    }
                 }
                 Rtype::Txt => {
-                    services.for_each(|service| {
+                    for service in services.clone() {
                         if question.qname().name_eq(&service.service_fqdn(true)?) {
                             service.add_txt(answer, ttl_sec)?;
                             replied = true;
                         }
-
-                        Ok(())
-                    })?;
+                    }
                 }
                 Rtype::Any => {
                     // A / AAAA
@@ -267,7 +236,7 @@ impl<'a> Host<'a> {
                     }
 
                     // PTR
-                    services.for_each(|service| {
+                    for service in services.clone() {
                         if question.qname().name_eq(&Service::dns_sd_fqdn(true)?) {
                             service.add_service_type(answer, ttl_sec)?;
                             replied = true;
@@ -281,21 +250,17 @@ impl<'a> Host<'a> {
                             service.add_txt(answer, ttl_sec)?;
                             replied = true;
                         }
-
-                        Ok(())
-                    })?;
+                    }
 
                     // SRV
-                    services.for_each(|service| {
+                    for service in services.clone() {
                         if question.qname().name_eq(&service.service_fqdn(true)?) {
                             self.add_ipv4(answer, ttl_sec)?;
                             self.add_ipv6(answer, ttl_sec)?;
                             service.add_service(answer, self.hostname, ttl_sec)?;
                             replied = true;
                         }
-
-                        Ok(())
-                    })?;
+                    }
                 }
                 _ => (),
             }
@@ -356,6 +321,7 @@ impl<'a> Host<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Service<'a> {
     pub name: &'a str,
     pub service: &'a str,
