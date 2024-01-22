@@ -42,8 +42,12 @@ embedded-nal-async = "0.7"
 std-embedded-nal-async = "0.1"
 embassy-time = { version = "0.3", features = ["std", "generic-queue"] }
 embassy-sync = "0.5"
+embassy-futures = "0.1"
+embedded-svc = { version = "0.26", features = ["std"] }
 futures-lite = "1"
 rand = "0.8"
+tokio = "1" # For the `mqtt_client` example
+async-compat = "0.2" # For the `mqtt_client` example
 
 [[example]]
 name = "captive_portal"
@@ -80,6 +84,10 @@ required-features = ["std"]
 [[example]]
 name = "std_nal"
 required-features = ["std"]
+
+[[example]]
+name = "mqtt_client"
+required-features = ["std", "embedded-svc"]
 
 [workspace]
 members = [
