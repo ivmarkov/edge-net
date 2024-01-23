@@ -5,6 +5,6 @@ edition = "2021"
 rust-version = "1.75"
 
 [dependencies]
-rumqttc = "0.19"
+rumqttc = "0.23"
 log = { workspace = true }
 embedded-svc = { workspace = true, optional = true, default-features = false, features = ["std"] }

@@ -1,5 +1,3 @@
-use core::fmt::Debug;
-
 use async_compat::CompatExt;
 
 use embedded_svc::mqtt::client::asynch::{Client, Connection, Publish, QoS};
@@ -30,11 +28,11 @@ fn main() {
     .unwrap()
 }
 
-async fn run<M, C>(mut client: M, mut connection: C, topic: &str) -> Result<(), M::Error>
+async fn run<M, C>(mut client: M, mut connection: C, topic: &str) -> Result<(), anyhow::Error>
 where
     M: Client + Publish + 'static,
-    C: Connection<Error = M::Error> + 'static,
-    M::Error: Debug + 'static,
+    M::Error: std::error::Error + Send + Sync + 'static,
+    C: Connection + 'static,
 {
     info!("About to start the MQTT client");
 
@@ -48,20 +46,11 @@ where
         async move {
             info!("MQTT Listening for messages");
 
-            loop {
-                let msg = connection.next().await;
-
-                match msg {
-                    Err(err) => info!("[Queue] Error: {:?}", err),
-                    Ok(event) => {
-                        if let Some(event) = event {
-                            info!("[Queue] Event: {}", event.payload());
-                        } else {
-                            break;
-                        }
-                    }
-                }
+            while let Ok(event) = connection.next().await {
+                info!("[Queue] Event: {}", event.payload());
             }
+
+            info!("Connection closed");
 
             Ok(())
         },

@@ -12,11 +12,13 @@ readme = "README.md"
 rust-version = "1.75"
 
 [patch.crates-io]
-embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
+#embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
+embedded-svc = { path = "../embedded-svc" }
 std-embedded-nal-async = { git = "https://gitlab.com/ivmarkov/std-embedded-nal" }
 
 [features]
-default = ["io"]
+default = ["std", "embedded-svc"]
+#default = ["io"]
 std = ["io", "edge-captive/std", "edge-dhcp/std", "edge-http/std", "edge-mdns/std", "edge-raw/std", "edge-mqtt", "edge-ws/std", "edge-std-nal-async"]
 io = ["edge-captive/io", "edge-dhcp/io", "edge-http/io", "edge-mdns/io", "edge-raw/io", "edge-ws/io", "embedded-nal-async-xtra"]
 nightly = []

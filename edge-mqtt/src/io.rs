@@ -5,44 +5,15 @@ pub use embedded_svc_compat::*;
 
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
-    use core::fmt::{Debug, Display};
-
     use embedded_svc::mqtt::client::asynch::{
         Client, Connection, Details, ErrorType, Event, EventPayload, MessageId, Publish, QoS,
     };
 
     use log::trace;
 
-    use rumqttc::{AsyncClient, ClientError, ConnectionError, EventLoop, PubAck, SubAck, UnsubAck};
+    use rumqttc::{self, AsyncClient, EventLoop, PubAck, SubAck, UnsubAck};
 
-    #[derive(Debug)]
-    pub enum MqttError {
-        ClientError(ClientError),
-        ConnectionError(ConnectionError),
-    }
-
-    impl Display for MqttError {
-        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
-            match self {
-                MqttError::ClientError(error) => write!(f, "ClientError: {error}"),
-                MqttError::ConnectionError(error) => write!(f, "ConnectionError: {error}"),
-            }
-        }
-    }
-
-    impl std::error::Error for MqttError {}
-
-    impl From<ClientError> for MqttError {
-        fn from(value: ClientError) -> Self {
-            Self::ClientError(value)
-        }
-    }
-
-    impl From<ConnectionError> for MqttError {
-        fn from(value: ConnectionError) -> Self {
-            Self::ConnectionError(value)
-        }
-    }
+    pub use rumqttc::{ClientError, ConnectionError, RecvError};
 
     pub struct MqttClient(AsyncClient);
 
@@ -53,7 +24,7 @@ mod embedded_svc_compat {
     }
 
     impl ErrorType for MqttClient {
-        type Error = MqttError;
+        type Error = ClientError;
     }
 
     impl Client for MqttClient {
@@ -84,72 +55,92 @@ mod embedded_svc_compat {
         }
     }
 
-    pub struct MqttEvent(rumqttc::Event);
+    pub struct MqttEvent(Result<rumqttc::Event, ConnectionError>);
 
     impl MqttEvent {
-        fn payload(&self) -> Option<EventPayload<'_>> {
+        fn payload(&self) -> EventPayload<'_, ConnectionError> {
+            self.maybe_payload().unwrap()
+        }
+
+        fn maybe_payload(&self) -> Option<EventPayload<'_, ConnectionError>> {
             match &self.0 {
-                rumqttc::Event::Incoming(incoming) => match incoming {
-                    rumqttc::Packet::Connect(_) => Some(EventPayload::BeforeConnect),
-                    rumqttc::Packet::ConnAck(_) => Some(EventPayload::Connected(true)),
-                    rumqttc::Packet::Disconnect => Some(EventPayload::Disconnected),
-                    rumqttc::Packet::PubAck(PubAck { pkid, .. }) => {
-                        Some(EventPayload::Published(*pkid as _))
-                    }
-                    rumqttc::Packet::SubAck(SubAck { pkid, .. }) => {
-                        Some(EventPayload::Subscribed(*pkid as _))
-                    }
-                    rumqttc::Packet::UnsubAck(UnsubAck { pkid, .. }) => {
-                        Some(EventPayload::Unsubscribed(*pkid as _))
-                    }
-                    rumqttc::Packet::Publish(rumqttc::Publish {
-                        pkid,
-                        topic,
-                        payload,
-                        ..
-                    }) => Some(EventPayload::Received {
-                        id: *pkid as _,
-                        topic: Some(topic.as_str()),
-                        data: payload,
-                        details: Details::Complete,
-                    }),
-                    _ => None,
+                Ok(event) => match event {
+                    rumqttc::Event::Incoming(incoming) => match incoming {
+                        rumqttc::Packet::Connect(_) => Some(EventPayload::BeforeConnect),
+                        rumqttc::Packet::ConnAck(_) => Some(EventPayload::Connected(true)),
+                        rumqttc::Packet::Disconnect => Some(EventPayload::Disconnected),
+                        rumqttc::Packet::PubAck(PubAck { pkid, .. }) => {
+                            Some(EventPayload::Published(*pkid as _))
+                        }
+                        rumqttc::Packet::SubAck(SubAck { pkid, .. }) => {
+                            Some(EventPayload::Subscribed(*pkid as _))
+                        }
+                        rumqttc::Packet::UnsubAck(UnsubAck { pkid, .. }) => {
+                            Some(EventPayload::Unsubscribed(*pkid as _))
+                        }
+                        rumqttc::Packet::Publish(rumqttc::Publish {
+                            pkid,
+                            topic,
+                            payload,
+                            ..
+                        }) => Some(EventPayload::Received {
+                            id: *pkid as _,
+                            topic: Some(topic.as_str()),
+                            data: payload,
+                            details: Details::Complete,
+                        }),
+                        _ => None,
+                    },
+                    rumqttc::Event::Outgoing(_) => None,
                 },
-                rumqttc::Event::Outgoing(_) => None,
+                Err(err) => Some(EventPayload::Error(err)),
             }
         }
     }
 
+    impl ErrorType for MqttEvent {
+        type Error = ConnectionError;
+    }
+
     impl Event for MqttEvent {
-        fn payload(&self) -> EventPayload<'_> {
-            MqttEvent::payload(self).unwrap()
+        fn payload(&self) -> EventPayload<'_, Self::Error> {
+            MqttEvent::payload(self)
         }
     }
 
-    pub struct MqttConnection(EventLoop);
+    pub struct MqttConnection(EventLoop, bool);
 
     impl MqttConnection {
         pub const fn new(event_loop: EventLoop) -> Self {
-            Self(event_loop)
+            Self(event_loop, false)
         }
     }
 
     impl ErrorType for MqttConnection {
-        type Error = MqttError;
+        type Error = RecvError;
     }
 
     impl Connection for MqttConnection {
         type Event<'a> = MqttEvent where Self: 'a;
 
-        async fn next(&mut self) -> Result<Option<Self::Event<'_>>, Self::Error> {
-            loop {
-                let event = self.0.poll().await?;
-                trace!("Got event: {:?}", event);
+        async fn next(&mut self) -> Result<Self::Event<'_>, Self::Error> {
+            if self.1 {
+                Err(RecvError)
+            } else {
+                loop {
+                    let event = self.0.poll().await;
+                    trace!("Got event: {:?}", event);
 
-                let event = MqttEvent(event);
-
-                if event.payload().is_some() {
-                    break Ok(Some(event));
+                    let event = MqttEvent(event);
+                    if let Some(payload) = event.maybe_payload() {
+                        if matches!(payload, EventPayload::Error(ConnectionError::RequestsDone)) {
+                            self.1 = true;
+                            trace!("Done with requests");
+                            break Err(RecvError);
+                        } else {
+                            break Ok(event);
+                        }
+                    }
                 }
             }
         }
