@@ -31,7 +31,7 @@ jobs:
       - name: Build | Fmt Check
         run: cargo fmt -- --check
       - name: Build | Clippy
-        run: cargo clippy --features std,embedded-svc,examples --no-deps -- -Dwarnings
+        run: cargo clippy --features std,embedded-svc --examples --no-deps -- -Dwarnings
       - name: Build | Default
         run: cargo build
       - name: Build | Non-default
