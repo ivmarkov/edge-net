@@ -12,7 +12,6 @@ readme = "README.md"
 rust-version = "1.75"
 
 [patch.crates-io]
-embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
 std-embedded-nal-async = { git = "https://gitlab.com/ivmarkov/std-embedded-nal" }
 
 [features]
@@ -43,7 +42,7 @@ std-embedded-nal-async = "0.1"
 embassy-time = { version = "0.3", features = ["std", "generic-queue"] }
 embassy-sync = "0.5"
 embassy-futures = "0.1"
-embedded-svc = { version = "0.26", features = ["std"] }
+embedded-svc = { version = "0.27", features = ["std"] }
 futures-lite = "1"
 rand = "0.8"
 tokio = "1" # For the `mqtt_client` example
@@ -109,7 +108,7 @@ embassy-sync = { version = "0.5", default-features = false }
 embassy-time = { version = "0.3", default-features = false }
 embedded-io-async = { version = "0.6", default-features = false }
 embedded-nal-async = { version = "0.7", default-features = false }
-embedded-svc = { version = "0.26", default-features = false }
+embedded-svc = { version = "0.27", default-features = false }
 log = { version = "0.4", default-features = false }
 heapless = { version = "0.8", default-features = false }
 no-std-net = { version = "0.6", default-features = false }
