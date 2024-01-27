@@ -1,4 +1,4 @@
-name: PublishDryRun
+name: PublishDryRunCrate
 
 on:
   workflow_dispatch
