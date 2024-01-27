@@ -8,9 +8,9 @@ A wrapper for the [`rumqttc`](https://github.com/bytebeamio/rumqtt) crate that a
 
 **NOTE**: Needs STD!
 
-The plan for the future is to retire this crate in favor of []() once the latter gets MQTT 3.1 compatibility, and implements a more ergonomic API where sending can be done independently from receiving MQTT messages.
+The plan for the future is to retire this crate in favor of [rust-mqtt](https://github.com/obabec/rust-mqtt) once the latter gets MQTT 3.1 compatibility, and implements a more ergonomic API where sending can be done independently from receiving MQTT messages.
 
-... or implement a true `no_std` no-alloc alternative - just like all other `edge-*` crates - if "" does not see further development.
+... or implement a true `no_std` no-alloc alternative - just like all other `edge-*` crates - if `rust-mqtt` does not see further development.
 
 ## Example
 
