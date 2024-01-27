@@ -1,7 +1,7 @@
 name: PublishDryRunCrate
 
 on:
-  workflow_dispatch
+  workflow_dispatch:
     inputs:
       crate:
         required: true
