@@ -3,6 +3,17 @@ name = "edge-ws"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
+description = "Async + `no_std` + no-alloc implementation of the Websockets protocol"
+repository = "https://github.com/ivmarkov/edge-net"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+categories = [
+    "embedded",
+    "no-std",
+    "asynchronous",
+    "networking",
+    "websockets"
+]
 
 [features]
 default = ["io"]

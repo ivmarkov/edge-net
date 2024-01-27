@@ -3,6 +3,16 @@ name = "embedded-nal-async-xtra"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
+description = "Hosts a bunch of traits which are not yet available in the embedded-nal-async crate"
+repository = "https://github.com/ivmarkov/edge-net"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+categories = [
+    "embedded",
+    "no-std",
+    "asynchronous",
+    "networking"
+]
 
 [dependencies]
 embedded-io-async = { workspace = true }

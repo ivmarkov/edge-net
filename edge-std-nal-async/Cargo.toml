@@ -3,6 +3,16 @@ name = "edge-std-nal-async"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
+description = "A stop-gap STD implementation of embedded-nal-async, and embedded-nal-async-xtra"
+repository = "https://github.com/ivmarkov/edge-net"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+categories = [
+    "embedded",
+    "no-std",
+    "asynchronous",
+    "networking"
+]
 
 [dependencies]
 embedded-io-async = { workspace = true, features = ["std"] }

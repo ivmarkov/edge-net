@@ -3,6 +3,17 @@ name = "edge-mqtt"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
+description = "Implements the embedded-svc MQTT traits on top of the rumqttc crate"
+repository = "https://github.com/ivmarkov/edge-net"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+categories = [
+    "embedded",
+    "no-std",
+    "asynchronous",
+    "networking",
+    "mqtt"
+]
 
 [dependencies]
 rumqttc = "0.23"

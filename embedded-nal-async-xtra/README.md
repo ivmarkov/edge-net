@@ -4,7 +4,7 @@
 ![crates.io](https://img.shields.io/crates/v/edge-net.svg)
 [![Documentation](https://docs.rs/edge-net/badge.svg)](https://docs.rs/edge-net)
 
-A placeholder for a bunch of traits which hopefully will be upstreamed into [embedded-nal-async](https://github.com/rust-embedded-community/embedded-nal/tree/master/embedded-nal-async) soon - in one shape or another.
+Hosts a bunch of traits which hopefully will be upstreamed into [embedded-nal-async](https://github.com/rust-embedded-community/embedded-nal/tree/master/embedded-nal-async) soon - in one shape or another.
 
 ## Justification
 

@@ -2,6 +2,17 @@
 name = "edge-mdns"
 version = "0.1.0"
 edition = "2021"
+description = "Async + `no_std` + no-alloc implementation of an mDNS responder"
+repository = "https://github.com/ivmarkov/edge-net"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+categories = [
+    "embedded",
+    "no-std",
+    "asynchronous",
+    "networking",
+    "mdns"
+]
 
 [features]
 default = ["io"]

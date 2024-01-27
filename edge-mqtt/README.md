@@ -4,7 +4,7 @@
 ![crates.io](https://img.shields.io/crates/v/edge-net.svg)
 [![Documentation](https://docs.rs/edge-net/badge.svg)](https://docs.rs/edge-net)
 
-A wrapper for the [`rumqttc`]() crate that adapts it to async [MQTT traits]() of the `embedded-svc` crate.
+A wrapper for the [`rumqttc`](https://github.com/bytebeamio/rumqtt) crate that adapts it to the async [MQTT traits](https://github.com/esp-rs/embedded-svc/blob/master/src/mqtt/client.rs) of the `embedded-svc` crate.
 
 **NOTE**: Needs STD!
 
