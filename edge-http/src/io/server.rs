@@ -408,11 +408,16 @@ where
     Ok(connection.needs_close())
 }
 
+pub type DefaultServerBuffers = ServerBuffers<DEFAULT_HANDLERS_COUNT, DEFAULT_BUF_SIZE>;
+
 pub struct ServerBuffers<const P: usize = DEFAULT_HANDLERS_COUNT, const B: usize = DEFAULT_BUF_SIZE>(
     [MaybeUninit<[u8; B]>; P],
 );
 
 impl<const P: usize, const B: usize> ServerBuffers<P, B> {
+    pub const HANDLERS_COUNT: usize = P;
+    pub const BUF_SIZE: usize = B;
+
     #[inline(always)]
     pub const fn new() -> Self {
         Self([MaybeUninit::uninit(); P])
