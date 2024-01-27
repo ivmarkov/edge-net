@@ -18,15 +18,16 @@ use embedded_nal_async_xtra::{
     Multicast, RawSocket, RawStack, TcpAccept, TcpListen, TcpSplittableConnection,
 };
 
-pub struct StdTcpConnect(());
+#[derive(Default)]
+pub struct Stack(());
 
-impl StdTcpConnect {
+impl Stack {
     pub const fn new() -> Self {
         Self(())
     }
 }
 
-impl TcpConnect for StdTcpConnect {
+impl TcpConnect for Stack {
     type Error = io::Error;
 
     type Connection<'a> = StdTcpConnection where Self: 'a;
@@ -38,15 +39,7 @@ impl TcpConnect for StdTcpConnect {
     }
 }
 
-pub struct StdTcpListen(());
-
-impl StdTcpListen {
-    pub const fn new() -> Self {
-        Self(())
-    }
-}
-
-impl TcpListen for StdTcpListen {
+impl TcpListen for Stack {
     type Error = io::Error;
 
     type Acceptor<'m>
@@ -127,15 +120,7 @@ impl<'r> Write for StdTcpConnectionRef<'r> {
     }
 }
 
-pub struct StdUdpStack(());
-
-impl StdUdpStack {
-    pub const fn new() -> Self {
-        Self(())
-    }
-}
-
-impl UdpStack for StdUdpStack {
+impl UdpStack for Stack {
     type Error = io::Error;
 
     type Connected = StdUdpSocket;
@@ -274,15 +259,7 @@ impl Multicast for StdUdpSocket {
     }
 }
 
-pub struct StdDns(());
-
-impl StdDns {
-    pub const fn new() -> Self {
-        Self(())
-    }
-}
-
-impl Dns for StdDns {
+impl Dns for Stack {
     type Error = io::Error;
 
     async fn get_host_by_name(
@@ -395,22 +372,12 @@ impl RawSocket for StdRawSocket {
 }
 
 #[cfg(unix)]
-pub struct StdRawStack(u32);
-
-#[cfg(unix)]
-impl StdRawStack {
-    pub const fn new(interface: u32) -> Self {
-        Self(interface)
-    }
-}
-
-#[cfg(unix)]
-impl RawStack for StdRawStack {
+impl RawStack for Stack {
     type Error = io::Error;
 
     type Socket = StdRawSocket;
 
-    async fn bind(&self) -> Result<Self::Socket, Self::Error> {
+    async fn bind(&self, interface: u32) -> Result<Self::Socket, Self::Error> {
         let socket = cvt(unsafe {
             libc::socket(
                 libc::PF_PACKET,
@@ -422,7 +389,7 @@ impl RawStack for StdRawStack {
         let sockaddr = libc::sockaddr_ll {
             sll_family: libc::AF_PACKET as _,
             sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
-            sll_ifindex: self.0 as _,
+            sll_ifindex: interface as _,
             sll_hatype: 0,
             sll_pkttype: 0,
             sll_halen: 0,
@@ -450,7 +417,7 @@ impl RawStack for StdRawStack {
 
         socket.set_broadcast(true)?;
 
-        Ok(StdRawSocket(Async::new(socket)?, self.0 as _))
+        Ok(StdRawSocket(Async::new(socket)?, interface as _))
     }
 }
 
