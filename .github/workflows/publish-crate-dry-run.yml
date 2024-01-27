@@ -2,21 +2,21 @@ name: PublishDryRun
 
 on:
   workflow_dispatch
-  inputs:
-    crate:
-      required: true
-      type: choice
-      description: Crate to publish
-      options: 
-      - edge-std-nal-async
-      - embedded-nal-async-xtra
-      - edge-captive
-      - edge-dhcp
-      - edge-http
-      - edge-mdns
-      - edge-mqtt
-      - edge-raw
-      - edge-ws
+    inputs:
+      crate:
+        required: true
+        type: choice
+        description: Crate to publish
+        options: 
+        - edge-std-nal-async
+        - embedded-nal-async-xtra
+        - edge-captive
+        - edge-dhcp
+        - edge-http
+        - edge-mdns
+        - edge-mqtt
+        - edge-raw
+        - edge-ws
 
 env:
   rust_toolchain: stable
