@@ -8,8 +8,8 @@ on:
         type: choice
         description: Crate to publish
         options: 
-        - edge-std-nal-async
         - embedded-nal-async-xtra
+        - edge-std-nal-async
         - edge-captive
         - edge-dhcp
         - edge-http
