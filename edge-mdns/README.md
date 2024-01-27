@@ -19,8 +19,6 @@ use embedded_nal_async_xtra::Multicast;
 use edge_mdns::io::{self, MdnsIoError, MdnsRunBuffers, UdpSplitBuffer, DEFAULT_SOCKET};
 use edge_mdns::Host;
 
-use edge_std_nal_async::StdUdpStack;
-
 use log::*;
 
 // Change this to the IP address of the machine where you'll run this example
@@ -33,7 +31,7 @@ fn main() {
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    let stack = StdUdpStack::new();
+    let stack = edge_std_nal_async::Stack::new();
 
     let mut udp_buffer = UdpSplitBuffer::new();
     let mut buffers = MdnsRunBuffers::new();

@@ -21,8 +21,6 @@ use embedded_nal_async::{AddrType, Dns, SocketAddr, TcpConnect};
 use edge_http::io::{client::Connection, Error};
 use edge_http::Method;
 
-use std_embedded_nal_async::Stack;
-
 use log::*;
 
 fn main() {
@@ -30,7 +28,7 @@ fn main() {
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    let stack: Stack = Default::default();
+    let stack: edge_std_nal_async::Stack = Default::default();
 
     let mut buf = [0_u8; 8192];
 
@@ -98,7 +96,6 @@ async fn request<'b, const N: usize, T: TcpConnect>(
 use edge_http::io::server::{Connection, Handler, Server, ServerBuffers};
 use edge_http::Method;
 
-use edge_std_nal_async::StdTcpListen;
 use embedded_nal_async_xtra::TcpListen;
 
 use embedded_io_async::{Read, Write};
@@ -122,7 +119,9 @@ pub async fn run<const P: usize, const B: usize>(
 
     info!("Running HTTP server on {addr}");
 
-    let acceptor = StdTcpListen::new().listen(addr.parse().unwrap()).await?;
+    let acceptor = edge_std_nal_async::Stack::new()
+        .listen(addr.parse().unwrap())
+        .await?;
 
     let mut server: Server<_, _> = Server::new(acceptor, HttpHandler);
 
