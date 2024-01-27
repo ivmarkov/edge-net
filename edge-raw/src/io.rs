@@ -128,7 +128,7 @@ where
     }
 }
 
-pub struct Udp2RawStack<T, const N: usize = 1500>(T)
+pub struct Udp2RawStack<T, const N: usize = 1500>(T, u32)
 where
     T: RawStack;
 
@@ -136,8 +136,8 @@ impl<T, const N: usize> Udp2RawStack<T, N>
 where
     T: RawStack,
 {
-    pub const fn new(stack: T) -> Self {
-        Self(stack)
+    pub const fn new(stack: T, interface: u32) -> Self {
+        Self(stack, interface)
     }
 }
 
@@ -162,7 +162,7 @@ where
             Err(Error::UnsupportedProtocol)?
         };
 
-        let socket = self.0.bind().await.map_err(Self::Error::Io)?;
+        let socket = self.0.bind(self.1).await.map_err(Self::Error::Io)?;
 
         Ok((local, ConnectedUdp2RawSocket(socket, localv4, remotev4)))
     }
@@ -175,7 +175,7 @@ where
             Err(Error::UnsupportedProtocol)?
         };
 
-        let socket = self.0.bind().await.map_err(Self::Error::Io)?;
+        let socket = self.0.bind(self.1).await.map_err(Self::Error::Io)?;
 
         Ok((local, UnconnectedUdp2RawSocket(socket, Some(localv4))))
     }
@@ -185,7 +185,7 @@ where
             Err(Error::UnsupportedProtocol)?
         };
 
-        let socket = self.0.bind().await.map_err(Self::Error::Io)?;
+        let socket = self.0.bind(self.1).await.map_err(Self::Error::Io)?;
 
         Ok(UnconnectedUdp2RawSocket(socket, Some(localv4)))
     }

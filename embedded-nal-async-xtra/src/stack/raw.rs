@@ -25,7 +25,7 @@ pub trait RawStack {
 
     type Socket: RawSocket<Error = Self::Error>;
 
-    async fn bind(&self) -> Result<Self::Socket, Self::Error>;
+    async fn bind(&self, interface: u32) -> Result<Self::Socket, Self::Error>;
 }
 
 impl<T> RawStack for &T
@@ -36,8 +36,8 @@ where
 
     type Socket = T::Socket;
 
-    async fn bind(&self) -> Result<Self::Socket, Self::Error> {
-        (*self).bind().await
+    async fn bind(&self, interface: u32) -> Result<Self::Socket, Self::Error> {
+        (*self).bind(interface).await
     }
 }
 
@@ -49,7 +49,7 @@ where
 
     type Socket = T::Socket;
 
-    async fn bind(&self) -> Result<Self::Socket, Self::Error> {
-        (**self).bind().await
+    async fn bind(&self, interface: u32) -> Result<Self::Socket, Self::Error> {
+        (**self).bind(interface).await
     }
 }
