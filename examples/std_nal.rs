@@ -4,14 +4,12 @@ use embedded_nal_async::{IpAddr, Ipv4Addr, SocketAddr, TcpConnect};
 
 use log::*;
 
-use std_embedded_nal_async::Stack;
-
 fn main() {
     env_logger::init_from_env(
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    let stack: Stack = Default::default();
+    let stack = edge_std_nal_async::Stack::new();
 
     futures_lite::future::block_on(read(&stack)).unwrap();
 }

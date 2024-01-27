@@ -1,6 +1,5 @@
 /// NOTE: Run this example with `sudo` to be able to bind to the interface, as it uses raw sockets which require root privileges.
 use edge_raw::io::Udp2RawStack;
-use edge_std_nal_async::StdRawStack;
 
 use edge_dhcp::client::Client;
 use edge_dhcp::io::{self, client::Lease, client::DEFAULT_CLIENT_PORT};
@@ -24,7 +23,7 @@ fn main() {
 async fn run(if_index: u32, if_mac: [u8; 6]) -> Result<(), anyhow::Error> {
     let mut client = Client::new(rand::thread_rng(), if_mac);
 
-    let stack: Udp2RawStack<_> = Udp2RawStack::new(StdRawStack::new(if_index));
+    let stack: Udp2RawStack<_> = Udp2RawStack::new(edge_std_nal_async::Stack::new(), if_index);
     let mut buf = [0; 1500];
 
     loop {

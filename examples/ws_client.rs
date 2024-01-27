@@ -7,8 +7,6 @@ use edge_http::io::client::Connection;
 
 use rand::{thread_rng, RngCore};
 
-use std_embedded_nal_async::Stack;
-
 use log::*;
 
 // NOTE: HTTP-only echo WS servers seem to be hard to find, this one might or might not work...
@@ -20,7 +18,7 @@ fn main() {
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    let stack: Stack = Default::default();
+    let stack = edge_std_nal_async::Stack::new();
 
     let mut buf = [0_u8; 8192];
 

@@ -1,7 +1,6 @@
 use edge_http::io::server::{Connection, Handler, Server, ServerBuffers};
 use edge_http::Method;
 
-use edge_std_nal_async::StdTcpListen;
 use embedded_nal_async_xtra::TcpListen;
 
 use embedded_io_async::{Read, Write};
@@ -25,7 +24,9 @@ pub async fn run<const P: usize, const B: usize>(
 
     info!("Running HTTP server on {addr}");
 
-    let acceptor = StdTcpListen::new().listen(addr.parse().unwrap()).await?;
+    let acceptor = edge_std_nal_async::Stack::new()
+        .listen(addr.parse().unwrap())
+        .await?;
 
     let mut server: Server<_, _> = Server::new(acceptor, HttpHandler);
 
