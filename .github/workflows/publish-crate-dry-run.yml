@@ -37,4 +37,4 @@ jobs:
       - name: Setup | Set default toolchain
         run: rustup default ${{ env.rust_toolchain }}
       - name: Build | Publish Dry Run
-        run: cd "${{ github.event.inputs.crate }}; cargo publish --dry-run
+        run: cd "${{ github.event.inputs.crate }}"; cargo publish --dry-run
