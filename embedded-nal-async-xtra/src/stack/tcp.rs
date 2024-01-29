@@ -65,7 +65,7 @@ where
 
 pub trait TcpAccept {
     type Error: embedded_io_async::Error;
-    
+
     type Connection<'m>: embedded_io_async::Read<Error = Self::Error>
         + embedded_io_async::Write<Error = Self::Error>
     where
