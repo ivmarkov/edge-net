@@ -144,7 +144,7 @@ where
 ### Websocket echo server
 
 ```rust
-use edge_http::io::server::{Connection, Handler, Server, ServerBuffers};
+use edge_http::io::server::{Connection, DefaultServer, Handler};
 use edge_http::Method;
 
 use edge_ws::{FrameHeader, FrameType};
@@ -159,14 +159,12 @@ fn main() {
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    let mut buffers: ServerBuffers = ServerBuffers::new();
+    let mut server = DefaultServer::new();
 
-    futures_lite::future::block_on(run(&mut buffers)).unwrap();
+    futures_lite::future::block_on(run(&mut server)).unwrap();
 }
 
-pub async fn run<const P: usize, const B: usize>(
-    buffers: &mut ServerBuffers<P, B>,
-) -> Result<(), anyhow::Error> {
+pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
     let addr = "0.0.0.0:8881";
 
     info!("Running HTTP server on {addr}");
@@ -175,9 +173,7 @@ pub async fn run<const P: usize, const B: usize>(
         .listen(addr.parse().unwrap())
         .await?;
 
-    let mut server: Server<_, _> = Server::new(acceptor, WsHandler);
-
-    server.process::<2, P, B>(buffers).await?;
+    server.run(acceptor, WsHandler).await?;
 
     Ok(())
 }

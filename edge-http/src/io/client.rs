@@ -347,7 +347,7 @@ where
 
 impl<'b, T, const N: usize> Read for Connection<'b, T, N>
 where
-    T: TcpConnect + 'b,
+    T: TcpConnect,
 {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         self.response_mut()?.io.read(buf).await
@@ -356,7 +356,7 @@ where
 
 impl<'b, T, const N: usize> Write for Connection<'b, T, N>
 where
-    T: TcpConnect + 'b,
+    T: TcpConnect,
 {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         self.request_mut()?.io.write(buf).await
@@ -408,7 +408,7 @@ mod embedded_svc_compat {
 
     impl<'b, T, const N: usize> Headers for super::Connection<'b, T, N>
     where
-        T: TcpConnect + 'b,
+        T: TcpConnect,
     {
         fn header(&self, name: &str) -> Option<&'_ str> {
             let response = self.response_ref().expect("Not in response state");
@@ -419,7 +419,7 @@ mod embedded_svc_compat {
 
     impl<'b, T, const N: usize> Status for super::Connection<'b, T, N>
     where
-        T: TcpConnect + 'b,
+        T: TcpConnect,
     {
         fn status(&self) -> u16 {
             let response = self.response_ref().expect("Not in response state");
@@ -436,7 +436,7 @@ mod embedded_svc_compat {
 
     impl<'b, T, const N: usize> Connection for super::Connection<'b, T, N>
     where
-        T: TcpConnect + 'b,
+        T: TcpConnect,
     {
         type Read = Body<'b, T::Connection<'b>>;
 
