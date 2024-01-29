@@ -1,8 +1,7 @@
 #![allow(async_fn_in_trait)]
 
-use std::io::{self, ErrorKind};
+use std::io;
 use std::net::{self, TcpStream, ToSocketAddrs, UdpSocket};
-use std::os::fd::{AsFd, AsRawFd};
 
 use async_io::Async;
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
@@ -14,9 +13,10 @@ use embedded_nal_async::{
     TcpConnect, UdpStack, UnconnectedUdp,
 };
 
-use embedded_nal_async_xtra::{
-    Multicast, RawSocket, RawStack, TcpAccept, TcpListen, TcpSplittableConnection,
-};
+use embedded_nal_async_xtra::{Multicast, TcpAccept, TcpListen, TcpSplittableConnection};
+
+#[cfg(all(unix, not(target_os = "espidf")))]
+pub use raw::*;
 
 #[derive(Default)]
 pub struct Stack(());
@@ -86,37 +86,35 @@ impl Write for StdTcpConnection {
     }
 }
 
-impl TcpSplittableConnection for StdTcpConnection {
-    type Error = io::Error;
-
-    type Read<'a> = StdTcpConnectionRef<'a> where Self: 'a;
-
-    type Write<'a> = StdTcpConnectionRef<'a> where Self: 'a;
-
-    async fn split(&mut self) -> Result<(Self::Read<'_>, Self::Write<'_>), io::Error> {
-        Ok((StdTcpConnectionRef(&self.0), StdTcpConnectionRef(&self.0)))
-    }
-}
-
-pub struct StdTcpConnectionRef<'r>(&'r Async<TcpStream>);
-
-impl<'r> ErrorType for StdTcpConnectionRef<'r> {
+impl ErrorType for &StdTcpConnection {
     type Error = io::Error;
 }
 
-impl<'r> Read for StdTcpConnectionRef<'r> {
+impl Read for &StdTcpConnection {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        self.0.read(buf).await
+        (&self.0).read(buf).await
     }
 }
 
-impl<'r> Write for StdTcpConnectionRef<'r> {
+impl Write for &StdTcpConnection {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.0.write(buf).await
+        (&self.0).write(buf).await
     }
 
     async fn flush(&mut self) -> Result<(), Self::Error> {
-        self.0.flush().await
+        (&self.0).flush().await
+    }
+}
+
+impl TcpSplittableConnection for StdTcpConnection {
+    type Read<'a> = &'a StdTcpConnection where Self: 'a;
+
+    type Write<'a> = &'a StdTcpConnection where Self: 'a;
+
+    fn split(&mut self) -> Result<(Self::Read<'_>, Self::Write<'_>), io::Error> {
+        let socket = &*self;
+
+        Ok((socket, socket))
     }
 }
 
@@ -296,138 +294,179 @@ fn dns_lookup_host(host: &str, addr_type: AddrType) -> Result<IpAddr, io::Error>
         .ok_or_else(|| io::ErrorKind::AddrNotAvailable.into())
 }
 
-#[cfg(unix)]
-pub struct StdRawSocket(Async<std::net::UdpSocket>, u32);
+#[cfg(all(unix, not(target_os = "espidf")))]
+mod raw {
+    use std::io::{self, ErrorKind};
+    use std::os::fd::{AsFd, AsRawFd};
 
-#[cfg(unix)]
-impl RawSocket for StdRawSocket {
-    type Error = io::Error;
+    use async_io::Async;
 
-    async fn send(&mut self, mac: Option<&[u8; 6]>, data: &[u8]) -> Result<(), Self::Error> {
-        let mut sockaddr = libc::sockaddr_ll {
-            sll_family: libc::AF_PACKET as _,
-            sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
-            sll_ifindex: self.1 as _,
-            sll_hatype: 0,
-            sll_pkttype: 0,
-            sll_halen: 0,
-            sll_addr: Default::default(),
-        };
+    use embedded_nal_async_xtra::{RawSocket, RawStack};
 
-        if let Some(mac) = mac {
-            sockaddr.sll_halen = mac.len() as _;
-            sockaddr.sll_addr[..mac.len()].copy_from_slice(mac);
+    use crate::Stack;
+
+    pub struct StdRawSocket(Async<std::net::UdpSocket>, u32);
+
+    impl RawSocket for StdRawSocket {
+        type Error = io::Error;
+
+        async fn send(&mut self, mac: Option<&[u8; 6]>, data: &[u8]) -> Result<(), Self::Error> {
+            let mut sockaddr = libc::sockaddr_ll {
+                sll_family: libc::AF_PACKET as _,
+                sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
+                sll_ifindex: self.1 as _,
+                sll_hatype: 0,
+                sll_pkttype: 0,
+                sll_halen: 0,
+                sll_addr: Default::default(),
+            };
+
+            if let Some(mac) = mac {
+                sockaddr.sll_halen = mac.len() as _;
+                sockaddr.sll_addr[..mac.len()].copy_from_slice(mac);
+            }
+
+            let len = self
+                .0
+                .write_with(|io| {
+                    let len = core::cmp::min(data.len(), u16::MAX as usize);
+
+                    let ret = cvti(unsafe {
+                        libc::sendto(
+                            io.as_fd().as_raw_fd(),
+                            data.as_ptr() as *const _,
+                            len,
+                            libc::MSG_NOSIGNAL,
+                            &sockaddr as *const _ as *const _,
+                            core::mem::size_of::<libc::sockaddr_ll>() as _,
+                        )
+                    })?;
+                    Ok(ret as usize)
+                })
+                .await?;
+
+            assert_eq!(len, data.len());
+
+            Ok(())
         }
 
-        let len = self
-            .0
-            .write_with(|io| {
-                let len = core::cmp::min(data.len(), u16::MAX as usize);
+        async fn receive_into(
+            &mut self,
+            buffer: &mut [u8],
+        ) -> Result<(usize, [u8; 6]), Self::Error> {
+            self.0
+                .read_with(|io| {
+                    let mut storage: libc::sockaddr_storage = unsafe { core::mem::zeroed() };
+                    let mut addrlen = core::mem::size_of_val(&storage) as libc::socklen_t;
 
-                let ret = cvti(unsafe {
-                    libc::sendto(
-                        io.as_fd().as_raw_fd(),
-                        data.as_ptr() as *const _,
-                        len,
-                        libc::MSG_NOSIGNAL,
-                        &sockaddr as *const _ as *const _,
-                        core::mem::size_of::<libc::sockaddr_ll>() as _,
-                    )
-                })?;
-                Ok(ret as usize)
-            })
-            .await?;
+                    let ret = cvti(unsafe {
+                        libc::recvfrom(
+                            io.as_fd().as_raw_fd(),
+                            buffer.as_mut_ptr() as *mut _,
+                            buffer.len(),
+                            0,
+                            &mut storage as *mut _ as *mut _,
+                            &mut addrlen,
+                        )
+                    })?;
 
-        assert_eq!(len, data.len());
+                    let sockaddr = as_sockaddr_ll(&storage, addrlen as usize)?;
 
-        Ok(())
-    }
+                    let mut mac = [0; 6];
+                    mac.copy_from_slice(&sockaddr.sll_addr[..6]);
 
-    async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<(usize, [u8; 6]), Self::Error> {
-        self.0
-            .read_with(|io| {
-                let mut storage: libc::sockaddr_storage = unsafe { core::mem::zeroed() };
-                let mut addrlen = core::mem::size_of_val(&storage) as libc::socklen_t;
-
-                let ret = cvti(unsafe {
-                    libc::recvfrom(
-                        io.as_fd().as_raw_fd(),
-                        buffer.as_mut_ptr() as *mut _,
-                        buffer.len(),
-                        0,
-                        &mut storage as *mut _ as *mut _,
-                        &mut addrlen,
-                    )
-                })?;
-
-                let sockaddr = as_sockaddr_ll(&storage, addrlen as usize)?;
-
-                let mut mac = [0; 6];
-                mac.copy_from_slice(&sockaddr.sll_addr[..6]);
-
-                Ok((ret as usize, mac))
-            })
-            .await
-    }
-}
-
-#[cfg(unix)]
-impl RawStack for Stack {
-    type Error = io::Error;
-
-    type Socket = StdRawSocket;
-
-    async fn bind(&self, interface: u32) -> Result<Self::Socket, Self::Error> {
-        let socket = cvt(unsafe {
-            libc::socket(
-                libc::PF_PACKET,
-                libc::SOCK_DGRAM,
-                (libc::ETH_P_IP as u16).to_be() as _,
-            )
-        })?;
-
-        let sockaddr = libc::sockaddr_ll {
-            sll_family: libc::AF_PACKET as _,
-            sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
-            sll_ifindex: interface as _,
-            sll_hatype: 0,
-            sll_pkttype: 0,
-            sll_halen: 0,
-            sll_addr: Default::default(),
-        };
-
-        cvt(unsafe {
-            libc::bind(
-                socket,
-                &sockaddr as *const _ as *const _,
-                core::mem::size_of::<libc::sockaddr_ll>() as _,
-            )
-        })?;
-
-        // TODO
-        // cvt(unsafe {
-        //     libc::setsockopt(socket, libc::SOL_PACKET, libc::PACKET_AUXDATA, &1_u32 as *const _ as *const _, 4)
-        // })?;
-
-        let socket = {
-            use std::os::fd::FromRawFd;
-
-            unsafe { std::net::UdpSocket::from_raw_fd(socket) }
-        };
-
-        socket.set_broadcast(true)?;
-
-        Ok(StdRawSocket(Async::new(socket)?, interface as _))
-    }
-}
-
-fn as_sockaddr_ll(storage: &libc::sockaddr_storage, len: usize) -> io::Result<&libc::sockaddr_ll> {
-    match storage.ss_family as core::ffi::c_int {
-        libc::AF_PACKET => {
-            assert!(len >= core::mem::size_of::<libc::sockaddr_ll>());
-            Ok(unsafe { (storage as *const _ as *const libc::sockaddr_ll).as_ref() }.unwrap())
+                    Ok((ret as usize, mac))
+                })
+                .await
         }
-        _ => Err(io::Error::new(ErrorKind::InvalidInput, "invalid argument")),
+    }
+
+    impl RawStack for Stack {
+        type Error = io::Error;
+
+        type Socket = StdRawSocket;
+
+        async fn bind(&self, interface: u32) -> Result<Self::Socket, Self::Error> {
+            let socket = cvt(unsafe {
+                libc::socket(
+                    libc::PF_PACKET,
+                    libc::SOCK_DGRAM,
+                    (libc::ETH_P_IP as u16).to_be() as _,
+                )
+            })?;
+
+            let sockaddr = libc::sockaddr_ll {
+                sll_family: libc::AF_PACKET as _,
+                sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
+                sll_ifindex: interface as _,
+                sll_hatype: 0,
+                sll_pkttype: 0,
+                sll_halen: 0,
+                sll_addr: Default::default(),
+            };
+
+            cvt(unsafe {
+                libc::bind(
+                    socket,
+                    &sockaddr as *const _ as *const _,
+                    core::mem::size_of::<libc::sockaddr_ll>() as _,
+                )
+            })?;
+
+            // TODO
+            // cvt(unsafe {
+            //     libc::setsockopt(socket, libc::SOL_PACKET, libc::PACKET_AUXDATA, &1_u32 as *const _ as *const _, 4)
+            // })?;
+
+            let socket = {
+                use std::os::fd::FromRawFd;
+
+                unsafe { std::net::UdpSocket::from_raw_fd(socket) }
+            };
+
+            socket.set_broadcast(true)?;
+
+            Ok(StdRawSocket(Async::new(socket)?, interface as _))
+        }
+    }
+
+    fn as_sockaddr_ll(
+        storage: &libc::sockaddr_storage,
+        len: usize,
+    ) -> io::Result<&libc::sockaddr_ll> {
+        match storage.ss_family as core::ffi::c_int {
+            libc::AF_PACKET => {
+                assert!(len >= core::mem::size_of::<libc::sockaddr_ll>());
+                Ok(unsafe { (storage as *const _ as *const libc::sockaddr_ll).as_ref() }.unwrap())
+            }
+            _ => Err(io::Error::new(ErrorKind::InvalidInput, "invalid argument")),
+        }
+    }
+
+    fn cvt<T>(res: T) -> io::Result<T>
+    where
+        T: Into<i64> + Copy,
+    {
+        let ires: i64 = res.into();
+
+        if ires == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(res)
+        }
+    }
+
+    fn cvti<T>(res: T) -> io::Result<T>
+    where
+        T: Into<isize> + Copy,
+    {
+        let ires: isize = res.into();
+
+        if ires == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(res)
+        }
     }
 }
 
@@ -466,30 +505,4 @@ pub fn to_std_ipv4_addr(addr: Ipv4Addr) -> std::net::Ipv4Addr {
 
 pub fn to_nal_ipv4_addr(addr: std::net::Ipv4Addr) -> Ipv4Addr {
     addr.octets().into()
-}
-
-fn cvt<T>(res: T) -> io::Result<T>
-where
-    T: Into<i64> + Copy,
-{
-    let ires: i64 = res.into();
-
-    if ires == -1 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(res)
-    }
-}
-
-fn cvti<T>(res: T) -> io::Result<T>
-where
-    T: Into<isize> + Copy,
-{
-    let ires: isize = res.into();
-
-    if ires == -1 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(res)
-    }
 }
