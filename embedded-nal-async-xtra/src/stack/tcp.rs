@@ -1,8 +1,7 @@
+use embedded_io_async::ErrorType;
 use embedded_nal_async::SocketAddr;
 
-pub trait TcpSplittableConnection {
-    type Error: embedded_io_async::Error;
-
+pub trait TcpSplittableConnection: ErrorType {
     type Read<'a>: embedded_io_async::Read<Error = Self::Error>
     where
         Self: 'a;
@@ -10,21 +9,19 @@ pub trait TcpSplittableConnection {
     where
         Self: 'a;
 
-    async fn split(&mut self) -> Result<(Self::Read<'_>, Self::Write<'_>), Self::Error>;
+    fn split(&mut self) -> Result<(Self::Read<'_>, Self::Write<'_>), Self::Error>;
 }
 
 impl<'t, T> TcpSplittableConnection for &'t mut T
 where
     T: TcpSplittableConnection + 't,
 {
-    type Error = T::Error;
-
     type Read<'a> = T::Read<'a> where Self: 'a;
 
     type Write<'a> = T::Write<'a> where Self: 'a;
 
-    async fn split(&mut self) -> Result<(Self::Read<'_>, Self::Write<'_>), Self::Error> {
-        (**self).split().await
+    fn split(&mut self) -> Result<(Self::Read<'_>, Self::Write<'_>), Self::Error> {
+        (**self).split()
     }
 }
 
@@ -68,7 +65,7 @@ where
 
 pub trait TcpAccept {
     type Error: embedded_io_async::Error;
-
+    
     type Connection<'m>: embedded_io_async::Read<Error = Self::Error>
         + embedded_io_async::Write<Error = Self::Error>
     where
