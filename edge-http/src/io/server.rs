@@ -36,7 +36,6 @@ impl<'b, T, const N: usize> Connection<'b, T, N>
 where
     T: Read + Write,
 {
-    #[allow(clippy::needless_pass_by_ref_mut)]
     pub async fn new(
         buf: &'b mut [u8],
         mut io: T,
@@ -505,6 +504,8 @@ impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B
         Self([MaybeUninit::uninit(); P])
     }
 
+    #[inline(never)]
+    #[cold]
     pub async fn run<A, H>(&mut self, acceptor: A, handler: H) -> Result<(), Error<A::Error>>
     where
         A: embedded_nal_async_xtra::TcpAccept,
@@ -581,6 +582,8 @@ impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B
         result
     }
 
+    #[inline(never)]
+    #[cold]
     pub async fn run_with_task_id<A, H>(
         &mut self,
         acceptor: A,

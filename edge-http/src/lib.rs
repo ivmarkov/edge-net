@@ -172,6 +172,7 @@ impl Display for Method {
 pub struct Headers<'b, const N: usize = 64>([httparse::Header<'b>; N]);
 
 impl<'b, const N: usize> Headers<'b, N> {
+    #[inline(always)]
     pub const fn new() -> Self {
         Self([httparse::EMPTY_HEADER; N])
     }
@@ -422,6 +423,7 @@ pub struct RequestHeaders<'b, const N: usize> {
 }
 
 impl<'b, const N: usize> RequestHeaders<'b, N> {
+    #[inline(always)]
     pub const fn new() -> Self {
         Self {
             http11: Some(true),
@@ -467,6 +469,7 @@ pub struct ResponseHeaders<'b, const N: usize> {
 }
 
 impl<'b, const N: usize> ResponseHeaders<'b, N> {
+    #[inline(always)]
     pub const fn new() -> Self {
         Self {
             http11: Some(true),
