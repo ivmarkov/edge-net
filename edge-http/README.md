@@ -10,6 +10,14 @@ The implementation is based on the splendid [httparse](https://github.com/seanmo
 
 For other protocols, look at the [edge-net](https://github.com/ivmarkov/edge-net) aggregator crate documentation.
 
+## Next steps
+
+The most important next step is to optimize the memory consumption of the generated futures:
+* In particular, the `edge_http::io:::server::Server::run` future - with the defaults of 4 handlers and size for 64 headers in the request currently weights ~ **10KB**
+* Moreover, *this is without the memory buffers that the `edge_http::io:::server::Server` needs to operate* - which - while already optimized - take another 2048 * 4 = **8192KB**
+
+[Relevant material linking various Rust open issues on the subject](https://swatinem.de/blog/future-size)
+
 ## Examples
 
 ### HTTP client
