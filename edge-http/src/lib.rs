@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(async_fn_in_trait)]
+#![warn(clippy::large_futures)]
 
 use core::fmt::Display;
 use core::str;
@@ -7,7 +8,7 @@ use core::str;
 use httparse::{Header, EMPTY_HEADER};
 use ws::{is_upgrade_accepted, is_upgrade_request, NONCE_LEN};
 
-pub(crate) const DEFAULT_MAX_HEADERS_COUNT: usize = 64;
+pub const DEFAULT_MAX_HEADERS_COUNT: usize = 64;
 
 #[cfg(feature = "io")]
 pub mod io;

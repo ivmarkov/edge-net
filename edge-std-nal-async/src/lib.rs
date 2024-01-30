@@ -1,4 +1,7 @@
 #![allow(async_fn_in_trait)]
+#![warn(clippy::large_futures)]
+
+use core::pin::pin;
 
 use std::io;
 use std::net::{self, TcpStream, ToSocketAddrs, UdpSocket};
@@ -170,7 +173,8 @@ impl ConnectedUdp for StdUdpSocket {
         let mut offset = 0;
 
         loop {
-            offset += self.0.send(&data[offset..]).await?;
+            let fut = pin!(self.0.send(&data[offset..]));
+            offset += fut.await?;
 
             if offset == data.len() {
                 break;
@@ -181,7 +185,8 @@ impl ConnectedUdp for StdUdpSocket {
     }
 
     async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-        self.0.recv(buffer).await
+        let fut = pin!(self.0.recv(buffer));
+        fut.await
     }
 }
 
@@ -199,7 +204,8 @@ impl UnconnectedUdp for StdUdpSocket {
         let mut offset = 0;
 
         loop {
-            offset += self.0.send_to(data, to_std_addr(remote)).await?;
+            let fut = pin!(self.0.send_to(data, to_std_addr(remote)));
+            offset += fut.await?;
 
             if offset == data.len() {
                 break;
@@ -213,7 +219,8 @@ impl UnconnectedUdp for StdUdpSocket {
         &mut self,
         buffer: &mut [u8],
     ) -> Result<(usize, SocketAddr, SocketAddr), Self::Error> {
-        let (len, addr) = self.0.recv_from(buffer).await?;
+        let fut = pin!(self.0.recv_from(buffer));
+        let (len, addr) = fut.await?;
 
         Ok((
             len,
@@ -296,6 +303,8 @@ fn dns_lookup_host(host: &str, addr_type: AddrType) -> Result<IpAddr, io::Error>
 
 #[cfg(all(unix, not(target_os = "espidf")))]
 mod raw {
+    use core::pin::pin;
+
     use std::io::{self, ErrorKind};
     use std::os::fd::{AsFd, AsRawFd};
 
@@ -326,24 +335,23 @@ mod raw {
                 sockaddr.sll_addr[..mac.len()].copy_from_slice(mac);
             }
 
-            let len = self
-                .0
-                .write_with(|io| {
-                    let len = core::cmp::min(data.len(), u16::MAX as usize);
+            let fut = pin!(self.0.write_with(|io| {
+                let len = core::cmp::min(data.len(), u16::MAX as usize);
 
-                    let ret = cvti(unsafe {
-                        libc::sendto(
-                            io.as_fd().as_raw_fd(),
-                            data.as_ptr() as *const _,
-                            len,
-                            libc::MSG_NOSIGNAL,
-                            &sockaddr as *const _ as *const _,
-                            core::mem::size_of::<libc::sockaddr_ll>() as _,
-                        )
-                    })?;
-                    Ok(ret as usize)
-                })
-                .await?;
+                let ret = cvti(unsafe {
+                    libc::sendto(
+                        io.as_fd().as_raw_fd(),
+                        data.as_ptr() as *const _,
+                        len,
+                        libc::MSG_NOSIGNAL,
+                        &sockaddr as *const _ as *const _,
+                        core::mem::size_of::<libc::sockaddr_ll>() as _,
+                    )
+                })?;
+                Ok(ret as usize)
+            }));
+
+            let len = fut.await?;
 
             assert_eq!(len, data.len());
 
@@ -354,30 +362,30 @@ mod raw {
             &mut self,
             buffer: &mut [u8],
         ) -> Result<(usize, [u8; 6]), Self::Error> {
-            self.0
-                .read_with(|io| {
-                    let mut storage: libc::sockaddr_storage = unsafe { core::mem::zeroed() };
-                    let mut addrlen = core::mem::size_of_val(&storage) as libc::socklen_t;
+            let fut = pin!(self.0.read_with(|io| {
+                let mut storage: libc::sockaddr_storage = unsafe { core::mem::zeroed() };
+                let mut addrlen = core::mem::size_of_val(&storage) as libc::socklen_t;
 
-                    let ret = cvti(unsafe {
-                        libc::recvfrom(
-                            io.as_fd().as_raw_fd(),
-                            buffer.as_mut_ptr() as *mut _,
-                            buffer.len(),
-                            0,
-                            &mut storage as *mut _ as *mut _,
-                            &mut addrlen,
-                        )
-                    })?;
+                let ret = cvti(unsafe {
+                    libc::recvfrom(
+                        io.as_fd().as_raw_fd(),
+                        buffer.as_mut_ptr() as *mut _,
+                        buffer.len(),
+                        0,
+                        &mut storage as *mut _ as *mut _,
+                        &mut addrlen,
+                    )
+                })?;
 
-                    let sockaddr = as_sockaddr_ll(&storage, addrlen as usize)?;
+                let sockaddr = as_sockaddr_ll(&storage, addrlen as usize)?;
 
-                    let mut mac = [0; 6];
-                    mac.copy_from_slice(&sockaddr.sll_addr[..6]);
+                let mut mac = [0; 6];
+                mac.copy_from_slice(&sockaddr.sll_addr[..6]);
 
-                    Ok((ret as usize, mac))
-                })
-                .await
+                Ok((ret as usize, mac))
+            }));
+
+            fut.await
         }
     }
 

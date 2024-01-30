@@ -153,9 +153,10 @@ where
 
             if len > 0 {
                 info!("Broadcasting mDNS entry to {remote_addr}");
-                send.send(local_addr, remote_addr, &send_buf[..len])
-                    .await
-                    .map_err(MdnsIoError::IoError)?;
+
+                let fut = pin!(send.send(local_addr, remote_addr, &send_buf[..len]));
+
+                fut.await.map_err(MdnsIoError::IoError)?;
             }
         }
 
@@ -197,9 +198,9 @@ where
         if len > 0 {
             info!("Replying to mDNS query from {}", remote);
 
-            send.send(local, remote, &send_buf[..len])
-                .await
-                .map_err(MdnsIoError::IoError)?;
+            let fut = pin!(send.send(local, remote, &send_buf[..len]));
+
+            fut.await.map_err(MdnsIoError::IoError)?;
         }
     }
 }

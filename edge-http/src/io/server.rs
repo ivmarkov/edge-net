@@ -496,12 +496,12 @@ pub struct Server<
     const B: usize = DEFAULT_BUF_SIZE,
     const N: usize = DEFAULT_MAX_HEADERS_COUNT,
     const W: usize = 2,
->([MaybeUninit<[u8; B]>; P]);
+>(MaybeUninit<[[u8; B]; P]>);
 
 impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B, N, W> {
     #[inline(always)]
     pub const fn new() -> Self {
-        Self([MaybeUninit::uninit(); P])
+        Self(MaybeUninit::uninit())
     }
 
     #[inline(never)]
@@ -525,7 +525,7 @@ impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B
             let channel = &channel;
             let task_id = index;
             let handler = &handler;
-            let buf = self.0[index].as_mut_ptr();
+            let buf: *mut [u8; B] = &mut unsafe { self.0.assume_init_mut() }[index];
 
             tasks
                 .push(async move {
@@ -603,7 +603,7 @@ impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B
             let channel = &channel;
             let task_id = index;
             let handler = &handler;
-            let buf = self.0[index].as_mut_ptr();
+            let buf: *mut [u8; B] = &mut unsafe { self.0.assume_init_mut() }[index];
 
             tasks
                 .push(async move {

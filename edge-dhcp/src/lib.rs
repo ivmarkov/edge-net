@@ -1,4 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![warn(clippy::large_futures)]
 
 /// This code is a `no_std` and no-alloc modification of https://github.com/krolaw/dhcp4r
 use core::fmt;

@@ -1,4 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![warn(clippy::large_futures)]
 
 use core::fmt::{self, Display, Write};
 

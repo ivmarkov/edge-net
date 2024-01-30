@@ -123,6 +123,7 @@ mod embedded_svc_compat {
     impl Connection for MqttConnection {
         type Event<'a> = MqttEvent where Self: 'a;
 
+        #[allow(clippy::large_futures)]
         async fn next(&mut self) -> Result<Self::Event<'_>, Self::Error> {
             if self.1 {
                 Err(RecvError)
