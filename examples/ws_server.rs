@@ -27,7 +27,7 @@ pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
         .listen(addr.parse().unwrap())
         .await?;
 
-    server.run(acceptor, WsHandler).await?;
+    server.run(acceptor, WsHandler, None).await?;
 
     Ok(())
 }
