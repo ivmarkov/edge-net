@@ -9,3 +9,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Remove unnecessary lifetimes when implementing the `embedded-svc` traits
 * Server: new trait, `TaskHandler` which has an extra `task_id` parameter of type `usize`. This allows the request handling code to take advantage of the fact that - since the number of handlers when running a `Server` instance is fixed - it can store data related to handlers in a simple static array of the same size as the number of handlers that the server is running
 * Breaking change: structures `Server` and `ServerBuffers` united, because `Server` was actually stateless. Turbofish syntax for specifying max number of HTTP headers and queue size is no longer necessary
+* Breaking change: introduce an optional timeout for HTTP server connections and for the server itself
+* Breaking change: remove the `const W: usize` parameter from the `Server` struct, as the accept queue is no longer necessary (using an async mutex now internally)

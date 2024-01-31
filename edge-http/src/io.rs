@@ -25,6 +25,7 @@ pub enum Error<E> {
     IncompleteHeaders,
     IncompleteBody,
     InvalidState,
+    Timeout,
     WsUpgradeError(UpgradeError),
     Io(E),
 }
@@ -75,6 +76,7 @@ where
             Self::IncompleteHeaders => write!(f, "HTTP headers section is incomplete"),
             Self::IncompleteBody => write!(f, "HTTP body is incomplete"),
             Self::InvalidState => write!(f, "Connection is not in requested state"),
+            Self::Timeout => write!(f, "Timeout"),
             Self::WsUpgradeError(e) => write!(f, "WebSocket upgrade error: {e}"),
             Self::Io(e) => write!(f, "{e}"),
         }

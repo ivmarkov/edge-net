@@ -12,9 +12,9 @@ For other protocols, look at the [edge-net](https://github.com/ivmarkov/edge-net
 
 ## Next steps
 
-Optimize the memory consumption of the generated futures:
+Optimize further the memory consumption of the generated futures:
 * In particular, the `edge_http::io:::server::Server::run` future - with the defaults of 4 handlers and size for 64 headers in the request currently weights ~ **6 - 9KB**
-* Moreover, *this is without the memory buffers that the `edge_http::io:::server::Server` needs to operate* - which - while already optimized - take another 2048 * 4 ~ **8KB**
+* Moreover, *this is without the memory buffers that the `edge_http::io:::server::Server` needs to operate* - which - while already optimized - take another 2048 * 4 ~ **8KB** (but that's of course normal and to be accepted)
 
 [Relevant material linking various Rust open issues on the subject](https://swatinem.de/blog/future-size)
 
@@ -129,7 +129,7 @@ pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
         .listen(addr.parse().unwrap())
         .await?;
 
-    server.run(acceptor, HttpHandler).await?;
+    server.run(acceptor, HttpHandler, None).await?;
 
     Ok(())
 }

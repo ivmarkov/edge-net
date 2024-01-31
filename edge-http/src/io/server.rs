@@ -4,23 +4,27 @@ use core::pin::pin;
 
 use embassy_futures::select::Either;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::mutex::Mutex;
+use embassy_time::{Duration, Timer};
+
 use embedded_io_async::{ErrorType, Read, Write};
 
 use log::{debug, info, warn};
-
-use crate::ws::{upgrade_response_headers, MAX_BASE64_KEY_RESPONSE_LEN};
-use crate::DEFAULT_MAX_HEADERS_COUNT;
-
-const DEFAULT_HANDLER_TASKS_COUNT: usize = 4;
-const DEFAULT_BUF_SIZE: usize = 2048;
 
 use super::{
     send_headers, send_headers_end, send_status, Body, BodyType, Error, RequestHeaders, SendBody,
 };
 
+use crate::ws::{upgrade_response_headers, MAX_BASE64_KEY_RESPONSE_LEN};
+use crate::DEFAULT_MAX_HEADERS_COUNT;
+
 #[allow(unused_imports)]
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
+
+pub const DEFAULT_HANDLER_TASKS_COUNT: usize = 4;
+pub const DEFAULT_BUF_SIZE: usize = 2048;
+pub const DEFAULT_TIMEOUT_MS: u32 = 5000;
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
@@ -39,10 +43,23 @@ where
     pub async fn new(
         buf: &'b mut [u8],
         mut io: T,
+        timeout_ms: Option<u32>,
     ) -> Result<Connection<'b, T, N>, Error<T::Error>> {
         let mut request = RequestHeaders::new();
 
-        let (buf, read_len) = request.receive(buf, &mut io).await?;
+        let (buf, read_len) = {
+            let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
+
+            let receive = pin!(request.receive(buf, &mut io));
+            let timer = Timer::after(Duration::from_millis(timeout_ms as _));
+
+            let result = embassy_futures::select::select(receive, timer).await;
+
+            match result {
+                Either::First(result) => result,
+                Either::Second(_) => Err(Error::Timeout),
+            }?
+        };
 
         let io = Body::new(
             BodyType::from_headers(request.headers.iter()),
@@ -372,17 +389,22 @@ where
     }
 }
 
-pub async fn handle_connection<const N: usize, T, H>(io: T, buf: &mut [u8], handler: H)
-where
+pub async fn handle_connection<const N: usize, T, H>(
+    io: T,
+    buf: &mut [u8],
+    timeout_ms: Option<u32>,
+    handler: H,
+) where
     H: for<'b> Handler<'b, &'b mut T, N>,
     T: Read + Write,
 {
-    handle_task_connection(io, buf, 0, TaskHandlerAdaptor::new(handler)).await
+    handle_task_connection(io, buf, timeout_ms, 0, TaskHandlerAdaptor::new(handler)).await
 }
 
 pub async fn handle_task_connection<const N: usize, T, H>(
     mut io: T,
     buf: &mut [u8],
+    timeout_ms: Option<u32>,
     task_id: usize,
     handler: H,
 ) where
@@ -390,28 +412,26 @@ pub async fn handle_task_connection<const N: usize, T, H>(
     T: Read + Write,
 {
     loop {
-        debug!("Handler task {}: Waiting for new request", task_id);
+        debug!("Handler task {task_id}: Waiting for new request");
 
-        let result = handle_task_request::<N, _, _>(buf, &mut io, task_id, &handler).await;
+        let result =
+            handle_task_request::<N, _, _>(buf, &mut io, task_id, timeout_ms, &handler).await;
 
         match result {
+            Err(HandleRequestError::Connection(Error::Timeout)) => {
+                info!("Handler task {task_id}: Connection closed due to timeout");
+                break;
+            }
             Err(e) => {
-                warn!(
-                    "Handler task {}: Error when handling request: {:?}",
-                    task_id, e
-                );
-
+                warn!("Handler task {task_id}: Error when handling request: {e:?}");
                 break;
             }
             Ok(needs_close) => {
                 if needs_close {
-                    debug!(
-                        "Handler task {}: Request complete; closing connection",
-                        task_id
-                    );
+                    debug!("Handler task {task_id}: Request complete; closing connection");
                     break;
                 } else {
-                    debug!("Handler task {}: Request complete", task_id);
+                    debug!("Handler task {task_id}: Request complete");
                 }
             }
         }
@@ -454,26 +474,28 @@ where
 pub async fn handle_request<'b, const N: usize, H, T>(
     buf: &'b mut [u8],
     io: T,
+    timeout_ms: Option<u32>,
     handler: H,
 ) -> Result<bool, HandleRequestError<T::Error, H::Error>>
 where
     H: Handler<'b, T, N>,
     T: Read + Write,
 {
-    handle_task_request(buf, io, 0, TaskHandlerAdaptor::new(handler)).await
+    handle_task_request(buf, io, 0, timeout_ms, TaskHandlerAdaptor::new(handler)).await
 }
 
 pub async fn handle_task_request<'b, const N: usize, H, T>(
     buf: &'b mut [u8],
     io: T,
     task_id: usize,
+    timeout_ms: Option<u32>,
     handler: H,
 ) -> Result<bool, HandleRequestError<T::Error, H::Error>>
 where
     H: TaskHandler<'b, T, N>,
     T: Read + Write,
 {
-    let mut connection = Connection::<_, N>::new(buf, io).await?;
+    let mut connection = Connection::<_, N>::new(buf, io, timeout_ms).await?;
 
     let result = handler.handle(task_id, &mut connection).await;
 
@@ -489,16 +511,15 @@ where
 }
 
 pub type DefaultServer =
-    Server<{ DEFAULT_HANDLER_TASKS_COUNT }, { DEFAULT_BUF_SIZE }, { DEFAULT_MAX_HEADERS_COUNT }, 2>;
+    Server<{ DEFAULT_HANDLER_TASKS_COUNT }, { DEFAULT_BUF_SIZE }, { DEFAULT_MAX_HEADERS_COUNT }>;
 
 pub struct Server<
     const P: usize = DEFAULT_HANDLER_TASKS_COUNT,
     const B: usize = DEFAULT_BUF_SIZE,
     const N: usize = DEFAULT_MAX_HEADERS_COUNT,
-    const W: usize = 2,
 >(MaybeUninit<[[u8; B]; P]>);
 
-impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B, N, W> {
+impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
     #[inline(always)]
     pub const fn new() -> Self {
         Self(MaybeUninit::uninit())
@@ -506,7 +527,12 @@ impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B
 
     #[inline(never)]
     #[cold]
-    pub async fn run<A, H>(&mut self, acceptor: A, handler: H) -> Result<(), Error<A::Error>>
+    pub async fn run<A, H>(
+        &mut self,
+        acceptor: A,
+        handler: H,
+        timeout_ms: Option<u32>,
+    ) -> Result<(), Error<A::Error>>
     where
         A: embedded_nal_async_xtra::TcpAccept,
         H: for<'b, 't> Handler<'b, &'b mut A::Connection<'t>, N>,
@@ -515,14 +541,13 @@ impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B
 
         // TODO: Figure out what is going on with the lifetimes so as to avoid this horrible code duplication
 
-        info!("Creating queue for {W} requests");
-        let channel = embassy_sync::channel::Channel::<NoopRawMutex, _, W>::new();
-
-        debug!("Creating {P} handler tasks");
+        info!("Creating {P} handler tasks");
+        let mutex = Mutex::<NoopRawMutex, _>::new(());
         let mut tasks = heapless::Vec::<_, P>::new();
 
         for index in 0..P {
-            let channel = &channel;
+            let mutex = &mutex;
+            let acceptor = &acceptor;
             let task_id = index;
             let handler = &handler;
             let buf: *mut [u8; B] = &mut unsafe { self.0.assume_init_mut() }[index];
@@ -530,14 +555,20 @@ impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B
             tasks
                 .push(async move {
                     loop {
-                        debug!("Handler task {}: Waiting for connection", task_id);
+                        debug!("Handler task {task_id}: Waiting for connection");
 
-                        let io = channel.receive().await;
-                        debug!("Handler task {}: Got connection request", task_id);
+                        let io = {
+                            let _guard = mutex.lock().await;
+
+                            acceptor.accept().await.map_err(Error::Io)
+                        }?;
+
+                        debug!("Handler task {task_id}: Got connection request");
 
                         handle_task_connection::<N, _, _>(
                             io,
                             unsafe { buf.as_mut() }.unwrap(),
+                            timeout_ms,
                             task_id,
                             handler,
                         )
@@ -548,36 +579,9 @@ impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B
                 .unwrap();
         }
 
-        let accept = pin!(async {
-            loop {
-                debug!("Acceptor: waiting for new connection");
+        let (result, _) = embassy_futures::select::select_slice(&mut tasks).await;
 
-                match acceptor.accept().await.map_err(Error::Io) {
-                    Ok(io) => {
-                        debug!("Acceptor: got new connection");
-                        channel.send(io).await;
-                        debug!("Acceptor: connection sent");
-                    }
-                    Err(e) => {
-                        debug!("Got error when accepting a new connection: {:?}", e);
-                        break Err(e);
-                    }
-                }
-            }
-        });
-
-        let result = embassy_futures::select::select(
-            accept,
-            embassy_futures::select::select_slice(&mut tasks),
-        )
-        .await;
-
-        let result = match result {
-            Either::First(result) => result,
-            Either::Second((result, _)) => result,
-        };
-
-        info!("Server processing loop quit");
+        warn!("Server processing loop quit abruptly: {result:?}");
 
         result
     }
@@ -588,19 +592,19 @@ impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B
         &mut self,
         acceptor: A,
         handler: H,
+        timeout_ms: Option<u32>,
     ) -> Result<(), Error<A::Error>>
     where
         A: embedded_nal_async_xtra::TcpAccept,
         H: for<'b, 't> TaskHandler<'b, &'b mut A::Connection<'t>, N>,
     {
-        info!("Creating queue for {W} requests");
-        let channel = embassy_sync::channel::Channel::<NoopRawMutex, _, W>::new();
-
         debug!("Creating {P} handler tasks");
+        let mutex = Mutex::<NoopRawMutex, _>::new(());
         let mut tasks = heapless::Vec::<_, P>::new();
 
         for index in 0..P {
-            let channel = &channel;
+            let mutex = &mutex;
+            let acceptor = &acceptor;
             let task_id = index;
             let handler = &handler;
             let buf: *mut [u8; B] = &mut unsafe { self.0.assume_init_mut() }[index];
@@ -608,14 +612,20 @@ impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B
             tasks
                 .push(async move {
                     loop {
-                        debug!("Handler task {}: Waiting for connection", task_id);
+                        debug!("Handler task {task_id}: Waiting for connection");
 
-                        let io = channel.receive().await;
-                        debug!("Handler task {}: Got connection request", task_id);
+                        let io = {
+                            let _guard = mutex.lock().await;
+
+                            acceptor.accept().await.map_err(Error::Io)
+                        }?;
+
+                        debug!("Handler task {task_id}: Got connection request");
 
                         handle_task_connection::<N, _, _>(
                             io,
                             unsafe { buf.as_mut() }.unwrap(),
+                            timeout_ms,
                             task_id,
                             handler,
                         )
@@ -626,36 +636,9 @@ impl<const P: usize, const B: usize, const N: usize, const W: usize> Server<P, B
                 .unwrap();
         }
 
-        let accept = pin!(async {
-            loop {
-                debug!("Acceptor: waiting for new connection");
+        let (result, _) = embassy_futures::select::select_slice(&mut tasks).await;
 
-                match acceptor.accept().await.map_err(Error::Io) {
-                    Ok(io) => {
-                        debug!("Acceptor: got new connection");
-                        channel.send(io).await;
-                        debug!("Acceptor: connection sent");
-                    }
-                    Err(e) => {
-                        debug!("Got error when accepting a new connection: {:?}", e);
-                        break Err(e);
-                    }
-                }
-            }
-        });
-
-        let result = embassy_futures::select::select(
-            accept,
-            embassy_futures::select::select_slice(&mut tasks),
-        )
-        .await;
-
-        let result = match result {
-            Either::First(result) => result,
-            Either::Second((result, _)) => result,
-        };
-
-        info!("Server processing loop quit");
+        warn!("Server processing loop quit abruptly: {result:?}");
 
         result
     }

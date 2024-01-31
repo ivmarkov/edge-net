@@ -18,7 +18,7 @@ categories = [
 [features]
 default = ["io"]
 std = ["io"]
-io = ["embedded-io-async", "embedded-nal-async", "embedded-nal-async-xtra", "embassy-sync", "embassy-futures"]
+io = ["embedded-io-async", "embedded-nal-async", "embedded-nal-async-xtra", "embassy-sync", "embassy-futures", "embassy-time"]
 
 [dependencies]
 embedded-io-async = { workspace = true, optional = true }
@@ -30,6 +30,7 @@ log = { workspace = true }
 no-std-net = { workspace = true }
 embassy-sync = { workspace = true, optional = true }
 embassy-futures = { workspace = true, optional = true }
+embassy-time = { workspace = true, optional = true }
 httparse = { version = "1.7", default-features = false }
 base64 = { version = "0.13", default-features = false }
 sha1_smol = { version = "1", default-features = false }
