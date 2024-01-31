@@ -60,10 +60,38 @@ impl TcpAccept for StdTcpAccept {
 
     type Connection<'m> = StdTcpConnection;
 
+    #[cfg(not(target_os = "espidf"))]
     async fn accept(&self) -> Result<Self::Connection<'_>, Self::Error> {
         let connection = self.0.accept().await.map(|(socket, _)| socket)?;
 
         Ok(StdTcpConnection(connection))
+    }
+
+    #[cfg(target_os = "espidf")]
+    async fn accept(&self) -> Result<Self::Connection<'_>, Self::Error> {
+        // ESP IDF (lwIP actually) does not really support `select`-ing on
+        // socket accept: https://groups.google.com/g/osdeve_mirror_tcpip_lwip/c/Vsz7SVa6a2M
+        //
+        // If we do this, `select` would block and not return with our accepting socket `fd`
+        // marked as ready even if our accepting socket has a pending connection.
+        //
+        // (Note also that since the time when the above link was posted on the internet,
+        // the lwIP `accept` API has improved a bit in that it would now return `EWOULDBLOCK`
+        // instead of blocking indefinitely
+        // - and we take advantage of that in the "async" implementation below.)
+        //
+        // The workaround below is not ideal in that
+        // it uses a timer to poll the socket, but it avoids spinning a hidden,
+        // separate thread just to accept connections - which would be the alternative.
+        loop {
+            match self.0.as_ref().accept() {
+                Ok((connection, _)) => break Ok(StdTcpConnection(Async::new(connection)?)),
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                    async_io::Timer::after(core::time::Duration::from_millis(5)).await;
+                }
+                Err(err) => break Err(err),
+            }
+        }
     }
 }
 

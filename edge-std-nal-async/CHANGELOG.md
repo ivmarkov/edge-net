@@ -8,3 +8,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.1] - ????-??-??
 * Do not compile the `RawSocket` implementation for the ESP IDF, as it is missing the `sockaddr_ll` structure in `libc`
 * Retire `StdTcpSocketRef` in favor of simply using `&StdTcpSocket`
+* ESP-IDF bugfix: The `TcpAccept` implementation was incorrect, because lwIP - unfortunately - does not support `select`-ing on server-side listening sockets
