@@ -5,7 +5,7 @@ use embedded_io_async::{ErrorType, Read, Write};
 use embedded_nal_async::{SocketAddr, TcpConnect};
 
 use crate::{
-    ws::{upgrade_request_headers, MAX_BASE64_KEY_LEN, NONCE_LEN},
+    ws::{upgrade_request_headers, MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN},
     DEFAULT_MAX_HEADERS_COUNT,
 };
 
@@ -81,17 +81,20 @@ where
         uri: &str,
         version: Option<&str>,
         nonce: &[u8; NONCE_LEN],
+        nonce_base64_buf: &mut [u8; MAX_BASE64_KEY_LEN],
     ) -> Result<(), Error<T::Error>> {
-        let mut nonce_base64_buf = [0_u8; MAX_BASE64_KEY_LEN];
-
-        let headers = upgrade_request_headers(host, origin, version, nonce, &mut nonce_base64_buf);
+        let headers = upgrade_request_headers(host, origin, version, nonce, nonce_base64_buf);
 
         self.initiate_request(true, Method::Get, uri, &headers)
             .await
     }
 
-    pub fn is_ws_upgrade_accepted(&self, nonce: &[u8; NONCE_LEN]) -> Result<bool, Error<T::Error>> {
-        Ok(self.headers()?.is_ws_upgrade_accepted(nonce))
+    pub fn is_ws_upgrade_accepted(
+        &self,
+        nonce: &[u8; NONCE_LEN],
+        buf: &mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
+    ) -> Result<bool, Error<T::Error>> {
+        Ok(self.headers()?.is_ws_upgrade_accepted(nonce, buf))
     }
 
     #[allow(clippy::type_complexity)]

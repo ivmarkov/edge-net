@@ -1,5 +1,5 @@
 use anyhow::bail;
-use edge_http::ws::NONCE_LEN;
+use edge_http::ws::{MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN};
 use edge_ws::{FrameHeader, FrameType};
 use embedded_nal_async::{AddrType, Dns, SocketAddr, TcpConnect};
 
@@ -50,11 +50,13 @@ where
     let mut nonce = [0_u8; NONCE_LEN];
     rng_source.fill_bytes(&mut nonce);
 
-    conn.initiate_ws_upgrade_request(Some(fqdn), Some("foo.com"), path, None, &nonce)
+    let mut buf = [0_u8; MAX_BASE64_KEY_LEN];
+    conn.initiate_ws_upgrade_request(Some(fqdn), Some("foo.com"), path, None, &nonce, &mut buf)
         .await?;
     conn.initiate_response().await?;
 
-    if !conn.is_ws_upgrade_accepted(&nonce)? {
+    let mut buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
+    if !conn.is_ws_upgrade_accepted(&nonce, &mut buf)? {
         bail!("WS upgrade failed");
     }
 

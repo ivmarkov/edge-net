@@ -6,7 +6,7 @@ use core::fmt::Display;
 use core::str;
 
 use httparse::{Header, EMPTY_HEADER};
-use ws::{is_upgrade_accepted, is_upgrade_request, NONCE_LEN};
+use ws::{is_upgrade_accepted, is_upgrade_request, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN};
 
 pub const DEFAULT_MAX_HEADERS_COUNT: usize = 64;
 
@@ -340,11 +340,9 @@ impl<'b, const N: usize> Headers<'b, N> {
         origin: Option<&'b str>,
         version: Option<&'b str>,
         nonce: &[u8; ws::NONCE_LEN],
-        nonce_base64_buf: &'b mut [u8; ws::MAX_BASE64_KEY_LEN],
+        buf: &'b mut [u8; ws::MAX_BASE64_KEY_LEN],
     ) -> &mut Self {
-        for (name, value) in
-            ws::upgrade_request_headers(host, origin, version, nonce, nonce_base64_buf)
-        {
+        for (name, value) in ws::upgrade_request_headers(host, origin, version, nonce, buf) {
             self.set(name, value);
         }
 
@@ -355,14 +353,12 @@ impl<'b, const N: usize> Headers<'b, N> {
         &mut self,
         request_headers: H,
         version: Option<&'a str>,
-        sec_key_response_base64_buf: &'b mut [u8; ws::MAX_BASE64_KEY_RESPONSE_LEN],
+        buf: &'b mut [u8; ws::MAX_BASE64_KEY_RESPONSE_LEN],
     ) -> Result<&mut Self, ws::UpgradeError>
     where
         H: IntoIterator<Item = (&'a str, &'a str)>,
     {
-        for (name, value) in
-            ws::upgrade_response_headers(request_headers, version, sec_key_response_base64_buf)?
-        {
+        for (name, value) in ws::upgrade_response_headers(request_headers, version, buf)? {
             self.set(name, value);
         }
 
@@ -480,8 +476,12 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
         }
     }
 
-    pub fn is_ws_upgrade_accepted(&self, nonce: &[u8; NONCE_LEN]) -> bool {
-        is_upgrade_accepted(self.code, self.headers.iter(), nonce)
+    pub fn is_ws_upgrade_accepted(
+        &self,
+        nonce: &[u8; NONCE_LEN],
+        buf: &mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
+    ) -> bool {
+        is_upgrade_accepted(self.code, self.headers.iter(), nonce, buf)
     }
 }
 
@@ -510,6 +510,8 @@ impl<'b, const N: usize> Display for ResponseHeaders<'b, N> {
 pub mod ws {
     use core::fmt;
 
+    use log::debug;
+
     use crate::Method;
 
     pub const NONCE_LEN: usize = 16;
@@ -517,18 +519,15 @@ pub mod ws {
     pub const MAX_BASE64_KEY_RESPONSE_LEN: usize = 33;
 
     pub const UPGRADE_REQUEST_HEADERS_LEN: usize = 7;
-    pub const UPGRADE_RESPONSE_HEADERS_LEN: usize = 3;
+    pub const UPGRADE_RESPONSE_HEADERS_LEN: usize = 4;
 
     pub fn upgrade_request_headers<'a>(
         host: Option<&'a str>,
         origin: Option<&'a str>,
         version: Option<&'a str>,
         nonce: &[u8; NONCE_LEN],
-        nonce_base64_buf: &'a mut [u8; MAX_BASE64_KEY_LEN],
+        buf: &'a mut [u8; MAX_BASE64_KEY_LEN],
     ) -> [(&'a str, &'a str); UPGRADE_REQUEST_HEADERS_LEN] {
-        let nonce_base64_len =
-            base64::encode_config_slice(nonce, base64::URL_SAFE, nonce_base64_buf);
-
         let host = host.map(|host| ("Host", host)).unwrap_or(("", ""));
         let origin = origin.map(|origin| ("Origin", origin)).unwrap_or(("", ""));
 
@@ -539,9 +538,7 @@ pub mod ws {
             ("Connection", "Upgrade"),
             ("Upgrade", "websocket"),
             ("Sec-WebSocket-Version", version.unwrap_or("13")),
-            ("Sec-WebSocket-Key", unsafe {
-                core::str::from_utf8_unchecked(&nonce_base64_buf[..nonce_base64_len])
-            }),
+            ("Sec-WebSocket-Key", sec_key_encode(nonce, buf)),
         ]
     }
 
@@ -572,7 +569,6 @@ pub mod ws {
         NoVersion,
         NoSecKey,
         UnsupportedVersion,
-        SecKeyTooLong,
     }
 
     impl fmt::Display for UpgradeError {
@@ -581,7 +577,6 @@ pub mod ws {
                 Self::NoVersion => write!(f, "No Sec-WebSocket-Version header"),
                 Self::NoSecKey => write!(f, "No Sec-WebSocket-Key header"),
                 Self::UnsupportedVersion => write!(f, "Unsupported Sec-WebSocket-Version"),
-                Self::SecKeyTooLong => write!(f, "Sec-WebSocket-Key too long"),
             }
         }
     }
@@ -592,13 +587,13 @@ pub mod ws {
     pub fn upgrade_response_headers<'a, 'b, H>(
         request_headers: H,
         version: Option<&'a str>,
-        sec_key_response_base64_buf: &'b mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
+        buf: &'b mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
     ) -> Result<[(&'b str, &'b str); UPGRADE_RESPONSE_HEADERS_LEN], UpgradeError>
     where
         H: IntoIterator<Item = (&'a str, &'a str)>,
     {
         let mut version_ok = false;
-        let mut sec_key = None;
+        let mut sec_key_resp_len = None;
 
         for (name, value) in request_headers {
             if name.eq_ignore_ascii_case("Sec-WebSocket-Version") {
@@ -608,41 +603,18 @@ pub mod ws {
 
                 version_ok = true;
             } else if name.eq_ignore_ascii_case("Sec-WebSocket-Key") {
-                const WS_MAGIC_GUUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-
-                let mut buf = [0_u8; MAX_BASE64_KEY_LEN + WS_MAGIC_GUUID.len()];
-
-                let value_len = value.as_bytes().len();
-
-                if value_len > MAX_BASE64_KEY_LEN {
-                    return Err(UpgradeError::SecKeyTooLong);
-                }
-
-                buf[..value_len].copy_from_slice(value.as_bytes());
-                buf[value_len..value_len + WS_MAGIC_GUUID.as_bytes().len()]
-                    .copy_from_slice(WS_MAGIC_GUUID.as_bytes());
-
-                let mut sha1 = sha1_smol::Sha1::new();
-
-                sha1.update(&buf[..value_len + WS_MAGIC_GUUID.as_bytes().len()]);
-
-                let sec_key_len = base64::encode_config_slice(
-                    sha1.digest().bytes(),
-                    base64::STANDARD_NO_PAD,
-                    sec_key_response_base64_buf,
-                );
-
-                sec_key = Some(sec_key_len);
+                sec_key_resp_len = Some(sec_key_response(value, buf).len());
             }
         }
 
         if version_ok {
-            if let Some(sec_key_len) = sec_key {
+            if let Some(sec_key_resp_len) = sec_key_resp_len {
                 Ok([
+                    ("Content-Length", "0"),
                     ("Connection", "Upgrade"),
                     ("Upgrade", "websocket"),
                     ("Sec-WebSocket-Accept", unsafe {
-                        core::str::from_utf8_unchecked(&sec_key_response_base64_buf[..sec_key_len])
+                        core::str::from_utf8_unchecked(&buf[..sec_key_resp_len])
                     }),
                 ])
             } else {
@@ -656,7 +628,8 @@ pub mod ws {
     pub fn is_upgrade_accepted<'a, H>(
         code: Option<u16>,
         response_headers: H,
-        _nonce: &[u8; NONCE_LEN], // TODO
+        nonce: &[u8; NONCE_LEN],
+        buf: &'a mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
     ) -> bool
     where
         H: IntoIterator<Item = (&'a str, &'a str)>,
@@ -667,16 +640,75 @@ pub mod ws {
 
         let mut connection = false;
         let mut upgrade = false;
+        let mut sec_key_response = false;
 
         for (name, value) in response_headers {
             if name.eq_ignore_ascii_case("Connection") {
                 connection = value.eq_ignore_ascii_case("Upgrade");
             } else if name.eq_ignore_ascii_case("Upgrade") {
                 upgrade = value.eq_ignore_ascii_case("websocket");
+            } else if name.eq_ignore_ascii_case("Sec-WebSocket-Key") {
+                let sec_key = sec_key_encode(nonce, buf);
+
+                let mut sha1 = sha1_smol::Sha1::new();
+                sha1.update(sec_key.as_bytes());
+
+                let sec_key_resp = sec_key_response_finalize(&mut sha1, buf);
+
+                sec_key_response = value.eq(sec_key_resp);
             }
         }
 
-        connection && upgrade
+        connection && upgrade && sec_key_response
+    }
+
+    fn sec_key_encode<'a>(nonce: &[u8], buf: &'a mut [u8]) -> &'a str {
+        let nonce_base64_len = base64::encode_config_slice(nonce, base64::STANDARD, buf);
+
+        unsafe { core::str::from_utf8_unchecked(&buf[..nonce_base64_len]) }
+    }
+
+    pub fn sec_key_response<'a>(
+        sec_key: &str,
+        buf: &'a mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
+    ) -> &'a str {
+        let mut sha1 = sha1_smol::Sha1::new();
+
+        sec_key_response_start(sec_key, &mut sha1);
+        sec_key_response_finalize(&mut sha1, buf)
+    }
+
+    fn sec_key_response_start(sec_key: &str, sha1: &mut sha1_smol::Sha1) {
+        debug!("Computing response for key: {sec_key}");
+
+        sha1.update(sec_key.as_bytes());
+    }
+
+    fn sec_key_response_finalize<'a>(sha1: &mut sha1_smol::Sha1, buf: &'a mut [u8]) -> &'a str {
+        const WS_MAGIC_GUUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+        sha1.update(WS_MAGIC_GUUID.as_bytes());
+
+        let len = base64::encode_config_slice(sha1.digest().bytes(), base64::STANDARD, buf);
+
+        let sec_key_response = unsafe { core::str::from_utf8_unchecked(&buf[..len]) };
+
+        debug!("Computed response: {sec_key_response}");
+
+        sec_key_response
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::ws::{sec_key_response, MAX_BASE64_KEY_RESPONSE_LEN};
+
+    #[test]
+    fn test_resp() {
+        let mut buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
+        let resp = sec_key_response("dGhlIHNhbXBsZSBub25jZQ==", &mut buf);
+
+        assert_eq!(resp, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
     }
 }
 

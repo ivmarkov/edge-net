@@ -98,14 +98,11 @@ where
         self.complete_request(Some(status), message, headers).await
     }
 
-    pub async fn initiate_ws_upgrade_response(&mut self) -> Result<(), Error<T::Error>> {
-        let mut sec_key_response_base64_buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
-
-        let headers = upgrade_response_headers(
-            self.headers()?.headers.iter(),
-            None,
-            &mut sec_key_response_base64_buf,
-        )?;
+    pub async fn initiate_ws_upgrade_response(
+        &mut self,
+        buf: &mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
+    ) -> Result<(), Error<T::Error>> {
+        let headers = upgrade_response_headers(self.headers()?.headers.iter(), None, buf)?;
 
         self.initiate_response(101, None, &headers).await
     }

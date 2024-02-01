@@ -23,7 +23,7 @@ just run it with some argument, i.e.
 
 ```rust
 use anyhow::bail;
-use edge_http::ws::NONCE_LEN;
+use edge_http::ws::{MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN};
 use edge_ws::{FrameHeader, FrameType};
 use embedded_nal_async::{AddrType, Dns, SocketAddr, TcpConnect};
 
@@ -74,11 +74,13 @@ where
     let mut nonce = [0_u8; NONCE_LEN];
     rng_source.fill_bytes(&mut nonce);
 
-    conn.initiate_ws_upgrade_request(Some(fqdn), Some("foo.com"), path, None, &nonce)
+    let mut buf = [0_u8; MAX_BASE64_KEY_LEN];
+    conn.initiate_ws_upgrade_request(Some(fqdn), Some("foo.com"), path, None, &nonce, &mut buf)
         .await?;
     conn.initiate_response().await?;
 
-    if !conn.is_ws_upgrade_accepted(&nonce)? {
+    let mut buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
+    if !conn.is_ws_upgrade_accepted(&nonce, &mut buf)? {
         bail!("WS upgrade failed");
     }
 
@@ -145,6 +147,7 @@ where
 
 ```rust
 use edge_http::io::server::{Connection, DefaultServer, Handler};
+use edge_http::ws::MAX_BASE64_KEY_RESPONSE_LEN;
 use edge_http::Method;
 
 use edge_ws::{FrameHeader, FrameType};
@@ -202,7 +205,8 @@ where
             conn.write_all(b"Initiate WS Upgrade request to switch this connection to WS")
                 .await?;
         } else {
-            conn.initiate_ws_upgrade_response().await?;
+            let mut buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
+            conn.initiate_ws_upgrade_response(&mut buf).await?;
 
             conn.complete().await?;
 

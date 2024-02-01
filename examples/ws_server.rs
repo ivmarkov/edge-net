@@ -1,4 +1,5 @@
 use edge_http::io::server::{Connection, DefaultServer, Handler};
+use edge_http::ws::MAX_BASE64_KEY_RESPONSE_LEN;
 use edge_http::Method;
 
 use edge_ws::{FrameHeader, FrameType};
@@ -56,7 +57,8 @@ where
             conn.write_all(b"Initiate WS Upgrade request to switch this connection to WS")
                 .await?;
         } else {
-            conn.initiate_ws_upgrade_response().await?;
+            let mut buf = [0_u8; MAX_BASE64_KEY_RESPONSE_LEN];
+            conn.initiate_ws_upgrade_response(&mut buf).await?;
 
             conn.complete().await?;
 

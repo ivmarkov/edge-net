@@ -11,3 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Breaking change: structures `Server` and `ServerBuffers` united, because `Server` was actually stateless. Turbofish syntax for specifying max number of HTTP headers and queue size is no longer necessary
 * Breaking change: introduce an optional timeout for HTTP server connections and for the server itself
 * Breaking change: remove the `const W: usize` parameter from the `Server` struct, as the accept queue is no longer necessary (using an async mutex now internally)
+* Fix a bug where the Websockets' `Sec-Key-Accept` header was computed incorrectly
+* Implement `Sec-Key-Accept` header validation in the HTTP client
+* Breaking change: `UpgradeError::SecKeyTooLong` removed as it is no longer used
