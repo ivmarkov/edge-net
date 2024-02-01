@@ -1,6 +1,6 @@
 [package]
 name = "edge-net"
-version = "0.7.0"
+version = "0.7.1"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
 categories = ["embedded", "hardware-support"]
@@ -113,7 +113,7 @@ octseq = { version = "0.3.2", default-features = false }
 
 edge-captive = { version = "0.2.0", path = "edge-captive", default-features = false }
 edge-dhcp = { version = "0.2.0", path = "edge-dhcp", default-features = false }
-edge-http = { version = "0.2.0", path = "edge-http", default-features = false }
+edge-http = { version = "0.2.1", path = "edge-http", default-features = false }
 edge-mdns = { version = "0.2.0", path = "edge-mdns", default-features = false }
 edge-mqtt = { version = "0.2.0", path = "edge-mqtt", default-features = false }
 edge-raw = { version = "0.2.0", path = "edge-raw", default-features = false }

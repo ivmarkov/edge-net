@@ -647,7 +647,7 @@ pub mod ws {
                 connection = value.eq_ignore_ascii_case("Upgrade");
             } else if name.eq_ignore_ascii_case("Upgrade") {
                 upgrade = value.eq_ignore_ascii_case("websocket");
-            } else if name.eq_ignore_ascii_case("Sec-WebSocket-Key") {
+            } else if name.eq_ignore_ascii_case("Sec-WebSocket-Accept") {
                 let sec_key = sec_key_encode(nonce, buf);
 
                 let mut sha1 = sha1_smol::Sha1::new();
