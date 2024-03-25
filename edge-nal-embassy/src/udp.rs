@@ -20,7 +20,16 @@ pub struct UdpStack<
     const M: usize = 2,
 > {
     stack: &'d Stack<D>,
-    state: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>,
+    buffers: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>,
+}
+
+impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
+    UdpStack<'d, D, N, TX_SZ, RX_SZ, M>
+{
+    /// Create a new `UdpStack`.
+    pub fn new(stack: &'d Stack<D>, buffers: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>) -> Self {
+        Self { stack, buffers }
+    }
 }
 
 impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpBind
@@ -31,7 +40,7 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
     type Socket<'a> = UdpSocket<'a, N, TX_SZ, RX_SZ, M> where Self: 'a;
 
     async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
-        let mut socket = UdpSocket::new(&self.stack, self.state)?;
+        let mut socket = UdpSocket::new(&self.stack, self.buffers)?;
 
         socket.socket.bind(to_emb_socket(local))?;
 
