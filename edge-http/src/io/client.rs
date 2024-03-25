@@ -1,8 +1,10 @@
-use core::{mem, str};
+use core::mem;
+use core::net::SocketAddr;
+use core::str;
 
 use embedded_io_async::{ErrorType, Read, Write};
 
-use embedded_nal_async::{SocketAddr, TcpConnect};
+use edge_nal::TcpConnect;
 
 use crate::{
     ws::{upgrade_request_headers, MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN},
@@ -98,7 +100,7 @@ where
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn split(&mut self) -> (&ResponseHeaders<'b, N>, &mut Body<'b, T::Connection<'b>>) {
+    pub fn split(&mut self) -> (&ResponseHeaders<'b, N>, &mut Body<'b, T::Socket<'b>>) {
         let response = self.response_mut().expect("Not in response mode");
 
         (&response.response, &mut response.io)
@@ -110,11 +112,11 @@ where
         Ok(&response.response)
     }
 
-    pub fn raw_connection(&mut self) -> Result<&mut T::Connection<'b>, Error<T::Error>> {
+    pub fn raw_connection(&mut self) -> Result<&mut T::Socket<'b>, Error<T::Error>> {
         Ok(self.io_mut())
     }
 
-    pub fn release(mut self) -> (T::Connection<'b>, &'b mut [u8]) {
+    pub fn release(mut self) -> (T::Socket<'b>, &'b mut [u8]) {
         let mut state = self.unbind();
 
         let io = state.io.take().unwrap();
@@ -134,7 +136,7 @@ where
         let state = self.unbound_mut()?;
 
         let fresh_connection = if state.io.is_none() {
-            state.io = Some(state.socket.connect(state.addr).await.map_err(Error::Io)?);
+            state.io = Some(state.socket.connect(state.addr).await.map_err(Error::Io)?.1);
             true
         } else {
             false
@@ -149,7 +151,8 @@ where
                     if !fresh_connection {
                         // Attempt to reconnect and re-send the request
                         state.io = None;
-                        state.io = Some(state.socket.connect(state.addr).await.map_err(Error::Io)?);
+                        state.io =
+                            Some(state.socket.connect(state.addr).await.map_err(Error::Io)?.1);
 
                         send_request(http11, Some(method), Some(uri), state.io.as_mut().unwrap())
                             .await?;
@@ -331,7 +334,7 @@ where
         }
     }
 
-    fn io_mut(&mut self) -> &mut T::Connection<'b> {
+    fn io_mut(&mut self) -> &mut T::Socket<'b> {
         match self {
             Self::Unbound(unbound) => unbound.io.as_mut().unwrap(),
             Self::Request(request) => request.io.as_raw_writer(),
@@ -379,7 +382,7 @@ where
     buf: &'b mut [u8],
     socket: &'b T,
     addr: SocketAddr,
-    io: Option<T::Connection<'b>>,
+    io: Option<T::Socket<'b>>,
 }
 
 struct RequestState<'b, T, const N: usize>
@@ -389,7 +392,7 @@ where
     buf: &'b mut [u8],
     socket: &'b T,
     addr: SocketAddr,
-    io: SendBody<T::Connection<'b>>,
+    io: SendBody<T::Socket<'b>>,
 }
 
 struct ResponseState<'b, T, const N: usize>
@@ -400,7 +403,7 @@ where
     response: ResponseHeaders<'b, N>,
     socket: &'b T,
     addr: SocketAddr,
-    io: Body<'b, T::Connection<'b>>,
+    io: Body<'b, T::Socket<'b>>,
 }
 
 #[cfg(feature = "embedded-svc")]
@@ -441,13 +444,13 @@ mod embedded_svc_compat {
     where
         T: TcpConnect,
     {
-        type Read = Body<'b, T::Connection<'b>>;
+        type Read = Body<'b, T::Socket<'b>>;
 
         type Headers = ResponseHeaders<'b, N>;
 
         type RawConnectionError = T::Error;
 
-        type RawConnection = T::Connection<'b>;
+        type RawConnection = T::Socket<'b>;
 
         async fn initiate_request(
             &mut self,

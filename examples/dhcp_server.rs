@@ -1,10 +1,11 @@
-/// NOTE: Run this example with `sudo` to be able to bind to the interface, as it uses raw sockets which require root privileges.
-use edge_raw::io::Udp2RawStack;
+//! NOTE: Run this example with `sudo` to be able to bind to the interface, as it uses raw sockets which require root privileges.
+
+use core::net::{Ipv4Addr, SocketAddrV4};
 
 use edge_dhcp::io::{self, DEFAULT_SERVER_PORT};
 use edge_dhcp::server::{Server, ServerOptions};
-
-use embedded_nal_async::{Ipv4Addr, SocketAddrV4};
+use edge_nal::RawStack;
+use edge_raw::io::RawSocket2Udp;
 
 fn main() {
     env_logger::init_from_env(
@@ -18,13 +19,17 @@ fn main() {
 }
 
 async fn run(if_index: u32) -> Result<(), anyhow::Error> {
-    let stack: Udp2RawStack<_> = Udp2RawStack::new(edge_std_nal_async::Stack::new(), if_index);
+    let stack = edge_nal_std::Interface::new(if_index);
 
     let mut buf = [0; 1500];
 
     let ip = Ipv4Addr::new(192, 168, 0, 1);
 
-    let mut socket = io::bind(&stack, SocketAddrV4::new(ip, DEFAULT_SERVER_PORT)).await?;
+    let mut socket: RawSocket2Udp<_> = RawSocket2Udp::new(
+        stack.bind().await?,
+        SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_SERVER_PORT),
+        [0; 6],
+    );
 
     let mut gw_buf = [Ipv4Addr::UNSPECIFIED];
 

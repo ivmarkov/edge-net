@@ -1,7 +1,6 @@
-use embedded_nal_async::Ipv4Addr;
+use core::net::Ipv4Addr;
 
-use embedded_nal_async_xtra::UnconnectedUdpWithMac;
-
+use edge_nal::{UdpReceive, UdpSend};
 use log::{info, warn};
 
 use self::dhcp::{Options, Packet};
@@ -31,7 +30,7 @@ pub async fn run<T, const N: usize>(
     buf: &mut [u8],
 ) -> Result<(), Error<T::Error>>
 where
-    T: UnconnectedUdp + UnconnectedUdpWithMac,
+    T: UdpReceive + UdpSend,
 {
     info!(
         "Running DHCP server for addresses {}-{} with configuration {server_options:?}",
@@ -39,9 +38,7 @@ where
     );
 
     loop {
-        let (len, local, remote) = UnconnectedUdp::receive_into(socket, buf)
-            .await
-            .map_err(Error::Io)?;
+        let (len, remote) = socket.receive(buf).await.map_err(Error::Io)?;
         let packet = &buf[..len];
 
         let request = match Packet::decode(packet) {
@@ -65,21 +62,10 @@ where
                 remote
             };
 
-            let remote_mac = if request.broadcast {
-                [0xff; 6]
-            } else {
-                request.chaddr[..6].try_into().unwrap()
-            };
-
-            UnconnectedUdpWithMac::send(
-                socket,
-                local,
-                remote,
-                Some(&remote_mac),
-                reply.encode(buf)?,
-            )
-            .await
-            .map_err(Error::Io)?;
+            socket
+                .send(remote, reply.encode(buf)?)
+                .await
+                .map_err(Error::Io)?;
         }
     }
 }

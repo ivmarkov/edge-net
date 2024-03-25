@@ -1,6 +1,8 @@
+use core::net::{IpAddr, Ipv4Addr, SocketAddr};
+
 use embedded_io_async::{Read, Write};
 
-use embedded_nal_async::{IpAddr, Ipv4Addr, SocketAddr, TcpConnect};
+use edge_nal::TcpConnect;
 
 use log::*;
 
@@ -9,7 +11,7 @@ fn main() {
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    let stack = edge_std_nal_async::Stack::new();
+    let stack = edge_nal_std::Stack::new();
 
     futures_lite::future::block_on(read(&stack)).unwrap();
 }
@@ -19,7 +21,8 @@ async fn read<T: TcpConnect>(stack: &T) -> Result<(), T::Error> {
 
     let mut connection = stack
         .connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 80))
-        .await?;
+        .await?
+        .1;
 
     connection.write_all(b"GET / HTTP/1.0\n\n").await?;
 

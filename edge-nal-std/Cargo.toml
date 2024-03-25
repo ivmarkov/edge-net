@@ -1,9 +1,9 @@
 [package]
-name = "edge-std-nal-async"
+name = "edge-nal-std"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.75"
-description = "A stop-gap STD implementation of embedded-nal-async, and embedded-nal-async-xtra"
+rust-version = "1.77"
+description = "A STD implementation of edge-nal based on `async-io`"
 repository = "https://github.com/ivmarkov/edge-net"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
@@ -16,8 +16,7 @@ categories = [
 
 [dependencies]
 embedded-io-async = { workspace = true, features = ["std"] }
-embedded-nal-async = { workspace = true }
-embedded-nal-async-xtra = { workspace = true }
+edge-nal = { workspace = true }
 async-io = "2"
 futures-lite = "1"
 libc = "0.2"

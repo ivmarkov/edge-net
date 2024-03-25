@@ -1,10 +1,11 @@
-/// NOTE: Run this example with `sudo` to be able to bind to the interface, as it uses raw sockets which require root privileges.
-use edge_raw::io::Udp2RawStack;
+//! NOTE: Run this example with `sudo` to be able to bind to the interface, as it uses raw sockets which require root privileges.
+
+use core::net::{Ipv4Addr, SocketAddrV4};
 
 use edge_dhcp::client::Client;
-use edge_dhcp::io::{self, client::Lease, client::DEFAULT_CLIENT_PORT};
-
-use embedded_nal_async::{Ipv4Addr, SocketAddrV4};
+use edge_dhcp::io::client::{Lease, DEFAULT_CLIENT_PORT};
+use edge_nal::{MacAddr, RawStack};
+use edge_raw::io::RawSocket2Udp;
 
 use log::info;
 
@@ -20,18 +21,18 @@ fn main() {
     .unwrap();
 }
 
-async fn run(if_index: u32, if_mac: [u8; 6]) -> Result<(), anyhow::Error> {
+async fn run(if_index: u32, if_mac: MacAddr) -> Result<(), anyhow::Error> {
     let mut client = Client::new(rand::thread_rng(), if_mac);
 
-    let stack: Udp2RawStack<_> = Udp2RawStack::new(edge_std_nal_async::Stack::new(), if_index);
+    let stack = edge_nal_std::Interface::new(if_index);
     let mut buf = [0; 1500];
 
     loop {
-        let mut socket = io::bind(
-            &stack,
+        let mut socket: RawSocket2Udp<_> = RawSocket2Udp::new(
+            stack.bind().await?,
             SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_CLIENT_PORT),
-        )
-        .await?;
+            [0; 6],
+        );
 
         let (mut lease, options) = Lease::new(&mut client, &mut socket, &mut buf).await?;
 

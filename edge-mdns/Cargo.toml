@@ -17,7 +17,7 @@ categories = [
 [features]
 default = ["io"]
 std = ["io"]
-io = ["embassy-futures", "embassy-sync", "embassy-time", "embedded-nal-async", "embedded-nal-async-xtra"]
+io = ["embassy-futures", "embassy-sync", "embassy-time", "edge-nal"]
 
 [dependencies]
 log = { workspace = true }
@@ -28,5 +28,4 @@ heapless07 = { package = "heapless", version = "0.7" }
 embassy-futures = { workspace = true, optional = true }
 embassy-sync = { workspace = true, optional = true }
 embassy-time = { workspace = true, optional = true }
-embedded-nal-async = { workspace = true, optional = true }
-embedded-nal-async-xtra = { workspace = true, optional = true }
+edge-nal = { workspace = true, optional = true }

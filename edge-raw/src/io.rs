@@ -1,11 +1,10 @@
 use core::fmt::{self, Debug};
 use core::mem::MaybeUninit;
+use core::net::{SocketAddr, SocketAddrV4};
 
-use embedded_io_async::ErrorKind;
+use embedded_io_async::{ErrorKind, ErrorType};
 
-use embedded_nal_async::{ConnectedUdp, SocketAddr, SocketAddrV4, UdpStack, UnconnectedUdp};
-
-use embedded_nal_async_xtra::{RawSocket, RawStack, UnconnectedUdpWithMac};
+use edge_nal::{MacAddr, RawReceive, RawSend, RawSplit, UdpReceive, UdpSend, UdpSplit};
 
 use crate as raw;
 
@@ -51,151 +50,91 @@ where
 #[cfg(feature = "std")]
 impl<E> std::error::Error for Error<E> where E: std::error::Error {}
 
-pub struct ConnectedUdp2RawSocket<T, const N: usize>(T, SocketAddrV4, SocketAddrV4);
+/// A utility struct allowing to send and receive UDP packets over a raw socket.
+/// The major difference between this struct and a regular `UdpSend` and `UdpReceive` pair of UDP socket halves
+/// is that `RawSocket2Udp` requires the MAC address of the remote host to send packets to.
+///
+/// This allows DHCP clients to operate even when the local peer does not yet have a valid IP address.
+/// It also allows DHCP servers to send packets to specific clients which don't yet have an IP address, and are
+/// thus only addressable either by broadcasting, or by their MAC address.
+pub struct RawSocket2Udp<T, const N: usize = 1500> {
+    socket: T,
+    local: SocketAddrV4,
+    remote_mac: MacAddr,
+}
 
-impl<T, const N: usize> ConnectedUdp for ConnectedUdp2RawSocket<T, N>
+impl<T, const N: usize> RawSocket2Udp<T, N> {
+    pub fn new(socket: T, local: SocketAddrV4, remote_mac: MacAddr) -> Self {
+        Self {
+            socket,
+            local,
+            remote_mac,
+        }
+    }
+}
+
+impl<T, const N: usize> ErrorType for RawSocket2Udp<T, N>
 where
-    T: RawSocket,
+    T: ErrorType,
 {
     type Error = Error<T::Error>;
+}
 
-    async fn send(&mut self, data: &[u8]) -> Result<(), Self::Error> {
-        send::<_, N>(
-            &mut self.0,
-            SocketAddr::V4(self.1),
-            SocketAddr::V4(self.2),
-            None,
+impl<T, const N: usize> UdpReceive for RawSocket2Udp<T, N>
+where
+    T: RawReceive,
+{
+    async fn receive(&mut self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), Self::Error> {
+        let (len, _local, remote, _) =
+            udp_receive::<_, N>(&mut self.socket, Some(self.local), None, buffer).await?;
+
+        Ok((len, remote))
+    }
+}
+
+impl<T, const N: usize> UdpSend for RawSocket2Udp<T, N>
+where
+    T: RawSend,
+{
+    async fn send(&mut self, remote: SocketAddr, data: &[u8]) -> Result<(), Self::Error> {
+        let remote = match remote {
+            SocketAddr::V4(remote) => remote,
+            SocketAddr::V6(_) => Err(Error::UnsupportedProtocol)?,
+        };
+
+        udp_send::<_, N>(
+            &mut self.socket,
+            SocketAddr::V4(self.local),
+            SocketAddr::V4(remote),
+            self.remote_mac,
             data,
         )
         .await
     }
-
-    async fn receive_into(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-        let (len, _, _, _) =
-            receive_into::<_, N>(&mut self.0, Some(self.1), Some(self.2), buffer).await?;
-
-        Ok(len)
-    }
 }
 
-pub struct UnconnectedUdp2RawSocket<T, const N: usize>(T, Option<SocketAddrV4>);
-
-impl<T, const N: usize> UnconnectedUdp for UnconnectedUdp2RawSocket<T, N>
+impl<T, const N: usize> UdpSplit for RawSocket2Udp<T, N>
 where
-    T: RawSocket,
+    T: RawSplit,
 {
-    type Error = Error<T::Error>;
+    type Receive<'a> = RawSocket2Udp<T::Receive<'a>, N> where Self: 'a;
+    type Send<'a> = RawSocket2Udp<T::Send<'a>, N> where Self: 'a;
 
-    async fn send(
-        &mut self,
-        local: SocketAddr,
-        remote: SocketAddr,
-        data: &[u8],
-    ) -> Result<(), Self::Error> {
-        send::<_, N>(&mut self.0, local, remote, None, data).await
-    }
+    fn split(&mut self) -> (Self::Receive<'_>, Self::Send<'_>) {
+        let (receive, send) = self.socket.split();
 
-    async fn receive_into(
-        &mut self,
-        buffer: &mut [u8],
-    ) -> Result<(usize, SocketAddr, SocketAddr), Self::Error> {
-        let (len, local, remote, _) =
-            receive_into::<_, N>(&mut self.0, None, self.1, buffer).await?;
-
-        Ok((len, local, remote))
+        (
+            RawSocket2Udp::new(receive, self.local, self.remote_mac),
+            RawSocket2Udp::new(send, self.local, self.remote_mac),
+        )
     }
 }
 
-impl<T, const N: usize> UnconnectedUdpWithMac for UnconnectedUdp2RawSocket<T, N>
-where
-    T: RawSocket,
-{
-    async fn send(
-        &mut self,
-        local: SocketAddr,
-        remote: SocketAddr,
-        remote_mac: Option<&[u8; 6]>,
-        data: &[u8],
-    ) -> Result<(), Self::Error> {
-        send::<_, N>(&mut self.0, local, remote, remote_mac, data).await
-    }
-
-    async fn receive_into(
-        &mut self,
-        buffer: &mut [u8],
-    ) -> Result<(usize, SocketAddr, SocketAddr, [u8; 6]), Self::Error> {
-        receive_into::<_, N>(&mut self.0, None, self.1, buffer).await
-    }
-}
-
-pub struct Udp2RawStack<T, const N: usize = 1500>(T, u32)
-where
-    T: RawStack;
-
-impl<T, const N: usize> Udp2RawStack<T, N>
-where
-    T: RawStack,
-{
-    pub const fn new(stack: T, interface: u32) -> Self {
-        Self(stack, interface)
-    }
-}
-
-impl<T, const N: usize> UdpStack for Udp2RawStack<T, N>
-where
-    T: RawStack,
-{
-    type Error = Error<T::Error>;
-
-    type Connected = ConnectedUdp2RawSocket<T::Socket, N>;
-
-    type UniquelyBound = UnconnectedUdp2RawSocket<T::Socket, N>;
-
-    type MultiplyBound = UnconnectedUdp2RawSocket<T::Socket, N>;
-
-    async fn connect_from(
-        &self,
-        local: SocketAddr,
-        remote: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Connected), Self::Error> {
-        let (SocketAddr::V4(localv4), SocketAddr::V4(remotev4)) = (local, remote) else {
-            Err(Error::UnsupportedProtocol)?
-        };
-
-        let socket = self.0.bind(self.1).await.map_err(Self::Error::Io)?;
-
-        Ok((local, ConnectedUdp2RawSocket(socket, localv4, remotev4)))
-    }
-
-    async fn bind_single(
-        &self,
-        local: SocketAddr,
-    ) -> Result<(SocketAddr, Self::UniquelyBound), Self::Error> {
-        let SocketAddr::V4(localv4) = local else {
-            Err(Error::UnsupportedProtocol)?
-        };
-
-        let socket = self.0.bind(self.1).await.map_err(Self::Error::Io)?;
-
-        Ok((local, UnconnectedUdp2RawSocket(socket, Some(localv4))))
-    }
-
-    async fn bind_multiple(&self, local: SocketAddr) -> Result<Self::MultiplyBound, Self::Error> {
-        let SocketAddr::V4(localv4) = local else {
-            Err(Error::UnsupportedProtocol)?
-        };
-
-        let socket = self.0.bind(self.1).await.map_err(Self::Error::Io)?;
-
-        Ok(UnconnectedUdp2RawSocket(socket, Some(localv4)))
-    }
-}
-
-async fn send<T: RawSocket, const N: usize>(
+pub async fn udp_send<T: RawSend, const N: usize>(
     mut socket: T,
     local: SocketAddr,
     remote: SocketAddr,
-    mut remote_mac: Option<&[u8; 6]>,
+    remote_mac: MacAddr,
     data: &[u8],
 ) -> Result<(), Error<T::Error>> {
     let (SocketAddr::V4(local), SocketAddr::V4(remote)) = (local, remote) else {
@@ -215,24 +154,20 @@ async fn send<T: RawSocket, const N: usize>(
         }
     })?;
 
-    if remote_mac.is_none() && remote.ip().is_broadcast() {
-        remote_mac = Some(&[0xff; 6]);
-    }
-
     socket.send(remote_mac, data).await.map_err(Error::Io)
 }
 
-async fn receive_into<T: RawSocket, const N: usize>(
+pub async fn udp_receive<T: RawReceive, const N: usize>(
     mut socket: T,
     filter_src: Option<SocketAddrV4>,
     filter_dst: Option<SocketAddrV4>,
     buffer: &mut [u8],
-) -> Result<(usize, SocketAddr, SocketAddr, [u8; 6]), Error<T::Error>> {
+) -> Result<(usize, SocketAddr, SocketAddr, MacAddr), Error<T::Error>> {
     let mut buf = MaybeUninit::<[u8; N]>::uninit();
     let buf = unsafe { buf.assume_init_mut() };
 
     let (len, local, remote, remote_mac) = loop {
-        let (len, remote_mac) = socket.receive_into(buf).await.map_err(Error::Io)?;
+        let (len, remote_mac) = socket.receive(buf).await.map_err(Error::Io)?;
 
         match raw::ip_udp_decode(&buf[..len], filter_src, filter_dst) {
             Ok(Some((remote, local, data))) => {

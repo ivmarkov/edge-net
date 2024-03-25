@@ -2,7 +2,7 @@
 name = "edge-mqtt"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.77"
 description = "Implements the embedded-svc MQTT traits on top of the rumqttc crate"
 repository = "https://github.com/ivmarkov/edge-net"
 readme = "README.md"

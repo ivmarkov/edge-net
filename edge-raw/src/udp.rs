@@ -1,6 +1,6 @@
 use log::trace;
 
-use no_std_net::{Ipv4Addr, SocketAddrV4};
+use core::net::{Ipv4Addr, SocketAddrV4};
 
 use super::bytes::{BytesIn, BytesOut};
 

@@ -2,7 +2,7 @@
 name = "edge-dhcp"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.77"
 description = "Async + `no_std` + no-alloc implementation of the DHCP protocol"
 repository = "https://github.com/ivmarkov/edge-net"
 readme = "README.md"
@@ -18,16 +18,14 @@ categories = [
 [features]
 default = ["io"]
 std = ["io"]
-io = ["embassy-futures", "embedded-nal-async", "embedded-nal-async-xtra"]
+io = ["embassy-futures", "edge-nal"]
 
 [dependencies]
-no-std-net = { workspace = true }
 heapless = { workspace = true }
 log = { workspace = true }
 rand_core = "0.6"
 embassy-futures = { workspace = true, optional = true }
 embassy-time = { workspace = true, default-features = false } # TODO: Make optional
-embedded-nal-async = { workspace = true, optional = true }
-embedded-nal-async-xtra = { workspace = true, optional = true }
+edge-nal = { workspace = true, optional = true }
 num_enum = { version = "0.7", default-features = false }
 edge-raw = { workspace = true, default-features = false }

@@ -531,8 +531,8 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
         timeout_ms: Option<u32>,
     ) -> Result<(), Error<A::Error>>
     where
-        A: embedded_nal_async_xtra::TcpAccept,
-        H: for<'b, 't> Handler<'b, &'b mut A::Connection<'t>, N>,
+        A: edge_nal::TcpAccept,
+        H: for<'b, 't> Handler<'b, &'b mut A::Socket<'t>, N>,
     {
         let handler = TaskHandlerAdaptor::new(handler);
 
@@ -557,8 +557,8 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
                         let io = {
                             let _guard = mutex.lock().await;
 
-                            acceptor.accept().await.map_err(Error::Io)
-                        }?;
+                            acceptor.accept().await.map_err(Error::Io)?.1
+                        };
 
                         debug!("Handler task {task_id}: Got connection request");
 
@@ -592,8 +592,8 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
         timeout_ms: Option<u32>,
     ) -> Result<(), Error<A::Error>>
     where
-        A: embedded_nal_async_xtra::TcpAccept,
-        H: for<'b, 't> TaskHandler<'b, &'b mut A::Connection<'t>, N>,
+        A: edge_nal::TcpAccept,
+        H: for<'b, 't> TaskHandler<'b, &'b mut A::Socket<'t>, N>,
     {
         debug!("Creating {P} handler tasks");
         let mutex = Mutex::<NoopRawMutex, _>::new(());
@@ -614,8 +614,8 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
                         let io = {
                             let _guard = mutex.lock().await;
 
-                            acceptor.accept().await.map_err(Error::Io)
-                        }?;
+                            acceptor.accept().await.map_err(Error::Io)?.1
+                        };
 
                         debug!("Handler task {task_id}: Got connection request");
 

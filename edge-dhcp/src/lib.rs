@@ -5,7 +5,7 @@
 use core::fmt;
 use core::str::Utf8Error;
 
-pub use no_std_net::Ipv4Addr;
+pub use core::net::Ipv4Addr;
 
 use num_enum::TryFromPrimitive;
 

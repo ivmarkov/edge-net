@@ -1,7 +1,6 @@
 use edge_http::io::server::{Connection, DefaultServer, Handler};
 use edge_http::Method;
-
-use embedded_nal_async_xtra::TcpListen;
+use edge_nal::TcpBind;
 
 use embedded_io_async::{Read, Write};
 
@@ -22,9 +21,10 @@ pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
 
     info!("Running HTTP server on {addr}");
 
-    let acceptor = edge_std_nal_async::Stack::new()
-        .listen(addr.parse().unwrap())
-        .await?;
+    let acceptor = edge_nal_std::Stack::new()
+        .bind(addr.parse().unwrap())
+        .await?
+        .1;
 
     server.run(acceptor, HttpHandler, None).await?;
 

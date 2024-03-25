@@ -1,7 +1,8 @@
 use core::fmt;
+use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use core::time::Duration;
 
-use embedded_nal_async::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpStack, UnconnectedUdp};
+use edge_nal::{UdpReceive, UdpSend, UdpStack};
 
 use log::*;
 
@@ -40,7 +41,7 @@ impl<E> std::error::Error for DnsIoError<E> where E: std::error::Error {}
 
 pub async fn run<S>(
     stack: &S,
-    socket: SocketAddr,
+    local_addr: SocketAddr,
     tx_buf: &mut [u8],
     rx_buf: &mut [u8],
     ip: Ipv4Addr,
@@ -49,18 +50,12 @@ pub async fn run<S>(
 where
     S: UdpStack,
 {
-    let (_, mut udp) = stack
-        .bind_single(socket)
-        .await
-        .map_err(DnsIoError::IoError)?;
+    let (_, mut udp) = stack.bind(local_addr).await.map_err(DnsIoError::IoError)?;
 
     loop {
         debug!("Waiting for data");
 
-        let (len, local, remote) = udp
-            .receive_into(rx_buf)
-            .await
-            .map_err(DnsIoError::IoError)?;
+        let (len, remote) = udp.receive(rx_buf).await.map_err(DnsIoError::IoError)?;
 
         let request = &rx_buf[..len];
 
@@ -77,7 +72,7 @@ where
             },
         };
 
-        udp.send(local, remote, &tx_buf[..len])
+        udp.send(remote, &tx_buf[..len])
             .await
             .map_err(DnsIoError::IoError)?;
 

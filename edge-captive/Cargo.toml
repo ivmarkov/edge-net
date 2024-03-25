@@ -2,7 +2,7 @@
 name = "edge-captive"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.77"
 description = "Async + `no_std` + no-alloc implementation of a Captive Portal DNS"
 repository = "https://github.com/ivmarkov/edge-net"
 readme = "README.md"
@@ -18,10 +18,10 @@ categories = [
 [features]
 default = ["io"]
 std = ["io"]
-io = ["embedded-nal-async"]
+io = ["edge-nal"]
 
 [dependencies]
 log = { workspace = true }
 domain = { workspace = true }
 octseq = { workspace = true }
-embedded-nal-async = { workspace = true, optional = true }
+edge-nal = { workspace = true, optional = true }

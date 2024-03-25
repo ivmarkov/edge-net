@@ -1,9 +1,11 @@
+use core::net::SocketAddr;
+
 use anyhow::bail;
-use edge_http::ws::{MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN};
-use edge_ws::{FrameHeader, FrameType};
-use embedded_nal_async::{AddrType, Dns, SocketAddr, TcpConnect};
 
 use edge_http::io::client::Connection;
+use edge_http::ws::{MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN};
+use edge_nal::{AddrType, Dns, TcpConnect};
+use edge_ws::{FrameHeader, FrameType};
 
 use rand::{thread_rng, RngCore};
 
@@ -18,7 +20,7 @@ fn main() {
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    let stack = edge_std_nal_async::Stack::new();
+    let stack = edge_nal_std::Stack::new();
 
     let mut buf = [0_u8; 8192];
 

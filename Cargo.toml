@@ -9,12 +9,12 @@ description = "no_std and no-alloc async implementations of various network prot
 repository = "https://github.com/ivmarkov/edge-net"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.75"
+rust-version = "1.77"
 
 [features]
-default = ["io"]
-std = ["io", "edge-captive/std", "edge-dhcp/std", "edge-http/std", "edge-mdns/std", "edge-raw/std", "edge-mqtt", "edge-ws/std", "edge-std-nal-async"]
-io = ["edge-captive/io", "edge-dhcp/io", "edge-http/io", "edge-mdns/io", "edge-raw/io", "edge-ws/io", "embedded-nal-async-xtra"]
+default = ["io", "std"]
+std = ["io", "edge-captive/std", "edge-dhcp/std", "edge-http/std", "edge-mdns/std", "edge-raw/std", "edge-mqtt", "edge-ws/std", "edge-nal-std"]
+io = ["edge-captive/io", "edge-dhcp/io", "edge-http/io", "edge-mdns/io", "edge-raw/io", "edge-ws/io", "edge-nal"]
 nightly = []
 embedded-svc = ["edge-http/embedded-svc", "edge-mqtt/embedded-svc", "edge-ws/embedded-svc"]
 
@@ -24,17 +24,16 @@ edge-dhcp = { workspace = true }
 edge-http = { workspace = true }
 edge-mdns = { workspace = true }
 edge-mqtt = { workspace = true, optional = true }
+edge-nal = { workspace = true, optional = true }
 edge-raw = { workspace = true }
 edge-ws = { workspace = true }
-edge-std-nal-async = { workspace = true, optional = true }
-embedded-nal-async-xtra = { workspace = true, optional = true }
+edge-nal-std = { workspace = true, optional = true }
 
 [dev-dependencies]
 log = "0.4"
 anyhow = "1"
 env_logger = "0.10"
 embedded-io-async = "0.6"
-embedded-nal-async = "0.7"
 embassy-time = { version = "0.3", features = ["std", "generic-queue"] }
 embassy-sync = "0.5"
 embassy-futures = "0.1"
@@ -77,7 +76,7 @@ name = "ws_server"
 required-features = ["std"]
 
 [[example]]
-name = "std_nal"
+name = "nal_std"
 required-features = ["std"]
 
 [[example]]
@@ -92,10 +91,10 @@ members = [
     "edge-http",
     "edge-mdns",
     "edge-mqtt",
+    "edge-nal",
     "edge-raw",
     "edge-ws",
-    "edge-std-nal-async",
-    "embedded-nal-async-xtra"
+    "edge-nal-std"
 ]
 
 [workspace.dependencies]
@@ -103,11 +102,9 @@ embassy-futures = { version = "0.1", default-features = false }
 embassy-sync = { version = "0.5", default-features = false }
 embassy-time = { version = "0.3", default-features = false }
 embedded-io-async = { version = "0.6", default-features = false }
-embedded-nal-async = { version = "0.7", default-features = false }
 embedded-svc = { version = "0.27", default-features = false }
 log = { version = "0.4", default-features = false }
 heapless = { version = "0.8", default-features = false }
-no-std-net = { version = "0.6", default-features = false }
 domain = { version = "0.9.3", default-features = false, features = ["heapless"] }
 octseq = { version = "0.3.2", default-features = false }
 
@@ -116,7 +113,7 @@ edge-dhcp = { version = "0.2.0", path = "edge-dhcp", default-features = false }
 edge-http = { version = "0.2.1", path = "edge-http", default-features = false }
 edge-mdns = { version = "0.2.0", path = "edge-mdns", default-features = false }
 edge-mqtt = { version = "0.2.0", path = "edge-mqtt", default-features = false }
+edge-nal = { version = "0.2.0", path = "edge-nal", default-features = false }
 edge-raw = { version = "0.2.0", path = "edge-raw", default-features = false }
 edge-ws = { version = "0.2.0", path = "edge-ws", default-features = false }
-edge-std-nal-async = { version = "0.2.0", path = "edge-std-nal-async", default-features = false }
-embedded-nal-async-xtra = { version = "0.2.0", path = "embedded-nal-async-xtra", default-features = false }
+edge-nal-std = { version = "0.2.0", path = "edge-nal-std", default-features = false }

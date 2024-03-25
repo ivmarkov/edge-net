@@ -1,9 +1,9 @@
 use core::fmt::Debug;
+use core::net::Ipv4Addr;
 
+use edge_nal::{UdpReceive, UdpSend};
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Instant, Timer};
-
-use embedded_nal_async::Ipv4Addr;
 
 use log::{info, warn};
 
@@ -47,7 +47,7 @@ impl Lease {
     ) -> Result<(Self, NetworkInfo), Error<S::Error>>
     where
         T: RngCore,
-        S: UnconnectedUdp,
+        S: UdpReceive + UdpSend,
     {
         loop {
             let offer = Self::discover(client, socket, buf, Duration::from_secs(3)).await?;
@@ -93,7 +93,7 @@ impl Lease {
     ) -> Result<(), Error<S::Error>>
     where
         T: RngCore,
-        S: UnconnectedUdp,
+        S: UdpReceive + UdpSend,
     {
         loop {
             let now = Instant::now();
@@ -120,7 +120,7 @@ impl Lease {
     ) -> Result<bool, Error<S::Error>>
     where
         T: RngCore,
-        S: UnconnectedUdp,
+        S: UdpReceive + UdpSend,
     {
         info!("Renewing DHCP lease...");
 
@@ -157,14 +157,13 @@ impl Lease {
     ) -> Result<(), Error<S::Error>>
     where
         T: RngCore,
-        S: UnconnectedUdp,
+        S: UdpReceive + UdpSend,
     {
         let mut opt_buf = Options::buf();
         let request = client.release(&mut opt_buf, 0, self.ip);
 
         socket
             .send(
-                SocketAddr::V4(SocketAddrV4::new(self.ip, DEFAULT_CLIENT_PORT)),
                 SocketAddr::V4(SocketAddrV4::new(self.server_ip, DEFAULT_SERVER_PORT)),
                 request.encode(buf)?,
             )
@@ -182,7 +181,7 @@ impl Lease {
     ) -> Result<Settings, Error<S::Error>>
     where
         T: RngCore,
-        S: UnconnectedUdp,
+        S: UdpReceive + UdpSend,
     {
         info!("Discovering DHCP servers...");
 
@@ -196,20 +195,15 @@ impl Lease {
 
             socket
                 .send(
-                    SocketAddr::V4(SocketAddrV4::new(
-                        Ipv4Addr::UNSPECIFIED,
-                        DEFAULT_CLIENT_PORT,
-                    )),
                     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, DEFAULT_SERVER_PORT)),
                     request.encode(buf)?,
                 )
                 .await
                 .map_err(Error::Io)?;
 
-            if let Either::First(result) =
-                select(socket.receive_into(buf), Timer::after(timeout)).await
+            if let Either::First(result) = select(socket.receive(buf), Timer::after(timeout)).await
             {
-                let (len, _local, _remote) = result.map_err(Error::Io)?;
+                let (len, _remote) = result.map_err(Error::Io)?;
                 let reply = Packet::decode(&buf[..len])?;
 
                 if client.is_offer(&reply, xid) {
@@ -242,7 +236,7 @@ impl Lease {
     ) -> Result<Option<Settings>, Error<S::Error>>
     where
         T: RngCore,
-        S: UnconnectedUdp,
+        S: UdpReceive + UdpSend,
     {
         for _ in 0..retries {
             info!("Requesting IP {ip} from DHCP server {server_ip}");
@@ -261,10 +255,6 @@ impl Lease {
             socket
                 .send(
                     SocketAddr::V4(SocketAddrV4::new(
-                        Ipv4Addr::UNSPECIFIED,
-                        DEFAULT_CLIENT_PORT,
-                    )),
-                    SocketAddr::V4(SocketAddrV4::new(
                         if broadcast {
                             Ipv4Addr::BROADCAST
                         } else {
@@ -277,10 +267,9 @@ impl Lease {
                 .await
                 .map_err(Error::Io)?;
 
-            if let Either::First(result) =
-                select(socket.receive_into(buf), Timer::after(timeout)).await
+            if let Either::First(result) = select(socket.receive(buf), Timer::after(timeout)).await
             {
-                let (len, _local, _remote) = result.map_err(Error::Io)?;
+                let (len, _remote) = result.map_err(Error::Io)?;
                 let packet = &buf[..len];
 
                 let reply = Packet::decode(packet)?;
