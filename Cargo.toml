@@ -13,7 +13,7 @@ rust-version = "1.77"
 
 [features]
 default = ["io", "std"]
-std = ["io", "edge-captive/std", "edge-dhcp/std", "edge-http/std", "edge-mdns/std", "edge-raw/std", "edge-mqtt", "edge-ws/std", "edge-nal-std"]
+std = ["io", "edge-captive/std", "edge-dhcp/std", "edge-http/std", "edge-mdns/std", "edge-raw/std", "edge-mqtt", "edge-ws/std", "edge-nal-std", "edge-nal-embassy"]
 io = ["edge-captive/io", "edge-dhcp/io", "edge-http/io", "edge-mdns/io", "edge-raw/io", "edge-ws/io", "edge-nal"]
 nightly = []
 embedded-svc = ["edge-http/embedded-svc", "edge-mqtt/embedded-svc", "edge-ws/embedded-svc"]
@@ -28,6 +28,7 @@ edge-nal = { workspace = true, optional = true }
 edge-raw = { workspace = true }
 edge-ws = { workspace = true }
 edge-nal-std = { workspace = true, optional = true }
+edge-nal-embassy = { workspace = true, optional = true }
 
 [dev-dependencies]
 log = "0.4"
@@ -94,7 +95,8 @@ members = [
     "edge-nal",
     "edge-raw",
     "edge-ws",
-    "edge-nal-std"
+    "edge-nal-std",
+    "edge-nal-embassy"
 ]
 
 [workspace.dependencies]
@@ -117,3 +119,4 @@ edge-nal = { version = "0.2.0", path = "edge-nal", default-features = false }
 edge-raw = { version = "0.2.0", path = "edge-raw", default-features = false }
 edge-ws = { version = "0.2.0", path = "edge-ws", default-features = false }
 edge-nal-std = { version = "0.2.0", path = "edge-nal-std", default-features = false }
+edge-nal-embassy = { version = "0.2.0", path = "edge-nal-embassy", default-features = false }

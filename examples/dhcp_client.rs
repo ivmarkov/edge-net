@@ -4,7 +4,7 @@ use core::net::{Ipv4Addr, SocketAddrV4};
 
 use edge_dhcp::client::Client;
 use edge_dhcp::io::client::{Lease, DEFAULT_CLIENT_PORT};
-use edge_nal::{MacAddr, RawStack};
+use edge_nal::{MacAddr, RawBind};
 use edge_raw::io::RawSocket2Udp;
 
 use log::info;

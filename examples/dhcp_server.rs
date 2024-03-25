@@ -4,7 +4,7 @@ use core::net::{Ipv4Addr, SocketAddrV4};
 
 use edge_dhcp::io::{self, DEFAULT_SERVER_PORT};
 use edge_dhcp::server::{Server, ServerOptions};
-use edge_nal::RawStack;
+use edge_nal::RawBind;
 use edge_raw::io::RawSocket2Udp;
 
 fn main() {

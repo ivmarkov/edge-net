@@ -13,8 +13,8 @@ use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 use embedded_io_async::{ErrorType, Read, Write};
 
 use edge_nal::{
-    AddrType, Dns, Multicast, TcpAccept, TcpBind, TcpConnect, TcpSplit, UdpReceive, UdpSend,
-    UdpSplit, UdpStack,
+    AddrType, Dns, Multicast, TcpAccept, TcpBind, TcpConnect, TcpSplit, UdpBind, UdpConnect,
+    UdpReceive, UdpSend, UdpSplit,
 };
 
 #[cfg(all(unix, not(target_os = "espidf")))]
@@ -48,12 +48,9 @@ impl TcpConnect for Stack {
 impl TcpBind for Stack {
     type Error = io::Error;
 
-    type Acceptor<'a> = TcpAcceptor where Self: 'a;
+    type Accept<'a> = TcpAcceptor where Self: 'a;
 
-    async fn bind(
-        &self,
-        local: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Acceptor<'_>), Self::Error> {
+    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Accept<'_>), Self::Error> {
         let acceptor = Async::<net::TcpListener>::bind(local).map(TcpAcceptor)?;
 
         Ok((acceptor.0.as_ref().local_addr()?, acceptor))
@@ -151,14 +148,14 @@ impl TcpSplit for TcpSocket {
 
     type Write<'a> = &'a TcpSocket where Self: 'a;
 
-    fn split(&mut self) -> Result<(Self::Read<'_>, Self::Write<'_>), io::Error> {
+    fn split(&mut self) -> (Self::Read<'_>, Self::Write<'_>) {
         let socket = &*self;
 
-        Ok((socket, socket))
+        (socket, socket)
     }
 }
 
-impl UdpStack for Stack {
+impl UdpConnect for Stack {
     type Error = io::Error;
 
     type Socket<'a> = UdpSocket where Self: 'a;
@@ -174,6 +171,12 @@ impl UdpStack for Stack {
 
         Ok((socket.as_ref().local_addr()?, UdpSocket(socket)))
     }
+}
+
+impl UdpBind for Stack {
+    type Error = io::Error;
+
+    type Socket<'a> = UdpSocket where Self: 'a;
 
     async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
         let socket = Async::<StdUdpSocket>::bind(local)?;
@@ -358,7 +361,7 @@ mod raw {
 
     use async_io::Async;
 
-    use edge_nal::{MacAddr, RawReceive, RawSend, RawSplit, RawStack};
+    use edge_nal::{MacAddr, RawBind, RawReceive, RawSend, RawSplit};
     use embedded_io_async::ErrorType;
 
     #[derive(Default)]
@@ -370,7 +373,7 @@ mod raw {
         }
     }
 
-    impl RawStack for Interface {
+    impl RawBind for Interface {
         type Error = io::Error;
 
         type Socket<'a> = RawSocket where Self: 'a;

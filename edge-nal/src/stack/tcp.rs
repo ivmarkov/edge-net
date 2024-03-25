@@ -10,7 +10,7 @@ pub trait TcpSplit: ErrorType {
     where
         Self: 'a;
 
-    fn split(&mut self) -> Result<(Self::Read<'_>, Self::Write<'_>), Self::Error>;
+    fn split(&mut self) -> (Self::Read<'_>, Self::Write<'_>);
 }
 
 impl<T> TcpSplit for &mut T
@@ -20,7 +20,7 @@ where
     type Read<'a> = T::Read<'a> where Self: 'a;
     type Write<'a> = T::Write<'a> where Self: 'a;
 
-    fn split(&mut self) -> Result<(Self::Read<'_>, Self::Write<'_>), Self::Error> {
+    fn split(&mut self) -> (Self::Read<'_>, Self::Write<'_>) {
         (**self).split()
     }
 }
@@ -43,14 +43,11 @@ pub trait TcpConnect {
 pub trait TcpBind {
     type Error: Error;
 
-    type Acceptor<'a>: TcpAccept<Error = Self::Error>
+    type Accept<'a>: TcpAccept<Error = Self::Error>
     where
         Self: 'a;
 
-    async fn bind(
-        &self,
-        local: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Acceptor<'_>), Self::Error>;
+    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Accept<'_>), Self::Error>;
 }
 
 pub trait TcpAccept {
@@ -103,12 +100,9 @@ where
 {
     type Error = T::Error;
 
-    type Acceptor<'a> = T::Acceptor<'a> where Self: 'a;
+    type Accept<'a> = T::Accept<'a> where Self: 'a;
 
-    async fn bind(
-        &self,
-        local: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Acceptor<'_>), Self::Error> {
+    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Accept<'_>), Self::Error> {
         (*self).bind(local).await
     }
 }
@@ -119,12 +113,9 @@ where
 {
     type Error = T::Error;
 
-    type Acceptor<'a> = T::Acceptor<'a> where Self: 'a;
+    type Accept<'a> = T::Accept<'a> where Self: 'a;
 
-    async fn bind(
-        &self,
-        local: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Acceptor<'_>), Self::Error> {
+    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Accept<'_>), Self::Error> {
         (**self).bind(local).await
     }
 }

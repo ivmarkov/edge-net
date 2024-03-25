@@ -2,7 +2,7 @@ use core::fmt;
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use core::time::Duration;
 
-use edge_nal::{UdpReceive, UdpSend, UdpStack};
+use edge_nal::{UdpBind, UdpReceive, UdpSend};
 
 use log::*;
 
@@ -48,7 +48,7 @@ pub async fn run<S>(
     ttl: Duration,
 ) -> Result<(), DnsIoError<S::Error>>
 where
-    S: UdpStack,
+    S: UdpBind,
 {
     let (_, mut udp) = stack.bind(local_addr).await.map_err(DnsIoError::IoError)?;
 

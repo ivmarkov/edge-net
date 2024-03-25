@@ -33,7 +33,7 @@ where
 
 /// This trait is implemented by raw socket stacks. The trait allows the underlying driver to
 /// construct multiple connections that implement the raw socket traits from `edge-net`.
-pub trait RawStack {
+pub trait RawBind {
     /// Error type returned on socket creation failure.
     type Error: embedded_io_async::Error;
 
@@ -50,9 +50,9 @@ pub trait RawStack {
     async fn bind(&self) -> Result<Self::Socket<'_>, Self::Error>;
 }
 
-impl<T> RawStack for &T
+impl<T> RawBind for &T
 where
-    T: RawStack,
+    T: RawBind,
 {
     type Error = T::Error;
 
@@ -63,9 +63,9 @@ where
     }
 }
 
-impl<T> RawStack for &mut T
+impl<T> RawBind for &mut T
 where
-    T: RawStack,
+    T: RawBind,
 {
     type Error = T::Error;
 

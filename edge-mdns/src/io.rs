@@ -8,7 +8,7 @@ use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
 
-use edge_nal::{Multicast, UdpReceive, UdpSend, UdpSplit, UdpStack};
+use edge_nal::{Multicast, UdpBind, UdpReceive, UdpSend, UdpSplit};
 
 use log::{info, warn};
 
@@ -76,7 +76,7 @@ pub async fn run<'s, T, S>(
 ) -> Result<(), MdnsIoError<S::Error>>
 where
     T: IntoIterator<Item = Service<'s>> + Clone,
-    S: UdpStack,
+    S: UdpBind,
     for<'a> S::Socket<'a>: Multicast<Error = S::Error>,
 {
     let (local_addr, mut udp) = stack.bind(socket).await.map_err(MdnsIoError::IoError)?;
