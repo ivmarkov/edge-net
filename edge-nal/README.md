@@ -7,26 +7,35 @@
 Hosts a bunch of traits which hopefully will be upstreamed into [embedded-nal-async](https://github.com/rust-embedded-community/embedded-nal/tree/master/embedded-nal-async) at some point in time - in one shape or another.
 
 ## Differences with [embedded-nal-async](https://github.com/rust-embedded-community/embedded-nal/tree/master/embedded-nal-async)
-* TCP:
-  * Factory traits for the creation of TCP server sockets - `TcpBind` and `TcpAccept`. `embedded-nal-async` only has `TcpConnect`
-  * Splittable sockets with `TcpSplit` (can be optionally implemented by `TcpConnect` and `TcpAccept`)
-* UDP:
-  * Separate `UdpSend` and `UdpReceive` traits for modeling the sending / receiving functinality of a UDP socket. Necessary for protocols that need UDP socket splitting, like mDNS responder
-  * Binding to a UDP socket and connecting to a UDP socket modeled with separate traits - `UdpBind` and `UdpConnect`, as not all platforms currently have capabilities to connect to a UDP socket (i.e. the networking stack of Embassy)
-  * Returning the local address of a UDP socket bind / connect operation is not supported, as not all platforms currently have this capability (i.e. the networking stack of Embassy)
-  * "Unbound" UDP sockets are currently not supported, as not all platforms have these capabilities (i.e. the networking stack of Embassy). Also, I've yet to find a good use case for these.
-  * Splittable sockets with `UdpSplit` (can be optionally implemented by `UdpConnect` and `UdpBind`)
-  * `Multicast` trait for joining / leaving IPv4 and IPv6 multicast groups (can be optionally implemented by `UdpConnect` and `UdpBind`)
+
+### TCP
+
+* Factory traits for the creation of TCP server sockets - `TcpBind` and `TcpAccept`. `embedded-nal-async` only has `TcpConnect`
+* Splittable sockets with `TcpSplit` (can be optionally implemented by `TcpConnect` and `TcpAccept`)
+
+### UDP
+
+* Separate `UdpSend` and `UdpReceive` traits for modeling the sending / receiving functinality of a UDP socket. Necessary for protocols that need UDP socket splitting, like mDNS responder
+* Binding to a UDP socket and connecting to a UDP socket modeled with separate traits - `UdpBind` and `UdpConnect`, as not all platforms currently have capabilities to connect to a UDP socket (i.e. the networking stack of Embassy)
+* Returning the local address of a UDP socket bind / connect operation is not supported, as not all platforms currently have this capability (i.e. the networking stack of Embassy)
+* "Unbound" UDP sockets are currently not supported, as not all platforms have these capabilities (i.e. the networking stack of Embassy). Also, I've yet to find a good use case for these.
+* Splittable sockets with `UdpSplit` (can be optionally implemented by `UdpConnect` and `UdpBind`)
+* `Multicast` trait for joining / leaving IPv4 and IPv6 multicast groups (can be optionally implemented by `UdpConnect` and `UdpBind`)
 
 ## Justification
 
-These traits are necessary to unlock the full functionality of some crates in `edge-net`, which is not possible with the current traits of `embedded-nal-async`. Namely:
+These traits are necessary to unlock the full functionality of some crates in `edge-net`, which is not possible with the current traits of `embedded-nal-async`. 
+
+Namely:
 * [edge-mdns](../edge-mdns) - needs UDP multicast capabilities as well as socket splitting
 * [edge-dhcp](../edge-dhcp) - needs raw ethernet socket capabilities or at least sending/receiving UDP packets to/from peers identified by their MAC addresses rather than by their IP addresses
 * [edge-http](../edge-http) - (full server only) needs a way to bind to a server-side TCP socket
 * [edge-ws](../edge-ws) - Most WebSocket use cases do require a splittable TCP socket (separate read and write halves)
 
-## TCP traits
+## Traits
+
+### TCP
+
 * [TcpSplit](src/stack/tcp.rs)
   * A trait that - when implemented on a TCP socket - allows for splitting the send and receive halves of the socket for full-duplex functionality
 * [TcpConnect](src/stack/tcp.rs)
@@ -36,7 +45,8 @@ These traits are necessary to unlock the full functionality of some crates in `e
 * [TcpAccept](src/stack/tcp.rs)
   * The acceptor of the server-side TCP socket factory similar in spirit to STD's `std::net::TcpListener::bind` method and `std::net::TcpListener` struct
 
-## UDP traits
+### UDP
+
 * [UdpReceive](src/udp.rs)
   * The receiver half of a UDP socket
 * [UdpSend](src/udp.rs)
@@ -50,7 +60,8 @@ These traits are necessary to unlock the full functionality of some crates in `e
 * [Multicast](src/multicast.rs)
   * Extra trait for UDP sockets allowing subscription to multicast groups
 
-## Traits for sending/receiving raw ethernet payloads (a.k.a. raw sockets)
+### Traits for sending/receiving raw ethernet payloads (a.k.a. raw sockets)
+
 * [RawReceive](src/raw.rs)
   * The receiver half of a raw socket
 * [RawSend](src/raw.rs)
