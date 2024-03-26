@@ -7,8 +7,7 @@ use embedded_io_async::ErrorType;
 /// This trait is implemented by UDP sockets and models their datagram receiving functionality.
 ///
 /// The socket it represents might be either bound (has a local IP address, port and interface) or
-/// connected (also has a remote IP address and port), or unbound (may not have a single local IP
-/// address, port and interface).
+/// connected (also has a remote IP address and port).
 ///
 /// The term "connected" here refers to the semantics of POSIX datagram sockets, through which datagrams
 /// are sent and received without having a remote address per call. It does not imply any process
@@ -29,8 +28,7 @@ pub trait UdpReceive: ErrorType {
 /// This trait is implemented by UDP sockets and models their datagram sending functionality.
 ///
 /// The socket it represents might be either bound (has a local IP address, port and interface) or
-/// connected (also has a remote IP address and port), or unbound (may not have a single local IP
-/// address, port and interface).
+/// connected (also has a remote IP address and port).
 ///
 /// The term "connected" here refers to the semantics of POSIX datagram sockets, through which datagrams
 /// are sent and received without having a remote address per call. It does not imply any process

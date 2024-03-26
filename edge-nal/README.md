@@ -12,10 +12,11 @@ Hosts a bunch of traits which hopefully will be upstreamed into [embedded-nal-as
   * Splittable sockets with `TcpSplit` (can be optionally implemented by `TcpConnect` and `TcpAccept`)
 * UDP:
   * Separate `UdpSend` and `UdpReceive` traits for modeling the sending / receiving functinality of a UDP socket. Necessary for protocols that need UDP socket splitting, like mDNS responder
-  * Binding to a UDP socket and connecting to a UDP socket modeled with separate traits - `UdpBind` and `UdpConnect`, as not all platforms currently capabilities to connect to a UDP socket (e.g. the networking stack of Embassy)
-  * Returning the local address of a UDP socket bind / connect operation is not supported, as not all platforms currently have this capability (e.g. the networking stack of Embassy)
+  * Binding to a UDP socket and connecting to a UDP socket modeled with separate traits - `UdpBind` and `UdpConnect`, as not all platforms currently have capabilities to connect to a UDP socket (i.e. the networking stack of Embassy)
+  * Returning the local address of a UDP socket bind / connect operation is not supported, as not all platforms currently have this capability (i.e. the networking stack of Embassy)
+  * "Unbound" UDP sockets are currently not supported, as not all platforms have these capabilities (i.e. the networking stack of Embassy). Also, I've yet to find a good use case for these.
   * Splittable sockets with `UdpSplit` (can be optionally implemented by `UdpConnect` and `UdpBind`)
-  * `Multicast` trait for joining / leaving IPv$ and IPv6 multicast groups (can be optionally implemented by `UdpConnect` and `UdpBind`)
+  * `Multicast` trait for joining / leaving IPv4 and IPv6 multicast groups (can be optionally implemented by `UdpConnect` and `UdpBind`)
 
 ## Justification
 

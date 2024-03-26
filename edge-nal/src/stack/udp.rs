@@ -7,9 +7,7 @@ use embedded_io_async::ErrorType;
 use crate::udp::{UdpReceive, UdpSend};
 
 /// This trait is implemented by UDP sockets that can be split into separate `send` and `receive` halves that can operate
-/// independently from each other (i.e., a full-duplex connection).
-///
-/// All sockets returned by the `UdpStack` trait must implement this trait.
+/// independently from each other (i.e., a full-duplex connection)
 pub trait UdpSplit: ErrorType {
     type Receive<'a>: UdpReceive<Error = Self::Error>
     where
@@ -33,19 +31,17 @@ where
     }
 }
 
-/// This trait is implemented by UDP/IP stacks. The trait allows the underlying driver to
-/// construct multiple connections that implement the UDP traits from `edge-net`.
+/// This is a factory trait for creating connected UDP sockets
 pub trait UdpConnect {
-    /// Error type returned on socket creation failure.
+    /// Error type returned on socket creation failure
     type Error: embedded_io_async::Error;
 
-    /// The socket type returned by the stack.
+    /// The socket type returned by the factory
     type Socket<'a>: UdpReceive<Error = Self::Error> + UdpSend<Error = Self::Error>
     where
         Self: 'a;
 
-    /// Connect to a remote socket. Return the local socket address to which the connection is bound,
-    /// as it might be only partially specified (as in either the port, or the IP address, or both might be unspecified).
+    /// Connect to a remote socket
     async fn connect(
         &self,
         local: SocketAddr,
@@ -53,19 +49,17 @@ pub trait UdpConnect {
     ) -> Result<Self::Socket<'_>, Self::Error>;
 }
 
-/// This trait is implemented by UDP/IP stacks. The trait allows the underlying driver to
-/// construct multiple connections that implement the UDP traits from `edge-net`.
+/// This is a factory trait for binding UDP sockets
 pub trait UdpBind {
-    /// Error type returned on socket creation failure.
+    /// Error type returned on socket creation failure
     type Error: embedded_io_async::Error;
 
-    /// The socket type returned by the stack.
+    /// The socket type returned by the stack
     type Socket<'a>: UdpReceive<Error = Self::Error> + UdpSend<Error = Self::Error>
     where
         Self: 'a;
 
-    /// Bind to a local socket. Return the local socket address to which the connection is bound, as the provided
-    /// local address might only be partially specified.
+    /// Bind to a local socket address
     async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error>;
 }
 
