@@ -6,7 +6,8 @@
 
 Async + `no_std` + no-alloc implementation of IP and UDP packet creation and parsing.
 
-The `edge_raw::io` module contains implementations of the `embedded_nal_async_xtra::RawStack` trait, as well as of the `embedded_nal_async::UdpSocket` trait. 
+The `edge_raw::io` module contains implementations of the `edge_nal::RawBind` trait, as well as of the `edge_nal::RawReceive` and `edge_nal::RawSend` traits.
+
 These are useful in the context of protocols like DHCP, which - while working on top of UDP - need to be capable of receiving
 and sending packets to peers that do not have an IP address assigned yet.
 
