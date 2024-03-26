@@ -4,11 +4,22 @@
 ![crates.io](https://img.shields.io/crates/v/edge-net.svg)
 [![Documentation](https://docs.rs/edge-net/badge.svg)](https://docs.rs/edge-net)
 
-Hosts a bunch of traits which hopefully will be upstreamed into [embedded-nal-async](https://github.com/rust-embedded-community/embedded-nal/tree/master/embedded-nal-async) soon - in one shape or another.
+Hosts a bunch of traits which hopefully will be upstreamed into [embedded-nal-async](https://github.com/rust-embedded-community/embedded-nal/tree/master/embedded-nal-async) at some point in time - in one shape or another.
+
+## Differences with [embedded-nal-async](https://github.com/rust-embedded-community/embedded-nal/tree/master/embedded-nal-async)
+* TCP:
+  * Factory traits for the creation of TCP server sockets - `TcpBind` and `TcpAccept`. `embedded-nal-async` only has `TcpConnect`
+  * Splittable sockets with `TcpSplit` (can be optionally implemented by `TcpConnect` and `TcpAccept`)
+* UDP:
+  * Separate `UdpSend` and `UdpReceive` traits for modeling the sending / receiving functinality of a UDP socket. Necessary for protocols that need UDP socket splitting, like mDNS responder
+  * Binding to a UDP socket and connecting to a UDP socket modeled with separate traits - `UdpBind` and `UdpConnect`, as not all platforms currently capabilities to connect to a UDP socket (e.g. the networking stack of Embassy)
+  * Returning the local address of a UDP socket bind / connect operation is not supported, as not all platforms currently have this capability (e.g. the networking stack of Embassy)
+  * Splittable sockets with `UdpSplit` (can be optionally implemented by `UdpConnect` and `UdpBind`)
+  * `Multicast` trait for joining / leaving IPv$ and IPv6 multicast groups (can be optionally implemented by `UdpConnect` and `UdpBind`)
 
 ## Justification
 
-These traits are necessary to unlock the full functionality of some crates in `edge-net`. Namely:
+These traits are necessary to unlock the full functionality of some crates in `edge-net`, which is not possible with the current traits of `embedded-nal-async`. Namely:
 * [edge-mdns](../edge-mdns) - needs UDP multicast capabilities as well as socket splitting
 * [edge-dhcp](../edge-dhcp) - needs raw ethernet socket capabilities or at least sending/receiving UDP packets to/from peers identified by their MAC addresses rather than by their IP addresses
 * [edge-http](../edge-http) - (full server only) needs a way to bind to a server-side TCP socket
@@ -19,10 +30,10 @@ These traits are necessary to unlock the full functionality of some crates in `e
   * A trait that - when implemented on a TCP socket - allows for splitting the send and receive halves of the socket for full-duplex functionality
 * [TcpConnect](src/stack/tcp.rs)
   * Client-side TCP socket factory similar in spirit to STD's `std::net::TcpListener::connect` method
-* [TcpAccept](src/stack/tcp.rs)
+* [TcpBind](src/stack/tcp.rs)
   * Server-side TCP socket factory similar in spirit to STD's `std::net::TcpListener::bind` method and `std::net::TcpListener` struct
-* [TcpStack](src/stack/tcp.rs)
-  * `TcpConnect` + `TcpAccept`
+* [TcpAccept](src/stack/tcp.rs)
+  * The acceptor of the server-side TCP socket factory similar in spirit to STD's `std::net::TcpListener::bind` method and `std::net::TcpListener` struct
 
 ## UDP traits
 * [UdpReceive](src/udp.rs)
@@ -31,8 +42,10 @@ These traits are necessary to unlock the full functionality of some crates in `e
   * The sender half of a UDP socket
 * [UdpSplit](src/stack/udp.rs)
   * A trait that - when implemented on a UDP socket - allows for splitting the send and receive halves of the socket for full-duplex functionality
-* [UdpStack](src/stack/udp.rs)
+* [UdpBind](src/stack/udp.rs)
   * Udp socket factory similar in spirit to STD's `std::net::UdpSocket::bind` method
+* [UdpConnect](src/stack/udp.rs)
+  * Udp socket factory similar in spirit to STD's `std::net::UdpSocket::connect` method
 * [Multicast](src/multicast.rs)
   * Extra trait for UDP sockets allowing subscription to multicast groups
 
@@ -43,5 +56,5 @@ These traits are necessary to unlock the full functionality of some crates in `e
   * The sender half of a raw socket
 * [RawSplit](src/stack/raw.rs)
   * A trait that - when implemented on a raw socket - allows for splitting the send and receive halves of the socket for full-duplex functionality
-* [RawStack](src/stack/raw.rs)
+* [RawBind](src/stack/raw.rs)
   * A raw socket factory
