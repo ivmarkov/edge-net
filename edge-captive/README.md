@@ -13,11 +13,10 @@ For other protocols, look at the [edge-net](https://github.com/ivmarkov/edge-net
 ## Example
 
 ```rust
+use core::net::{IpAddr, Ipv4Addr, SocketAddr};
 use core::time::Duration;
 
 use edge_captive::io::run;
-
-use embedded_nal_async::{IpAddr, Ipv4Addr, SocketAddr};
 
 use log::*;
 
@@ -26,7 +25,7 @@ fn main() {
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    let stack = edge_std_nal_async::Stack::new();
+    let stack = edge_nal_std::Stack::new();
 
     let mut tx_buf = [0; 1500];
     let mut rx_buf = [0; 1500];

@@ -23,11 +23,13 @@ Optimize further the memory consumption of the generated futures:
 ### HTTP client
 
 ```rust
+use core::net::SocketAddr;
+
 use embedded_io_async::Read;
-use embedded_nal_async::{AddrType, Dns, SocketAddr, TcpConnect};
 
 use edge_http::io::{client::Connection, Error};
 use edge_http::Method;
+use edge_nal::{AddrType, Dns, TcpConnect};
 
 use log::*;
 
@@ -36,7 +38,7 @@ fn main() {
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    let stack: edge_std_nal_async::Stack = Default::default();
+    let stack: edge_nal_std::Stack = Default::default();
 
     let mut buf = [0_u8; 8192];
 
@@ -103,8 +105,7 @@ async fn request<'b, const N: usize, T: TcpConnect>(
 ```rust
 use edge_http::io::server::{Connection, DefaultServer, Handler};
 use edge_http::Method;
-
-use embedded_nal_async_xtra::TcpListen;
+use edge_nal::TcpBind;
 
 use embedded_io_async::{Read, Write};
 
@@ -125,8 +126,8 @@ pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
 
     info!("Running HTTP server on {addr}");
 
-    let acceptor = edge_std_nal_async::Stack::new()
-        .listen(addr.parse().unwrap())
+    let acceptor = edge_nal_std::Stack::new()
+        .bind(addr.parse().unwrap())
         .await?;
 
     server.run(acceptor, HttpHandler, None).await?;
