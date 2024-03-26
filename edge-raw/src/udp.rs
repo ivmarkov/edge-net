@@ -41,12 +41,17 @@ where
     hdr.encode_with_payload(buf, *src.ip(), *dst.ip(), |buf| payload(buf))
 }
 
+/// Represents a parsed UDP header
 #[derive(Clone, Debug)]
 pub struct UdpPacketHeader {
-    pub src: u16, // Source port
-    pub dst: u16, // Destination port
-    pub len: u16, // UDP length
-    pub sum: u16, // UDP checksum
+    /// Source port
+    pub src: u16,
+    /// Destination port
+    pub dst: u16,
+    /// UDP length
+    pub len: u16,
+    /// UDP checksum
+    pub sum: u16,
 }
 
 impl UdpPacketHeader {
@@ -55,6 +60,7 @@ impl UdpPacketHeader {
     pub const SIZE: usize = 8;
     pub const CHECKSUM_WORD: usize = 3;
 
+    /// Create a new header instance
     pub fn new(src: u16, dst: u16) -> Self {
         Self {
             src,
@@ -64,7 +70,7 @@ impl UdpPacketHeader {
         }
     }
 
-    /// Parses the packet header from a byte slice
+    /// Decodes the header from a byte slice
     pub fn decode(data: &[u8]) -> Result<Self, Error> {
         let mut bytes = BytesIn::new(data);
 
@@ -76,7 +82,7 @@ impl UdpPacketHeader {
         })
     }
 
-    /// Encodes the packet header into the provided buf slice
+    /// Encodes the header into the provided buf slice
     pub fn encode<'o>(&self, buf: &'o mut [u8]) -> Result<&'o [u8], Error> {
         let mut bytes = BytesOut::new(buf);
 
@@ -91,6 +97,7 @@ impl UdpPacketHeader {
         Ok(&buf[..len])
     }
 
+    /// Encodes the header and the provided payload into the provided buf slice
     pub fn encode_with_payload<'o, F>(
         &mut self,
         buf: &'o mut [u8],
@@ -125,6 +132,7 @@ impl UdpPacketHeader {
         Ok(packet)
     }
 
+    /// Decodes the provided packet into a header and a payload slice
     pub fn decode_with_payload(
         packet: &[u8],
         src: Ipv4Addr,
@@ -173,6 +181,7 @@ impl UdpPacketHeader {
         Ok(Some((hdr, payload_data)))
     }
 
+    /// Injects the checksum into the provided packet
     pub fn inject_checksum(packet: &mut [u8], checksum: u16) {
         let checksum = checksum.to_be_bytes();
 
@@ -181,6 +190,7 @@ impl UdpPacketHeader {
         packet[offset + 1] = checksum[1];
     }
 
+    /// Computes the checksum for an already encoded packet
     pub fn checksum(packet: &[u8], src: Ipv4Addr, dst: Ipv4Addr) -> u16 {
         let mut buf = [0; 12];
 

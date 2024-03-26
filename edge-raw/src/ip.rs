@@ -34,19 +34,31 @@ where
     hdr.encode_with_payload(buf, encoder)
 }
 
+/// Represents a parsed IP header
 #[derive(Clone, Debug)]
 pub struct Ipv4PacketHeader {
-    pub version: u8,   // Version
-    pub hlen: u8,      // Header length
-    pub tos: u8,       // Type of service
-    pub len: u16,      // Total length
-    pub id: u16,       // Identification
-    pub off: u16,      // Fragment offset field
-    pub ttl: u8,       // Time to live
-    pub p: u8,         // Protocol
-    pub sum: u16,      // Checksum
-    pub src: Ipv4Addr, // Source address
-    pub dst: Ipv4Addr, // Dest address
+    /// Version
+    pub version: u8,
+    /// Header length
+    pub hlen: u8,
+    /// Type of service
+    pub tos: u8,
+    /// Total length
+    pub len: u16,
+    /// Identification
+    pub id: u16,
+    /// Fragment offset field
+    pub off: u16,
+    /// Time to live
+    pub ttl: u8,
+    /// Protocol
+    pub p: u8,
+    /// Checksum
+    pub sum: u16,
+    /// Source address
+    pub src: Ipv4Addr,
+    /// Dest address
+    pub dst: Ipv4Addr,
 }
 
 impl Ipv4PacketHeader {
@@ -56,6 +68,7 @@ impl Ipv4PacketHeader {
     pub const IP_DF: u16 = 0x4000; // Don't fragment flag
     pub const IP_MF: u16 = 0x2000; // More fragments flag
 
+    /// Create a new header instance
     pub fn new(src: Ipv4Addr, dst: Ipv4Addr, proto: u8) -> Self {
         Self {
             version: 4,
@@ -72,7 +85,7 @@ impl Ipv4PacketHeader {
         }
     }
 
-    /// Parses the packet from a byte slice
+    /// Decodes the header from a byte slice
     pub fn decode(data: &[u8]) -> Result<Self, Error> {
         let mut bytes = BytesIn::new(data);
 
@@ -93,7 +106,7 @@ impl Ipv4PacketHeader {
         })
     }
 
-    /// Encodes the packet into the provided buf slice
+    /// Encodes the header into the provided buf slice
     pub fn encode<'o>(&self, buf: &'o mut [u8]) -> Result<&'o [u8], Error> {
         let mut bytes = BytesOut::new(buf);
 
@@ -114,6 +127,7 @@ impl Ipv4PacketHeader {
         Ok(&buf[..len])
     }
 
+    /// Encodes the header and the provided payload into the provided buf slice
     pub fn encode_with_payload<'o, F>(
         &mut self,
         buf: &'o mut [u8],
@@ -147,6 +161,7 @@ impl Ipv4PacketHeader {
         Ok(&buf[..len])
     }
 
+    /// Decodes the provided packet into a header and a payload slice
     pub fn decode_with_payload(
         packet: &[u8],
         filter_src: Ipv4Addr,
@@ -196,6 +211,7 @@ impl Ipv4PacketHeader {
         }
     }
 
+    /// Injects the checksum into the provided packet
     pub fn inject_checksum(packet: &mut [u8], checksum: u16) {
         let checksum = checksum.to_be_bytes();
 
@@ -204,6 +220,7 @@ impl Ipv4PacketHeader {
         packet[offset + 1] = checksum[1];
     }
 
+    /// Computes the checksum for an already encoded packet
     pub fn checksum(packet: &[u8]) -> u16 {
         let hlen = (packet[0] & 0x0f) as usize * 4;
 

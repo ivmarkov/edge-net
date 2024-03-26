@@ -8,6 +8,7 @@ use edge_nal::{MacAddr, RawReceive, RawSend, RawSplit, UdpReceive, UdpSend, UdpS
 
 use crate as raw;
 
+/// An error that can occur when sending or receiving UDP packets over a raw socket.
 #[derive(Debug)]
 pub enum Error<E> {
     Io(E),
@@ -130,6 +131,7 @@ where
     }
 }
 
+/// Sends a UDP packet to a remote peer identified by its MAC address
 pub async fn udp_send<T: RawSend, const N: usize>(
     mut socket: T,
     local: SocketAddr,
@@ -157,6 +159,7 @@ pub async fn udp_send<T: RawSend, const N: usize>(
     socket.send(remote_mac, data).await.map_err(Error::Io)
 }
 
+/// Receives a UDP packet from a remote peer
 pub async fn udp_receive<T: RawReceive, const N: usize>(
     mut socket: T,
     filter_src: Option<SocketAddrV4>,

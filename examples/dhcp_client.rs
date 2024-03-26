@@ -31,7 +31,7 @@ async fn run(if_index: u32, if_mac: MacAddr) -> Result<(), anyhow::Error> {
         let mut socket: RawSocket2Udp<_> = RawSocket2Udp::new(
             stack.bind().await?,
             SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_CLIENT_PORT),
-            [0; 6],
+            [255; 6], // Broadcast
         );
 
         let (mut lease, options) = Lease::new(&mut client, &mut socket, &mut buf).await?;

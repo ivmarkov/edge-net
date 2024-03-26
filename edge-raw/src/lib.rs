@@ -17,6 +17,7 @@ pub mod udp;
 
 use bytes::BytesIn;
 
+/// An error type for decoding and encoding IP and UDP oackets
 #[derive(Debug)]
 pub enum Error {
     DataUnderflow,
@@ -51,6 +52,7 @@ impl fmt::Display for Error {
 #[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
+/// Decodes an IP packet and its UDP payload
 #[allow(clippy::type_complexity)]
 pub fn ip_udp_decode(
     packet: &[u8],
@@ -75,6 +77,7 @@ pub fn ip_udp_decode(
     }
 }
 
+/// Encodes an IP packet and its UDP payload
 pub fn ip_udp_encode<F>(
     buf: &mut [u8],
     src: SocketAddrV4,
