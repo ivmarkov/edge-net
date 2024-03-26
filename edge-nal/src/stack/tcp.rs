@@ -30,9 +30,7 @@ where
 pub trait TcpConnect {
     type Error: Error;
 
-    type Socket<'a>: Read<Error = Self::Error>
-        + Write<Error = Self::Error>
-        + TcpSplit<Error = Self::Error>
+    type Socket<'a>: Read<Error = Self::Error> + Write<Error = Self::Error>
     where
         Self: 'a;
 
@@ -52,9 +50,7 @@ pub trait TcpBind {
 pub trait TcpAccept {
     type Error: Error;
 
-    type Socket<'a>: Read<Error = Self::Error>
-        + Write<Error = Self::Error>
-        + TcpSplit<Error = Self::Error>
+    type Socket<'a>: Read<Error = Self::Error> + Write<Error = Self::Error>
     where
         Self: 'a;
 

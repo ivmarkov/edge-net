@@ -77,7 +77,7 @@ pub async fn run<'s, T, S>(
 where
     T: IntoIterator<Item = Service<'s>> + Clone,
     S: UdpBind,
-    for<'a> S::Socket<'a>: Multicast<Error = S::Error>,
+    for<'a> S::Socket<'a>: Multicast<Error = S::Error> + UdpSplit<Error = S::Error>,
 {
     let mut udp = stack.bind(socket).await.map_err(MdnsIoError::IoError)?;
 

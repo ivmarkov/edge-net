@@ -40,9 +40,7 @@ pub trait UdpConnect {
     type Error: embedded_io_async::Error;
 
     /// The socket type returned by the stack.
-    type Socket<'a>: UdpReceive<Error = Self::Error>
-        + UdpSend<Error = Self::Error>
-        + UdpSplit<Error = Self::Error>
+    type Socket<'a>: UdpReceive<Error = Self::Error> + UdpSend<Error = Self::Error>
     where
         Self: 'a;
 
@@ -62,9 +60,7 @@ pub trait UdpBind {
     type Error: embedded_io_async::Error;
 
     /// The socket type returned by the stack.
-    type Socket<'a>: UdpReceive<Error = Self::Error>
-        + UdpSend<Error = Self::Error>
-        + UdpSplit<Error = Self::Error>
+    type Socket<'a>: UdpReceive<Error = Self::Error> + UdpSend<Error = Self::Error>
     where
         Self: 'a;
 
