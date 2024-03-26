@@ -6,9 +6,20 @@
 
 A bare-metal implementation of `edge-nal` based on the `embassy-net`(https://crates.io/crates/embassy-net) crate - the netowkring stack of the Embassy echosystem.
 
-Implemented traits from `edge-net`:
-* TCP: all
-* UDP: all except `UdpConnect`
-* Raw sockets: not implemented yet, as `embassy-net` does not expose raw sockets
+## Implemented Traits
 
-TODO: Needs testing!
+### TCP
+
+All traits.
+
+### UDP
+
+* All traits except `UdpConnect` and `Multicast`.
+
+### Raw sockets
+
+Not implemented yet, as `embassy-net` does not expose raw sockets
+
+## Status
+
+**Needs testing!**
