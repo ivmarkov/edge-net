@@ -11,62 +11,52 @@ use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
 
 use crate::{to_emb_socket, to_net_socket, Pool};
 
-/// TCP stack compatible with the `edge-nal` traits.
-///
-/// The stack is capable of managing up to N concurrent connections with tx and rx buffers according to TX_SZ and RX_SZ.
-pub struct TcpStack<
-    'd,
-    D: Driver,
-    const N: usize,
-    const TX_SZ: usize = 1024,
-    const RX_SZ: usize = 1024,
-> {
+/// A struct that implements the `TcpConnect` and `TcpBind` factory traits from `edge-nal`
+/// Capable of managing up to N concurrent connections with TX and RX buffers according to TX_SZ and RX_SZ.
+pub struct Tcp<'d, D: Driver, const N: usize, const TX_SZ: usize = 1024, const RX_SZ: usize = 1024>
+{
     stack: &'d Stack<D>,
     buffers: &'d TcpBuffers<N, TX_SZ, RX_SZ>,
 }
 
 impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize>
-    TcpStack<'d, D, N, TX_SZ, RX_SZ>
+    Tcp<'d, D, N, TX_SZ, RX_SZ>
 {
-    /// Create a new `TcpStack`.
+    /// Create a new `Tcp` instance for the provided Embassy networking stack, using the provided TCP buffers
     pub fn new(stack: &'d Stack<D>, buffers: &'d TcpBuffers<N, TX_SZ, RX_SZ>) -> Self {
         Self { stack, buffers }
     }
 }
 
 impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpConnect
-    for TcpStack<'d, D, N, TX_SZ, RX_SZ>
+    for Tcp<'d, D, N, TX_SZ, RX_SZ>
 {
     type Error = TcpError;
 
     type Socket<'a> = TcpSocket<'a, N, TX_SZ, RX_SZ> where Self: 'a;
 
-    async fn connect(
-        &self,
-        remote: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
+    async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = TcpSocket::new(&self.stack, self.buffers)?;
 
         socket.socket.connect(to_emb_socket(remote)).await?;
 
-        let local_endpoint = socket.socket.local_endpoint().unwrap();
-
-        Ok((to_net_socket(local_endpoint), socket))
+        Ok(socket)
     }
 }
 
 impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpBind
-    for TcpStack<'d, D, N, TX_SZ, RX_SZ>
+    for Tcp<'d, D, N, TX_SZ, RX_SZ>
 {
     type Error = TcpError;
 
     type Accept<'a> = TcpAccept<'a, D, N, TX_SZ, RX_SZ> where Self: 'a;
 
-    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Accept<'_>), Self::Error> {
-        Ok((local, TcpAccept { stack: self, local }))
+    async fn bind(&self, local: SocketAddr) -> Result<Self::Accept<'_>, Self::Error> {
+        Ok(TcpAccept { stack: self, local })
     }
 }
 
+/// Represents an acceptor for incoming TCP client connections. Implements the `TcpAccept` factory trait from `edge-nal`
 pub struct TcpAccept<
     'd,
     D: Driver,
@@ -74,7 +64,7 @@ pub struct TcpAccept<
     const TX_SZ: usize = 1024,
     const RX_SZ: usize = 1024,
 > {
-    stack: &'d TcpStack<'d, D, N, TX_SZ, RX_SZ>,
+    stack: &'d Tcp<'d, D, N, TX_SZ, RX_SZ>,
     local: SocketAddr,
 }
 
@@ -97,6 +87,7 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> edge
 }
 
 /// A TCP socket
+/// Implements the `Read` and `Write` traits from `embedded-io-async`, as well as the `TcpSplit` factory trait from `edge-nal`
 pub struct TcpSocket<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> {
     socket: embassy_net::tcp::TcpSocket<'d>,
     stack_buffers: &'d TcpBuffers<N, TX_SZ, RX_SZ>,
@@ -163,6 +154,8 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Write
     }
 }
 
+/// Represents the read half of a split TCP socket
+/// Implements the `Read` trait from `embedded-io-async`
 pub struct TcpSocketRead<'a>(TcpReader<'a>);
 
 impl<'a> ErrorType for TcpSocketRead<'a> {
@@ -175,6 +168,8 @@ impl<'a> Read for TcpSocketRead<'a> {
     }
 }
 
+/// Represents the write half of a split TCP socket
+/// Implements the `Write` trait from `embedded-io-async`
 pub struct TcpSocketWrite<'a>(TcpWriter<'a>);
 
 impl<'a> ErrorType for TcpSocketWrite<'a> {
@@ -205,6 +200,7 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpSplit
     }
 }
 
+/// A shared error type that is used by the TCP factory traits implementation as well as the TCP socket
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum TcpError {
     General(Error),
@@ -243,11 +239,13 @@ impl embedded_io_async::Error for TcpError {
     }
 }
 
+/// A struct that holds a pool of TCP buffers
 pub struct TcpBuffers<const N: usize, const TX_SZ: usize, const RX_SZ: usize> {
     pool: Pool<([u8; TX_SZ], [u8; RX_SZ]), N>,
 }
 
 impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpBuffers<N, TX_SZ, RX_SZ> {
+    /// Create a new `TcpBuffers` instance
     pub const fn new() -> Self {
         Self { pool: Pool::new() }
     }

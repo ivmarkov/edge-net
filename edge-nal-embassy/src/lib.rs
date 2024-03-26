@@ -4,14 +4,16 @@
 
 use core::cell::{Cell, UnsafeCell};
 use core::mem::MaybeUninit;
-use core::net::{IpAddr, Ipv6Addr, SocketAddr};
+use core::net::{IpAddr, SocketAddr};
 use core::ptr::NonNull;
 
-use embassy_net::{IpAddress, IpEndpoint, IpListenEndpoint};
+use embassy_net::{IpAddress, IpEndpoint};
 
+pub use dns::*;
 pub use tcp::*;
 pub use udp::*;
 
+mod dns;
 mod tcp;
 mod udp;
 
@@ -59,15 +61,15 @@ pub(crate) fn to_net_socket(socket: IpEndpoint) -> SocketAddr {
     SocketAddr::new(to_net_addr(socket.addr), socket.port)
 }
 
-pub(crate) fn to_net_socket2(socket: IpListenEndpoint) -> SocketAddr {
-    SocketAddr::new(
-        socket
-            .addr
-            .map(to_net_addr)
-            .unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
-        socket.port,
-    )
-}
+// pub(crate) fn to_net_socket2(socket: IpListenEndpoint) -> SocketAddr {
+//     SocketAddr::new(
+//         socket
+//             .addr
+//             .map(to_net_addr)
+//             .unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+//         socket.port,
+//     )
+// }
 
 pub(crate) fn to_emb_socket(socket: SocketAddr) -> IpEndpoint {
     IpEndpoint {

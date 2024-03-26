@@ -79,7 +79,7 @@ where
     S: UdpBind,
     for<'a> S::Socket<'a>: Multicast<Error = S::Error>,
 {
-    let (local_addr, mut udp) = stack.bind(socket).await.map_err(MdnsIoError::IoError)?;
+    let mut udp = stack.bind(socket).await.map_err(MdnsIoError::IoError)?;
 
     udp.join(IpAddr::V6(IPV6_BROADCAST_ADDR))
         .await
@@ -95,13 +95,7 @@ where
 
     let send = Mutex::<NoopRawMutex, _>::new((send, send_buf));
 
-    let mut broadcast = pin!(broadcast(
-        host,
-        services.clone(),
-        local_addr,
-        interface,
-        &send
-    ));
+    let mut broadcast = pin!(broadcast(host, services.clone(), interface, &send));
     let mut respond = pin!(respond(host, services, recv, recv_buf, &send));
 
     let result = select(&mut broadcast, &mut respond).await;
@@ -115,7 +109,6 @@ where
 async fn broadcast<'s, T, S>(
     host: &Host<'_>,
     services: T,
-    _local_addr: SocketAddr,
     interface: Option<u32>,
     send: &Mutex<impl RawMutex, (S, &mut [u8])>,
 ) -> Result<(), MdnsIoError<S::Error>>

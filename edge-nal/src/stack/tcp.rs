@@ -1,3 +1,5 @@
+//! Factory traits for creating TCP sockets on embedded devices
+
 use core::net::SocketAddr;
 
 use embedded_io_async::{Error, ErrorType, Read, Write};
@@ -34,10 +36,7 @@ pub trait TcpConnect {
     where
         Self: 'a;
 
-    async fn connect(
-        &self,
-        remote: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error>;
+    async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error>;
 }
 
 pub trait TcpBind {
@@ -47,7 +46,7 @@ pub trait TcpBind {
     where
         Self: 'a;
 
-    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Accept<'_>), Self::Error>;
+    async fn bind(&self, local: SocketAddr) -> Result<Self::Accept<'_>, Self::Error>;
 }
 
 pub trait TcpAccept {
@@ -70,10 +69,7 @@ where
 
     type Socket<'a> = T::Socket<'a> where Self: 'a;
 
-    async fn connect(
-        &self,
-        remote: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
+    async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         (*self).connect(remote).await
     }
 }
@@ -86,10 +82,7 @@ where
 
     type Socket<'a> = T::Socket<'a> where Self: 'a;
 
-    async fn connect(
-        &self,
-        remote: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
+    async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         (**self).connect(remote).await
     }
 }
@@ -102,7 +95,7 @@ where
 
     type Accept<'a> = T::Accept<'a> where Self: 'a;
 
-    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Accept<'_>), Self::Error> {
+    async fn bind(&self, local: SocketAddr) -> Result<Self::Accept<'_>, Self::Error> {
         (*self).bind(local).await
     }
 }
@@ -115,7 +108,7 @@ where
 
     type Accept<'a> = T::Accept<'a> where Self: 'a;
 
-    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Accept<'_>), Self::Error> {
+    async fn bind(&self, local: SocketAddr) -> Result<Self::Accept<'_>, Self::Error> {
         (**self).bind(local).await
     }
 }
@@ -145,5 +138,3 @@ where
         (**self).accept().await
     }
 }
-
-pub trait TcpStack: TcpConnect + TcpAccept {}

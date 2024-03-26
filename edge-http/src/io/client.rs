@@ -136,7 +136,7 @@ where
         let state = self.unbound_mut()?;
 
         let fresh_connection = if state.io.is_none() {
-            state.io = Some(state.socket.connect(state.addr).await.map_err(Error::Io)?.1);
+            state.io = Some(state.socket.connect(state.addr).await.map_err(Error::Io)?);
             true
         } else {
             false
@@ -151,8 +151,7 @@ where
                     if !fresh_connection {
                         // Attempt to reconnect and re-send the request
                         state.io = None;
-                        state.io =
-                            Some(state.socket.connect(state.addr).await.map_err(Error::Io)?.1);
+                        state.io = Some(state.socket.connect(state.addr).await.map_err(Error::Io)?);
 
                         send_request(http11, Some(method), Some(uri), state.io.as_mut().unwrap())
                             .await?;

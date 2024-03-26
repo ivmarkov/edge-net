@@ -9,9 +9,11 @@ use embassy_net::Stack;
 
 use embedded_io_async::{ErrorKind, ErrorType};
 
-use crate::{to_emb_socket, to_net_socket, to_net_socket2, Pool};
+use crate::{to_emb_socket, to_net_socket, Pool};
 
-pub struct UdpStack<
+/// A struct that implements the `UdpBind` factory trait from `edge-nal`
+/// Capable of managing up to N concurrent connections with TX and RX buffers according to TX_SZ and RX_SZ, and packet metadata according to `M`.
+pub struct Udp<
     'd,
     D: Driver,
     const N: usize,
@@ -24,35 +26,32 @@ pub struct UdpStack<
 }
 
 impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
-    UdpStack<'d, D, N, TX_SZ, RX_SZ, M>
+    Udp<'d, D, N, TX_SZ, RX_SZ, M>
 {
-    /// Create a new `UdpStack`.
+    /// Create a new `Udp` instance for the provided Embassy networking stack using the provided UDP buffers.
     pub fn new(stack: &'d Stack<D>, buffers: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>) -> Self {
         Self { stack, buffers }
     }
 }
 
 impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpBind
-    for UdpStack<'d, D, N, TX_SZ, RX_SZ, M>
+    for Udp<'d, D, N, TX_SZ, RX_SZ, M>
 {
     type Error = UdpError;
 
     type Socket<'a> = UdpSocket<'a, N, TX_SZ, RX_SZ, M> where Self: 'a;
 
-    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
+    async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = UdpSocket::new(&self.stack, self.buffers)?;
 
         socket.socket.bind(to_emb_socket(local))?;
 
-        let local_endpoint = socket.socket.endpoint();
-
-        let local = to_net_socket2(local_endpoint);
-
-        Ok((local, socket))
+        Ok(socket)
     }
 }
 
 /// A UDP socket
+/// Implements the `UdpReceive` `UdpSend` and `UdpSplit` traits from `edge-nal`
 pub struct UdpSocket<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> {
     socket: embassy_net::udp::UdpSocket<'d>,
     stack_buffers: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>,
@@ -95,44 +94,6 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
             self.socket.close();
             self.stack_buffers.pool.free(self.socket_buffers);
             self.stack_buffers.meta_pool.free(self.socket_meta_buffers);
-        }
-    }
-}
-
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub enum UdpError {
-    Recv(RecvError),
-    Send(SendError),
-    Bind(BindError),
-    NoBuffers,
-}
-
-impl From<RecvError> for UdpError {
-    fn from(e: RecvError) -> Self {
-        UdpError::Recv(e)
-    }
-}
-
-impl From<SendError> for UdpError {
-    fn from(e: SendError) -> Self {
-        UdpError::Send(e)
-    }
-}
-
-impl From<BindError> for UdpError {
-    fn from(e: BindError) -> Self {
-        UdpError::Bind(e)
-    }
-}
-
-// TODO
-impl embedded_io_async::Error for UdpError {
-    fn kind(&self) -> ErrorKind {
-        match self {
-            UdpError::Recv(_) => ErrorKind::Other,
-            UdpError::Send(_) => ErrorKind::Other,
-            UdpError::Bind(_) => ErrorKind::Other,
-            UdpError::NoBuffers => ErrorKind::OutOfMemory,
         }
     }
 }
@@ -201,6 +162,46 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     }
 }
 
+/// A shared error type that is used by the UDP factory trait implementation as well as the UDP socket
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum UdpError {
+    Recv(RecvError),
+    Send(SendError),
+    Bind(BindError),
+    NoBuffers,
+}
+
+impl From<RecvError> for UdpError {
+    fn from(e: RecvError) -> Self {
+        UdpError::Recv(e)
+    }
+}
+
+impl From<SendError> for UdpError {
+    fn from(e: SendError) -> Self {
+        UdpError::Send(e)
+    }
+}
+
+impl From<BindError> for UdpError {
+    fn from(e: BindError) -> Self {
+        UdpError::Bind(e)
+    }
+}
+
+// TODO
+impl embedded_io_async::Error for UdpError {
+    fn kind(&self) -> ErrorKind {
+        match self {
+            UdpError::Recv(_) => ErrorKind::Other,
+            UdpError::Send(_) => ErrorKind::Other,
+            UdpError::Bind(_) => ErrorKind::Other,
+            UdpError::NoBuffers => ErrorKind::OutOfMemory,
+        }
+    }
+}
+
+/// A struct that holds a pool of UDP buffers
 pub struct UdpBuffers<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> {
     pool: Pool<([u8; TX_SZ], [u8; RX_SZ]), N>,
     meta_pool: Pool<
@@ -215,6 +216,7 @@ pub struct UdpBuffers<const N: usize, const TX_SZ: usize, const RX_SZ: usize, co
 impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     UdpBuffers<N, TX_SZ, RX_SZ, M>
 {
+    /// Create a new `UdpBuffers` instance
     pub const fn new() -> Self {
         Self {
             pool: Pool::new(),

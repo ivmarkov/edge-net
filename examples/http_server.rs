@@ -23,8 +23,7 @@ pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
 
     let acceptor = edge_nal_std::Stack::new()
         .bind(addr.parse().unwrap())
-        .await?
-        .1;
+        .await?;
 
     server.run(acceptor, HttpHandler, None).await?;
 

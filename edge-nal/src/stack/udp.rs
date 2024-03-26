@@ -1,14 +1,10 @@
 //! Factory traits for creating UDP sockets on embedded devices
 
-use core::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use core::net::SocketAddr;
 
 use embedded_io_async::ErrorType;
 
 use crate::udp::{UdpReceive, UdpSend};
-
-/// A socket address that is completely unspecified (i.e. the IP address is unspecified, and the port is 0)
-pub const UNSPECIFIED_ADDR: SocketAddr =
-    SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0));
 
 /// This trait is implemented by UDP sockets that can be split into separate `send` and `receive` halves that can operate
 /// independently from each other (i.e., a full-duplex connection).
@@ -56,7 +52,7 @@ pub trait UdpConnect {
         &self,
         local: SocketAddr,
         remote: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error>;
+    ) -> Result<Self::Socket<'_>, Self::Error>;
 }
 
 /// This trait is implemented by UDP/IP stacks. The trait allows the underlying driver to
@@ -74,7 +70,7 @@ pub trait UdpBind {
 
     /// Bind to a local socket. Return the local socket address to which the connection is bound, as the provided
     /// local address might only be partially specified.
-    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error>;
+    async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error>;
 }
 
 impl<T> UdpConnect for &T
@@ -88,7 +84,7 @@ where
         &self,
         local: SocketAddr,
         remote: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
+    ) -> Result<Self::Socket<'_>, Self::Error> {
         (*self).connect(local, remote).await
     }
 }
@@ -104,7 +100,7 @@ where
         &self,
         local: SocketAddr,
         remote: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
+    ) -> Result<Self::Socket<'_>, Self::Error> {
         (**self).connect(local, remote).await
     }
 }
@@ -116,7 +112,19 @@ where
     type Error = T::Error;
     type Socket<'a> = T::Socket<'a> where Self: 'a;
 
-    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
+    async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         (*self).bind(local).await
+    }
+}
+
+impl<T> UdpBind for &mut T
+where
+    T: UdpBind,
+{
+    type Error = T::Error;
+    type Socket<'a> = T::Socket<'a> where Self: 'a;
+
+    async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
+        (**self).bind(local).await
     }
 }

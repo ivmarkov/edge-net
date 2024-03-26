@@ -50,7 +50,7 @@ pub async fn run<S>(
 where
     S: UdpBind,
 {
-    let (_, mut udp) = stack.bind(local_addr).await.map_err(DnsIoError::IoError)?;
+    let mut udp = stack.bind(local_addr).await.map_err(DnsIoError::IoError)?;
 
     loop {
         debug!("Waiting for data");

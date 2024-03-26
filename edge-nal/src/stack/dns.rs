@@ -1,3 +1,5 @@
+//! A trait for performing DNS lookups on embedded devices
+
 use core::net::IpAddr;
 
 /// This is the host address type to be returned by `gethostbyname`.

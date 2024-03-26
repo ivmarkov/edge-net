@@ -8,6 +8,7 @@ use std::io;
 use std::net::{self, TcpStream, ToSocketAddrs, UdpSocket as StdUdpSocket};
 
 use async_io::Async;
+
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 
 use embedded_io_async::{ErrorType, Read, Write};
@@ -34,14 +35,10 @@ impl TcpConnect for Stack {
 
     type Socket<'a> = TcpSocket where Self: 'a;
 
-    async fn connect(
-        &self,
-        remote: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
+    async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let socket = Async::<TcpStream>::connect(remote).await?;
-        let local = socket.as_ref().local_addr()?;
 
-        Ok((local, TcpSocket(socket)))
+        Ok(TcpSocket(socket))
     }
 }
 
@@ -50,10 +47,10 @@ impl TcpBind for Stack {
 
     type Accept<'a> = TcpAcceptor where Self: 'a;
 
-    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Accept<'_>), Self::Error> {
+    async fn bind(&self, local: SocketAddr) -> Result<Self::Accept<'_>, Self::Error> {
         let acceptor = Async::<net::TcpListener>::bind(local).map(TcpAcceptor)?;
 
-        Ok((acceptor.0.as_ref().local_addr()?, acceptor))
+        Ok(acceptor)
     }
 }
 
@@ -164,12 +161,12 @@ impl UdpConnect for Stack {
         &self,
         local: SocketAddr,
         remote: SocketAddr,
-    ) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
+    ) -> Result<Self::Socket<'_>, Self::Error> {
         let socket = Async::<StdUdpSocket>::bind(local)?;
 
         socket.as_ref().connect(remote)?;
 
-        Ok((socket.as_ref().local_addr()?, UdpSocket(socket)))
+        Ok(UdpSocket(socket))
     }
 }
 
@@ -178,12 +175,12 @@ impl UdpBind for Stack {
 
     type Socket<'a> = UdpSocket where Self: 'a;
 
-    async fn bind(&self, local: SocketAddr) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
+    async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let socket = Async::<StdUdpSocket>::bind(local)?;
 
         socket.as_ref().set_broadcast(true)?;
 
-        Ok((socket.as_ref().local_addr()?, UdpSocket(socket)))
+        Ok(UdpSocket(socket))
     }
 }
 

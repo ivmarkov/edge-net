@@ -21,8 +21,7 @@ async fn read<T: TcpConnect>(stack: &T) -> Result<(), T::Error> {
 
     let mut connection = stack
         .connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 80))
-        .await?
-        .1;
+        .await?;
 
     connection.write_all(b"GET / HTTP/1.0\n\n").await?;
 
