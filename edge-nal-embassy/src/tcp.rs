@@ -36,7 +36,7 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpC
     type Socket<'a> = TcpSocket<'a, N, TX_SZ, RX_SZ> where Self: 'a;
 
     async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
-        let mut socket = TcpSocket::new(&self.stack, self.buffers)?;
+        let mut socket = TcpSocket::new(self.stack, self.buffers)?;
 
         socket.socket.connect(to_emb_socket(remote)).await?;
 

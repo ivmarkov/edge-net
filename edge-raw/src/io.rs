@@ -1,6 +1,6 @@
 use core::fmt::{self, Debug};
 use core::mem::MaybeUninit;
-use core::net::{SocketAddr, SocketAddrV4};
+use core::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use embedded_io_async::{ErrorKind, ErrorType};
 
@@ -60,15 +60,22 @@ impl<E> std::error::Error for Error<E> where E: std::error::Error {}
 /// thus only addressable either by broadcasting, or by their MAC address.
 pub struct RawSocket2Udp<T, const N: usize = 1500> {
     socket: T,
-    local: SocketAddrV4,
+    filter_local: Option<SocketAddrV4>,
+    filter_remote: Option<SocketAddrV4>,
     remote_mac: MacAddr,
 }
 
 impl<T, const N: usize> RawSocket2Udp<T, N> {
-    pub fn new(socket: T, local: SocketAddrV4, remote_mac: MacAddr) -> Self {
+    pub fn new(
+        socket: T,
+        filter_local: Option<SocketAddrV4>,
+        filter_remote: Option<SocketAddrV4>,
+        remote_mac: MacAddr,
+    ) -> Self {
         Self {
             socket,
-            local,
+            filter_local,
+            filter_remote,
             remote_mac,
         }
     }
@@ -86,8 +93,13 @@ where
     T: RawReceive,
 {
     async fn receive(&mut self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), Self::Error> {
-        let (len, _local, remote, _) =
-            udp_receive::<_, N>(&mut self.socket, Some(self.local), None, buffer).await?;
+        let (len, _local, remote, _) = udp_receive::<_, N>(
+            &mut self.socket,
+            self.filter_local,
+            self.filter_remote,
+            buffer,
+        )
+        .await?;
 
         Ok((len, remote))
     }
@@ -105,7 +117,10 @@ where
 
         udp_send::<_, N>(
             &mut self.socket,
-            SocketAddr::V4(self.local),
+            SocketAddr::V4(
+                self.filter_local
+                    .unwrap_or(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
+            ),
             SocketAddr::V4(remote),
             self.remote_mac,
             data,
@@ -125,8 +140,13 @@ where
         let (receive, send) = self.socket.split();
 
         (
-            RawSocket2Udp::new(receive, self.local, self.remote_mac),
-            RawSocket2Udp::new(send, self.local, self.remote_mac),
+            RawSocket2Udp::new(
+                receive,
+                self.filter_local,
+                self.filter_remote,
+                self.remote_mac,
+            ),
+            RawSocket2Udp::new(send, self.filter_local, self.filter_remote, self.remote_mac),
         )
     }
 }
@@ -162,8 +182,8 @@ pub async fn udp_send<T: RawSend, const N: usize>(
 /// Receives a UDP packet from a remote peer
 pub async fn udp_receive<T: RawReceive, const N: usize>(
     mut socket: T,
-    filter_src: Option<SocketAddrV4>,
-    filter_dst: Option<SocketAddrV4>,
+    filter_local: Option<SocketAddrV4>,
+    filter_remote: Option<SocketAddrV4>,
     buffer: &mut [u8],
 ) -> Result<(usize, SocketAddr, SocketAddr, MacAddr), Error<T::Error>> {
     let mut buf = MaybeUninit::<[u8; N]>::uninit();
@@ -172,7 +192,7 @@ pub async fn udp_receive<T: RawReceive, const N: usize>(
     let (len, local, remote, remote_mac) = loop {
         let (len, remote_mac) = socket.receive(buf).await.map_err(Error::Io)?;
 
-        match raw::ip_udp_decode(&buf[..len], filter_src, filter_dst) {
+        match raw::ip_udp_decode(&buf[..len], filter_remote, filter_local) {
             Ok(Some((remote, local, data))) => {
                 if data.len() > buffer.len() {
                     Err(Error::RawError(raw::Error::BufferOverflow))?;

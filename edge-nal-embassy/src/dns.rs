@@ -47,7 +47,7 @@ where
             _ => DnsQueryType::A,
         };
         let addrs = self.stack.dns_query(host, qtype).await?;
-        if let Some(first) = addrs.get(0) {
+        if let Some(first) = addrs.first() {
             Ok(to_net_addr(*first))
         } else {
             Err(Error::Failed.into())

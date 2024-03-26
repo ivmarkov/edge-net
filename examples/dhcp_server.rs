@@ -2,7 +2,7 @@
 
 use core::net::{Ipv4Addr, SocketAddrV4};
 
-use edge_dhcp::io::{self, DEFAULT_SERVER_PORT};
+use edge_dhcp::io::{self, DEFAULT_CLIENT_PORT, DEFAULT_SERVER_PORT};
 use edge_dhcp::server::{Server, ServerOptions};
 use edge_nal::RawBind;
 use edge_raw::io::RawSocket2Udp;
@@ -27,7 +27,14 @@ async fn run(if_index: u32) -> Result<(), anyhow::Error> {
 
     let mut socket: RawSocket2Udp<_> = RawSocket2Udp::new(
         stack.bind().await?,
-        SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_SERVER_PORT),
+        Some(SocketAddrV4::new(
+            Ipv4Addr::UNSPECIFIED,
+            DEFAULT_SERVER_PORT,
+        )),
+        Some(SocketAddrV4::new(
+            Ipv4Addr::UNSPECIFIED,
+            DEFAULT_CLIENT_PORT,
+        )),
         [0; 6],
     );
 

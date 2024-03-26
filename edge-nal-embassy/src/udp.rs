@@ -42,7 +42,7 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
     type Socket<'a> = UdpSocket<'a, N, TX_SZ, RX_SZ, M> where Self: 'a;
 
     async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
-        let mut socket = UdpSocket::new(&self.stack, self.buffers)?;
+        let mut socket = UdpSocket::new(self.stack, self.buffers)?;
 
         socket.socket.bind(to_emb_socket(local))?;
 
