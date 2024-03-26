@@ -17,6 +17,7 @@ Suitable for microcontrollers and embedded systems in general.
 * [DHCP cient and server](edge-dhcp)
 * [Raw IP & UDP packet send/receive](edge-raw) (useful in combination with the DHCP client and server)
 * [MQTT client](edge-mqtt) (currently just a slim wrapper around [`rumqttc`](https://github.com/bytebeamio/rumqtt/tree/main/rumqttc), so needs STD)
+* [TCP, UDP and raw sockets](edge-nal)
 
 ## Supported platforms
 
