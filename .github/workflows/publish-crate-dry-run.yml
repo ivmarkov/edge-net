@@ -10,6 +10,7 @@ on:
         options: 
         - edge-nal
         - edge-nal-std
+        - edge-nal-embassy
         - edge-captive
         - edge-dhcp
         - edge-http
