@@ -37,6 +37,6 @@ jobs:
       - name: Build | Non-default
         run: cargo build --no-default-features
       - name: Build | Embassy
-        run: cargo build --no-default-features --features io,edge-nal-embassy
+        run: cargo build --no-default-features --features embassy
       - name: Build | Examples
         run: cargo build --examples

@@ -9,9 +9,9 @@ pub use edge_mdns as mdns;
 pub use edge_mqtt as mqtt;
 #[cfg(feature = "io")]
 pub use edge_nal as nal;
-#[cfg(feature = "edge-nal-embassy")]
-pub use edge_nal_embassy::*;
+#[cfg(feature = "embassy")]
+pub use edge_nal_embassy as embassy;
 #[cfg(feature = "std")]
-pub use edge_nal_std::*;
+pub use edge_nal_std as std;
 pub use edge_raw as raw;
 pub use edge_ws as ws;
