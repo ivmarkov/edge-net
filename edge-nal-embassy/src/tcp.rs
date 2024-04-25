@@ -9,7 +9,7 @@ use embassy_net::Stack;
 
 use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
 
-use crate::{to_emb_socket, to_net_socket, Pool};
+use crate::{to_emb_bind_socket, to_emb_socket, to_net_socket, Pool};
 
 /// A struct that implements the `TcpConnect` and `TcpBind` factory traits from `edge-nal`
 /// Capable of managing up to N concurrent connections with TX and RX buffers according to TX_SZ and RX_SZ.
@@ -78,7 +78,7 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> edge
     async fn accept(&self) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
         let mut socket = TcpSocket::new(self.stack.stack, self.stack.buffers)?;
 
-        socket.socket.accept(to_emb_socket(self.local)).await?;
+        socket.socket.accept(to_emb_bind_socket(self.local)).await?;
 
         let local_endpoint = socket.socket.local_endpoint().unwrap();
 
