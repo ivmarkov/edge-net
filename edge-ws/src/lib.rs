@@ -285,7 +285,11 @@ impl FrameHeader {
     }
 
     pub fn mask(&self, buf: &mut [u8], payload_offset: usize) {
-        if let Some(mask_key) = self.mask_key {
+        Self::mask_with(buf, self.mask_key, payload_offset)
+    }
+
+    pub fn mask_with(buf: &mut [u8], mask_key: Option<u32>, payload_offset: usize) {
+        if let Some(mask_key) = mask_key {
             let mask_bytes = mask_key.to_be_bytes();
 
             for (offset, byte) in buf.iter_mut().enumerate() {
