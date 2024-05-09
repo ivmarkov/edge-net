@@ -21,8 +21,8 @@ pub use super::*;
 /// To support these clients, the socket needs to also be capable of sending packets with a broadcast IP destination address
 /// - yet - with the destination *MAC* address in the Ethernet frame set to the MAC address of the DHCP client.
 ///
-/// Such UDP sockets implement the `UnconnectedUdpWithMac` trait and are essentially based on the raw socket functionality,
-/// as available on most operating systems.
+/// This is currently only possible with STD's BSD raw sockets' implementation. Unfortunately, `smoltcp` and thus `embassy-net`
+/// do not have an equivalent (yet).
 pub async fn run<T, const N: usize>(
     server: &mut dhcp::server::Server<N>,
     server_options: &dhcp::server::ServerOptions<'_>,
