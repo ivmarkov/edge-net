@@ -247,9 +247,11 @@ impl<'b, const N: usize> Headers<'b, N> {
                     return self;
                 }
             }
-        }
 
-        panic!("No space left");
+            panic!("No space left");
+        } else {
+            self.remove(name)
+        }
     }
 
     pub fn remove(&mut self, name: &str) -> &mut Self {
