@@ -2,6 +2,7 @@
 #![warn(clippy::large_futures)]
 
 use core::net::{IpAddr, SocketAddr};
+use core::ops::Deref;
 use core::pin::pin;
 
 use std::io;
@@ -100,6 +101,24 @@ impl TcpAccept for TcpAcceptor {
 
 pub struct TcpSocket(Async<TcpStream>);
 
+impl TcpSocket {
+    pub const fn new(socket: Async<TcpStream>) -> Self {
+        Self(socket)
+    }
+
+    pub fn release(self) -> Async<TcpStream> {
+        self.0
+    }
+}
+
+impl Deref for TcpSocket {
+    type Target = Async<TcpStream>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl ErrorType for TcpSocket {
     type Error = io::Error;
 }
@@ -185,6 +204,24 @@ impl UdpBind for Stack {
 }
 
 pub struct UdpSocket(Async<StdUdpSocket>);
+
+impl UdpSocket {
+    pub const fn new(socket: Async<StdUdpSocket>) -> Self {
+        Self(socket)
+    }
+
+    pub fn release(self) -> Async<StdUdpSocket> {
+        self.0
+    }
+}
+
+impl Deref for UdpSocket {
+    type Target = Async<StdUdpSocket>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl ErrorType for &UdpSocket {
     type Error = io::Error;
@@ -351,6 +388,7 @@ fn dns_lookup_host(host: &str, addr_type: AddrType) -> Result<IpAddr, io::Error>
 
 #[cfg(all(unix, not(target_os = "espidf")))]
 mod raw {
+    use core::ops::Deref;
     use core::pin::pin;
 
     use std::io::{self, ErrorKind};
@@ -420,6 +458,24 @@ mod raw {
     }
 
     pub struct RawSocket(Async<std::net::UdpSocket>, u32);
+
+    impl RawSocket {
+        pub const fn new(socket: Async<std::net::UdpSocket>, interface: u32) -> Self {
+            Self(socket, interface)
+        }
+
+        pub fn release(self) -> (Async<std::net::UdpSocket>, u32) {
+            (self.0, self.1)
+        }
+    }
+
+    impl Deref for RawSocket {
+        type Target = Async<std::net::UdpSocket>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
 
     impl ErrorType for &RawSocket {
         type Error = io::Error;
