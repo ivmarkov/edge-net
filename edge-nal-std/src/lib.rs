@@ -87,9 +87,7 @@ impl TcpAccept for TcpAcceptor {
         // separate thread just to accept connections - which would be the alternative.
         loop {
             match self.0.as_ref().accept() {
-                Ok((socket, _)) => {
-                    break Ok((socket.as_ref().peer_addr()?, TcpSocket(Async::new(socket)?)))
-                }
+                Ok((socket, _)) => break Ok((socket.peer_addr()?, TcpSocket(Async::new(socket)?))),
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
                     async_io::Timer::after(core::time::Duration::from_millis(5)).await;
                 }
