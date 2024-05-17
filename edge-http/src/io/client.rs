@@ -223,7 +223,7 @@ where
         let mut response = ResponseHeaders::new();
 
         match response
-            .receive(state.buf, &mut state.io.as_mut().unwrap())
+            .receive(state.buf, &mut state.io.as_mut().unwrap(), true)
             .await
         {
             Ok((buf, read_len)) => {
