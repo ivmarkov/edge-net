@@ -91,14 +91,16 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
         &mut self,
         buf: &'b mut [u8],
         mut input: R,
+        exact: bool,
     ) -> Result<(&'b mut [u8], usize), Error<R::Error>>
     where
         R: Read,
     {
-        let (read_len, headers_len) = match read_reply_buf::<N, _>(&mut input, buf, true).await {
-            Ok(read_len) => read_len,
-            Err(e) => return Err(e),
-        };
+        let (read_len, headers_len) =
+            match read_reply_buf::<N, _>(&mut input, buf, true, exact).await {
+                Ok(read_len) => read_len,
+                Err(e) => return Err(e),
+            };
 
         let mut parser = httparse::Request::new(&mut self.headers.0);
 
@@ -158,11 +160,12 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
         &mut self,
         buf: &'b mut [u8],
         mut input: R,
+        exact: bool,
     ) -> Result<(&'b mut [u8], usize), Error<R::Error>>
     where
         R: Read,
     {
-        let (read_len, headers_len) = read_reply_buf::<N, _>(&mut input, buf, false).await?;
+        let (read_len, headers_len) = read_reply_buf::<N, _>(&mut input, buf, false, exact).await?;
 
         let mut parser = httparse::Response::new(&mut self.headers.0);
 
@@ -940,33 +943,80 @@ async fn read_reply_buf<const N: usize, R>(
     mut input: R,
     buf: &mut [u8],
     request: bool,
+    exact: bool,
 ) -> Result<(usize, usize), Error<R::Error>>
 where
     R: Read,
 {
-    let mut offset = 0;
-    let mut size = 0;
-
-    while buf.len() > size {
-        let read = input.read(&mut buf[offset..]).await.map_err(Error::Io)?;
-
-        offset += read;
-        size += read;
+    if exact {
+        let raw_headers_len = read_headers(&mut input, buf).await?;
 
         let mut headers = [httparse::EMPTY_HEADER; N];
 
         let status = if request {
-            httparse::Request::new(&mut headers).parse(&buf[..size])?
+            httparse::Request::new(&mut headers).parse(&buf[..raw_headers_len])?
         } else {
-            httparse::Response::new(&mut headers).parse(&buf[..size])?
+            httparse::Response::new(&mut headers).parse(&buf[..raw_headers_len])?
         };
 
         if let httparse::Status::Complete(headers_len) = status {
-            return Ok((size, headers_len));
+            return Ok((raw_headers_len, headers_len));
+        }
+
+        Err(Error::TooManyHeaders)
+    } else {
+        let mut offset = 0;
+        let mut size = 0;
+
+        while buf.len() > size {
+            let read = input.read(&mut buf[offset..]).await.map_err(Error::Io)?;
+
+            offset += read;
+            size += read;
+
+            let mut headers = [httparse::EMPTY_HEADER; N];
+
+            let status = if request {
+                httparse::Request::new(&mut headers).parse(&buf[..size])?
+            } else {
+                httparse::Response::new(&mut headers).parse(&buf[..size])?
+            };
+
+            if let httparse::Status::Complete(headers_len) = status {
+                return Ok((size, headers_len));
+            }
+        }
+
+        Err(Error::TooManyHeaders)
+    }
+}
+
+async fn read_headers<R>(mut input: R, buf: &mut [u8]) -> Result<usize, Error<R::Error>>
+where
+    R: Read,
+{
+    let mut offset = 0;
+    let mut byte = [0];
+
+    loop {
+        if offset == buf.len() {
+            Err(Error::TooLongHeaders)?;
+        }
+
+        let read = input.read(&mut byte).await.map_err(Error::Io)?;
+
+        if read == 0 {
+            Err(Error::IncompleteHeaders)?;
+        }
+
+        buf[offset] = byte[0];
+
+        offset += 1;
+
+        if offset >= b"\r\n\r\n".len() && buf[offset - 4..offset] == *b"\r\n\r\n" {
+            break Ok(offset);
         }
     }
-
-    Err(Error::TooManyHeaders)
 }
 
 async fn send_status_line<W>(

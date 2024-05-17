@@ -50,7 +50,7 @@ where
         let (buf, read_len) = {
             let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
 
-            let receive = pin!(request.receive(buf, &mut io));
+            let receive = pin!(request.receive(buf, &mut io, true));
             let timer = Timer::after(Duration::from_millis(timeout_ms as _));
 
             let result = embassy_futures::select::select(receive, timer).await;
