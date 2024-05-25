@@ -1,3 +1,4 @@
+#![cfg(any(feature = "async-io", feature = "async-io-mini"))]
 #![allow(async_fn_in_trait)]
 #![warn(clippy::large_futures)]
 
@@ -8,7 +9,10 @@ use core::pin::pin;
 use std::io;
 use std::net::{self, TcpStream, ToSocketAddrs, UdpSocket as StdUdpSocket};
 
+#[cfg(all(feature = "async-io", not(feature = "async-io-mini")))]
 use async_io::Async;
+#[cfg(feature = "async-io-mini")]
+use async_io_mini::Async;
 
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -392,7 +396,10 @@ mod raw {
     use std::io::{self, ErrorKind};
     use std::os::fd::{AsFd, AsRawFd};
 
+    #[cfg(all(feature = "async-io", not(feature = "async-io-mini")))]
     use async_io::Async;
+    #[cfg(feature = "async-io-mini")]
+    use async_io_mini::Async;
 
     use edge_nal::{MacAddr, RawBind, RawReceive, RawSend, RawSplit};
     use embedded_io_async::ErrorType;
