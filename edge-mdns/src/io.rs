@@ -66,6 +66,12 @@ impl MdnsRunBuffers {
     }
 }
 
+impl Default for MdnsRunBuffers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub async fn run<'s, T, S>(
     host: &Host<'_>,
     interface: Option<u32>,

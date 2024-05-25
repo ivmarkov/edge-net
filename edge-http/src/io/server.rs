@@ -641,6 +641,12 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
     }
 }
 
+impl<const P: usize, const B: usize, const N: usize> Default for Server<P, B, N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(feature = "embedded-svc")]
 mod embedded_svc_compat {
     use embedded_io_async::{Read, Write};
