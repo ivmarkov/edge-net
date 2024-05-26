@@ -1,7 +1,7 @@
 use core::net::{IpAddr, SocketAddr};
 use core::ptr::NonNull;
 
-use edge_nal::{Multicast, UdpBind, UdpReceive, UdpSend, UdpSplit};
+use edge_nal::{Multicast, Readable, UdpBind, UdpReceive, UdpSend, UdpSplit};
 
 use embassy_net::driver::Driver;
 use embassy_net::udp::{BindError, PacketMetadata, RecvError, SendError};
@@ -198,6 +198,14 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
         }
 
         Ok(())
+    }
+}
+
+impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Readable
+    for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+{
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        panic!("Not implemented yet")
     }
 }
 

@@ -1,7 +1,7 @@
 use core::net::SocketAddr;
 use core::ptr::NonNull;
 
-use edge_nal::{TcpBind, TcpConnect, TcpSplit};
+use edge_nal::{Readable, TcpBind, TcpConnect, TcpSplit};
 
 use embassy_net::driver::Driver;
 use embassy_net::tcp::{AcceptError, ConnectError, Error, TcpReader, TcpWriter};
@@ -154,6 +154,14 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Write
     }
 }
 
+impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Readable
+    for TcpSocket<'d, N, TX_SZ, RX_SZ>
+{
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        panic!("Not implemented yet")
+    }
+}
+
 /// Represents the read half of a split TCP socket
 /// Implements the `Read` trait from `embedded-io-async`
 pub struct TcpSocketRead<'a>(TcpReader<'a>);
@@ -165,6 +173,12 @@ impl<'a> ErrorType for TcpSocketRead<'a> {
 impl<'a> Read for TcpSocketRead<'a> {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         self.0.read(buf).await.map_err(TcpError::from)
+    }
+}
+
+impl<'a> Readable for TcpSocketRead<'a> {
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        panic!("Not implemented yet")
     }
 }
 

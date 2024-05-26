@@ -3,11 +3,12 @@
 use embedded_io_async::ErrorType;
 
 use crate::raw::{RawReceive, RawSend};
+use crate::Readable;
 
 /// This trait is implemented by raw sockets that can be split into separate `send` and `receive` halves that can operate
 /// independently from each other (i.e., a full-duplex connection)
 pub trait RawSplit: ErrorType {
-    type Receive<'a>: RawReceive<Error = Self::Error>
+    type Receive<'a>: RawReceive<Error = Self::Error> + Readable<Error = Self::Error>
     where
         Self: 'a;
     type Send<'a>: RawSend<Error = Self::Error>
@@ -39,6 +40,7 @@ pub trait RawBind {
     type Socket<'a>: RawReceive<Error = Self::Error>
         + RawSend<Error = Self::Error>
         + RawSplit<Error = Self::Error>
+        + Readable<Error = Self::Error>
     where
         Self: 'a;
 

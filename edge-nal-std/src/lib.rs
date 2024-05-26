@@ -19,8 +19,8 @@ use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 use embedded_io_async::{ErrorType, Read, Write};
 
 use edge_nal::{
-    AddrType, Dns, Multicast, TcpAccept, TcpBind, TcpConnect, TcpSplit, UdpBind, UdpConnect,
-    UdpReceive, UdpSend, UdpSplit,
+    AddrType, Dns, Multicast, Readable, TcpAccept, TcpBind, TcpConnect, TcpSplit, UdpBind,
+    UdpConnect, UdpReceive, UdpSend, UdpSplit,
 };
 
 #[cfg(all(unix, not(target_os = "espidf")))]
@@ -141,6 +141,12 @@ impl Write for TcpSocket {
     }
 }
 
+impl Readable for TcpSocket {
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        self.0.readable().await
+    }
+}
+
 impl ErrorType for &TcpSocket {
     type Error = io::Error;
 }
@@ -158,6 +164,12 @@ impl Write for &TcpSocket {
 
     async fn flush(&mut self) -> Result<(), Self::Error> {
         (&self.0).flush().await
+    }
+}
+
+impl Readable for &TcpSocket {
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        self.0.readable().await
     }
 }
 
@@ -285,29 +297,7 @@ impl UdpSend for &UdpSocket {
     }
 }
 
-impl ErrorType for UdpSocket {
-    type Error = io::Error;
-}
-
-impl UdpReceive for UdpSocket {
-    async fn receive(&mut self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), Self::Error> {
-        let mut rself = &*self;
-
-        let fut = pin!(rself.receive(buffer));
-        fut.await
-    }
-}
-
-impl UdpSend for UdpSocket {
-    async fn send(&mut self, remote: SocketAddr, data: &[u8]) -> Result<(), Self::Error> {
-        let mut rself = &*self;
-
-        let fut = pin!(rself.send(remote, data));
-        fut.await
-    }
-}
-
-impl Multicast for UdpSocket {
+impl Multicast for &UdpSocket {
     async fn join(&mut self, multicast_addr: IpAddr) -> Result<(), Self::Error> {
         match multicast_addr {
             IpAddr::V4(addr) => self
@@ -336,6 +326,59 @@ impl Multicast for UdpSocket {
         }
 
         Ok(())
+    }
+}
+
+impl Readable for &UdpSocket {
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        self.0.readable().await
+    }
+}
+
+impl ErrorType for UdpSocket {
+    type Error = io::Error;
+}
+
+impl UdpReceive for UdpSocket {
+    async fn receive(&mut self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), Self::Error> {
+        let mut rself = &*self;
+
+        let fut = pin!(rself.receive(buffer));
+        fut.await
+    }
+}
+
+impl UdpSend for UdpSocket {
+    async fn send(&mut self, remote: SocketAddr, data: &[u8]) -> Result<(), Self::Error> {
+        let mut rself = &*self;
+
+        let fut = pin!(rself.send(remote, data));
+        fut.await
+    }
+}
+
+impl Multicast for UdpSocket {
+    async fn join(&mut self, multicast_addr: IpAddr) -> Result<(), Self::Error> {
+        let mut rself = &*self;
+
+        let fut = pin!(rself.join(multicast_addr));
+        fut.await
+    }
+
+    async fn leave(&mut self, multicast_addr: IpAddr) -> Result<(), Self::Error> {
+        let mut rself = &*self;
+
+        let fut = pin!(rself.leave(multicast_addr));
+        fut.await
+    }
+}
+
+impl Readable for UdpSocket {
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        let mut rself = &*self;
+
+        let fut = pin!(rself.readable());
+        fut.await
     }
 }
 
@@ -401,7 +444,7 @@ mod raw {
     #[cfg(feature = "async-io-mini")]
     use async_io_mini::Async;
 
-    use edge_nal::{MacAddr, RawBind, RawReceive, RawSend, RawSplit};
+    use edge_nal::{MacAddr, RawBind, RawReceive, RawSend, RawSplit, Readable};
     use embedded_io_async::ErrorType;
 
     #[derive(Default)]
@@ -554,6 +597,12 @@ mod raw {
         }
     }
 
+    impl Readable for &RawSocket {
+        async fn readable(&mut self) -> Result<(), Self::Error> {
+            self.0.readable().await
+        }
+    }
+
     impl ErrorType for RawSocket {
         type Error = io::Error;
     }
@@ -587,6 +636,12 @@ mod raw {
             let socket = &*self;
 
             (socket, socket)
+        }
+    }
+
+    impl Readable for RawSocket {
+        async fn readable(&mut self) -> Result<(), Self::Error> {
+            self.0.readable().await
         }
     }
 
