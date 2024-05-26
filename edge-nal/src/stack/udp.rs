@@ -10,7 +10,7 @@ use crate::{Multicast, Readable};
 /// This trait is implemented by UDP sockets that can be split into separate `send` and `receive` halves that can operate
 /// independently from each other (i.e., a full-duplex connection)
 pub trait UdpSplit: ErrorType {
-    type Receive<'a>: UdpReceive<Error = Self::Error>
+    type Receive<'a>: UdpReceive<Error = Self::Error> + Readable<Error = Self::Error>
     where
         Self: 'a;
     type Send<'a>: UdpSend<Error = Self::Error>

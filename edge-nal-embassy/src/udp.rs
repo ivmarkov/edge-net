@@ -159,6 +159,14 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
     }
 }
 
+impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Readable
+    for &UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+{
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        panic!("Not implemented yet")
+    }
+}
+
 impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSplit
     for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
 {
