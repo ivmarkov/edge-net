@@ -4,7 +4,7 @@ use core::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use embedded_io_async::{ErrorKind, ErrorType};
 
-use edge_nal::{MacAddr, RawReceive, RawSend, RawSplit, UdpReceive, UdpSend, UdpSplit};
+use edge_nal::{MacAddr, RawReceive, RawSend, RawSplit, Readable, UdpReceive, UdpSend, UdpSplit};
 
 use crate as raw;
 
@@ -102,6 +102,15 @@ where
         .await?;
 
         Ok((len, remote))
+    }
+}
+
+impl<T, const N: usize> Readable for RawSocket2Udp<T, N>
+where
+    T: Readable,
+{
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        self.socket.readable().await.map_err(Error::Io)
     }
 }
 
