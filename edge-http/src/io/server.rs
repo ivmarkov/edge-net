@@ -538,9 +538,13 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
 
         // TODO: Figure out what is going on with the lifetimes so as to avoid this horrible code duplication
 
-        info!("Creating {P} handler tasks");
         let mutex = Mutex::<NoopRawMutex, _>::new(());
         let mut tasks = heapless::Vec::<_, P>::new();
+
+        info!(
+            "Creating {P} handler tasks, memory: {}B",
+            core::mem::size_of_val(&tasks)
+        );
 
         for index in 0..P {
             let mutex = &mutex;
@@ -595,9 +599,13 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
         A: edge_nal::TcpAccept,
         H: for<'b, 't> TaskHandler<'b, &'b mut A::Socket<'t>, N>,
     {
-        debug!("Creating {P} handler tasks");
         let mutex = Mutex::<NoopRawMutex, _>::new(());
         let mut tasks = heapless::Vec::<_, P>::new();
+
+        info!(
+            "Creating {P} handler tasks, memory: {}B",
+            core::mem::size_of_val(&tasks)
+        );
 
         for index in 0..P {
             let mutex = &mutex;
