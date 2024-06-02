@@ -1,4 +1,3 @@
-#![cfg(any(feature = "async-io", feature = "async-io-mini"))]
 #![allow(async_fn_in_trait)]
 #![warn(clippy::large_futures)]
 
@@ -9,7 +8,7 @@ use core::pin::pin;
 use std::io;
 use std::net::{self, TcpStream, ToSocketAddrs, UdpSocket as StdUdpSocket};
 
-#[cfg(all(feature = "async-io", not(feature = "async-io-mini")))]
+#[cfg(not(feature = "async-io-mini"))]
 use async_io::Async;
 #[cfg(feature = "async-io-mini")]
 use async_io_mini::Async;
@@ -237,7 +236,9 @@ impl UdpSocket {
         self.as_ref().join_multicast_v4(&multiaddr, &interface)?;
 
         #[cfg(target_os = "espidf")]
-        self.setsockopt_ipproto_ip(multiaddr, interface, 3)?;
+        self.setsockopt_ipproto_ip(
+            multiaddr, interface, 3, /* IP_ADD_MEMBERSHIP in ESP IDF*/
+        )?;
 
         Ok(())
     }
@@ -251,7 +252,9 @@ impl UdpSocket {
         self.as_ref().leave_multicast_v4(&multiaddr, &interface)?;
 
         #[cfg(target_os = "espidf")]
-        self.setsockopt_ipproto_ip(multiaddr, interface, 4)?;
+        self.setsockopt_ipproto_ip(
+            multiaddr, interface, 4, /* IP_LEAVE_MEMBERSHIP in ESP IDF*/
+        )?;
 
         Ok(())
     }
@@ -436,9 +439,7 @@ impl MulticastV4 for UdpSocket {
         multicast_addr: Ipv4Addr,
         interface: Ipv4Addr,
     ) -> Result<(), Self::Error> {
-        self.0
-            .as_ref()
-            .join_multicast_v4(&multicast_addr, &interface)
+        self.join_multicast_v4(&multicast_addr, &interface)
     }
 
     async fn leave_v4(
@@ -446,9 +447,7 @@ impl MulticastV4 for UdpSocket {
         multicast_addr: Ipv4Addr,
         interface: Ipv4Addr,
     ) -> Result<(), Self::Error> {
-        self.0
-            .as_ref()
-            .leave_multicast_v4(&multicast_addr, &interface)
+        self.leave_multicast_v4(&multicast_addr, &interface)
     }
 }
 
@@ -540,7 +539,7 @@ mod raw {
     use std::io::{self, ErrorKind};
     use std::os::fd::{AsFd, AsRawFd};
 
-    #[cfg(all(feature = "async-io", not(feature = "async-io-mini")))]
+    #[cfg(not(feature = "async-io-mini"))]
     use async_io::Async;
     #[cfg(feature = "async-io-mini")]
     use async_io_mini::Async;

@@ -14,7 +14,7 @@ rust-version = "1.77"
 [features]
 default = ["io"]
 async-io-mini = ["std", "edge-nal-std/async-io-mini"]
-std = ["io", "edge-captive/std", "edge-dhcp/std", "edge-http/std", "edge-mdns/std", "edge-raw/std", "edge-mqtt", "edge-ws/std", "edge-nal-std/async-io"]
+std = ["io", "edge-captive/std", "edge-dhcp/std", "edge-http/std", "edge-mdns/std", "edge-raw/std", "edge-mqtt", "edge-ws/std", "edge-nal-std"]
 embassy = ["io", "edge-nal-embassy"]
 io = ["edge-captive/io", "edge-dhcp/io", "edge-http/io", "edge-mdns/io", "edge-raw/io", "edge-ws/io", "edge-nal"]
 embedded-svc = ["edge-http/embedded-svc", "edge-mqtt/embedded-svc", "edge-ws/embedded-svc"]

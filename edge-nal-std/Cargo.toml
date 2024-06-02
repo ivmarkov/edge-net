@@ -14,13 +14,10 @@ categories = [
     "networking"
 ]
 
-[features]
-default = ["async-io"]
-
 [dependencies]
 embedded-io-async = { workspace = true, features = ["std"] }
 edge-nal = { workspace = true }
-async-io = { version = "2", optional = true }
+async-io = "2"
 async-io-mini = { git = "https://github.com/ivmarkov/async-io-mini", optional = true }
 futures-lite = "1"
 libc = "0.2"
