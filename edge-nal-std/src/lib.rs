@@ -227,6 +227,71 @@ impl UdpSocket {
     pub fn release(self) -> Async<StdUdpSocket> {
         self.0
     }
+
+    pub fn join_multicast_v4(
+        &self,
+        multiaddr: &Ipv4Addr,
+        interface: &Ipv4Addr,
+    ) -> Result<(), io::Error> {
+        #[cfg(not(target_os = "espidf"))]
+        self.as_ref().join_multicast_v4(&multiaddr, &interface)?;
+
+        #[cfg(target_os = "espidf")]
+        self.setsockopt_ipproto_ip(multiaddr, interface, 3)?;
+
+        Ok(())
+    }
+
+    pub fn leave_multicast_v4(
+        &self,
+        multiaddr: &Ipv4Addr,
+        interface: &Ipv4Addr,
+    ) -> Result<(), io::Error> {
+        #[cfg(not(target_os = "espidf"))]
+        self.as_ref().leave_multicast_v4(&multiaddr, &interface)?;
+
+        #[cfg(target_os = "espidf")]
+        self.setsockopt_ipproto_ip(multiaddr, interface, 4)?;
+
+        Ok(())
+    }
+
+    #[cfg(target_os = "espidf")]
+    pub fn setsockopt_ipproto_ip(
+        &self,
+        multiaddr: &Ipv4Addr,
+        interface: &Ipv4Addr,
+        option: u32,
+    ) -> Result<(), io::Error> {
+        // join_multicast_v4() is broken for ESP-IDF due to IP_ADD_MEMBERSHIP being wrongly defined to 11,
+        // while it should be 3: https://github.com/rust-lang/libc/blob/main/src/unix/newlib/mod.rs#L568
+        //
+        // leave_multicast_v4() is broken for ESP-IDF due to IP_ADD_MEMBERSHIP being wrongly defined to 12,
+        // while it should be 4: https://github.com/rust-lang/libc/blob/main/src/unix/newlib/mod.rs#L569
+
+        let mreq = libc::ip_mreq {
+            imr_multiaddr: libc::in_addr {
+                s_addr: u32::from_ne_bytes(multiaddr.octets()),
+            },
+            imr_interface: libc::in_addr {
+                s_addr: u32::from_ne_bytes(interface.octets()),
+            },
+        };
+
+        use std::os::fd::AsRawFd;
+
+        unsafe {
+            libc::setsockopt(
+                self.0.as_raw_fd(),
+                libc::IPPROTO_IP as _,
+                option as _,
+                &mreq as *const _ as *const _,
+                core::mem::size_of::<libc::ip_mreq>() as _,
+            );
+        }
+
+        Ok(())
+    }
 }
 
 impl Deref for UdpSocket {
@@ -303,9 +368,7 @@ impl MulticastV4 for &UdpSocket {
         multicast_addr: Ipv4Addr,
         interface: Ipv4Addr,
     ) -> Result<(), Self::Error> {
-        self.0
-            .as_ref()
-            .join_multicast_v4(&multicast_addr, &interface)
+        self.join_multicast_v4(&multicast_addr, &interface)
     }
 
     async fn leave_v4(
@@ -313,9 +376,7 @@ impl MulticastV4 for &UdpSocket {
         multicast_addr: Ipv4Addr,
         interface: Ipv4Addr,
     ) -> Result<(), Self::Error> {
-        self.0
-            .as_ref()
-            .leave_multicast_v4(&multicast_addr, &interface)
+        self.leave_multicast_v4(&multicast_addr, &interface)
     }
 }
 
