@@ -63,6 +63,15 @@ where
         ipv6: None,
     };
 
-    io::run(&host, Some(0), [], stack, DEFAULT_SOCKET, buffers).await
+    io::run(
+        &host,
+        Some(Ipv4Addr::UNSPECIFIED),
+        Some(0),
+        [],
+        stack,
+        DEFAULT_SOCKET,
+        buffers,
+    )
+    .await
 }
 ```

@@ -5,7 +5,7 @@ use core::net::SocketAddr;
 use embedded_io_async::ErrorType;
 
 use crate::udp::{UdpReceive, UdpSend};
-use crate::{Multicast, Readable};
+use crate::{MulticastV4, MulticastV6, Readable};
 
 /// This trait is implemented by UDP sockets that can be split into separate `send` and `receive` halves that can operate
 /// independently from each other (i.e., a full-duplex connection)
@@ -41,7 +41,8 @@ pub trait UdpConnect {
     type Socket<'a>: UdpReceive<Error = Self::Error>
         + UdpSend<Error = Self::Error>
         + UdpSplit<Error = Self::Error>
-        + Multicast<Error = Self::Error>
+        + MulticastV4<Error = Self::Error>
+        + MulticastV6<Error = Self::Error>
         + Readable<Error = Self::Error>
     where
         Self: 'a;
@@ -63,7 +64,8 @@ pub trait UdpBind {
     type Socket<'a>: UdpReceive<Error = Self::Error>
         + UdpSend<Error = Self::Error>
         + UdpSplit<Error = Self::Error>
-        + Multicast<Error = Self::Error>
+        + MulticastV4<Error = Self::Error>
+        + MulticastV6<Error = Self::Error>
         + Readable<Error = Self::Error>
     where
         Self: 'a;

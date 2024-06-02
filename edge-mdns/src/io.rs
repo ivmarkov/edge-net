@@ -8,7 +8,7 @@ use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
 
-use edge_nal::{Multicast, UdpBind, UdpReceive, UdpSend, UdpSplit};
+use edge_nal::{MulticastV4, MulticastV6, UdpBind, UdpReceive, UdpSend, UdpSplit};
 
 use log::{info, warn};
 
@@ -74,7 +74,8 @@ impl Default for MdnsRunBuffers {
 
 pub async fn run<'s, T, S>(
     host: &Host<'_>,
-    interface: Option<u32>,
+    ipv4_interface: Option<Ipv4Addr>,
+    ipv6_interface: Option<u32>,
     services: T,
     stack: &S,
     socket: SocketAddr,
@@ -83,16 +84,22 @@ pub async fn run<'s, T, S>(
 where
     T: IntoIterator<Item = Service<'s>> + Clone,
     S: UdpBind,
-    for<'a> S::Socket<'a>: Multicast<Error = S::Error> + UdpSplit<Error = S::Error>,
+    for<'a> S::Socket<'a>:
+        MulticastV4<Error = S::Error> + MulticastV6<Error = S::Error> + UdpSplit<Error = S::Error>,
 {
     let mut udp = stack.bind(socket).await.map_err(MdnsIoError::IoError)?;
 
-    udp.join(IpAddr::V6(IPV6_BROADCAST_ADDR))
-        .await
-        .map_err(MdnsIoError::IoError)?;
-    udp.join(IpAddr::V4(IP_BROADCAST_ADDR))
-        .await
-        .map_err(MdnsIoError::IoError)?;
+    if let Some(v4) = ipv4_interface {
+        udp.join_v4(IP_BROADCAST_ADDR, v4)
+            .await
+            .map_err(MdnsIoError::IoError)?;
+    }
+
+    if let Some(v6) = ipv6_interface {
+        udp.join_v6(IPV6_BROADCAST_ADDR, v6)
+            .await
+            .map_err(MdnsIoError::IoError)?;
+    }
 
     let (recv, send) = udp.split();
 
@@ -101,7 +108,13 @@ where
 
     let send = Mutex::<NoopRawMutex, _>::new((send, send_buf));
 
-    let mut broadcast = pin!(broadcast(host, services.clone(), interface, &send));
+    let mut broadcast = pin!(broadcast(
+        host,
+        services.clone(),
+        ipv4_interface.is_some(),
+        ipv6_interface,
+        &send
+    ));
     let mut respond = pin!(respond(host, services, recv, recv_buf, &send));
 
     let result = select(&mut broadcast, &mut respond).await;
@@ -115,7 +128,8 @@ where
 async fn broadcast<'s, T, S>(
     host: &Host<'_>,
     services: T,
-    interface: Option<u32>,
+    ipv4: bool,
+    ipv6_interface: Option<u32>,
     send: &Mutex<impl RawMutex, (S, &mut [u8])>,
 ) -> Result<(), MdnsIoError<S::Error>>
 where
@@ -124,13 +138,20 @@ where
 {
     loop {
         for remote_addr in
-            core::iter::once(SocketAddr::V4(SocketAddrV4::new(IP_BROADCAST_ADDR, PORT))).chain(
-                interface
-                    .map(|interface| {
-                        SocketAddr::V6(SocketAddrV6::new(IPV6_BROADCAST_ADDR, PORT, 0, interface))
-                    })
-                    .into_iter(),
-            )
+            core::iter::once(SocketAddr::V4(SocketAddrV4::new(IP_BROADCAST_ADDR, PORT)))
+                .filter(|_| ipv4)
+                .chain(
+                    ipv6_interface
+                        .map(|interface| {
+                            SocketAddr::V6(SocketAddrV6::new(
+                                IPV6_BROADCAST_ADDR,
+                                PORT,
+                                0,
+                                interface,
+                            ))
+                        })
+                        .into_iter(),
+                )
         {
             let mut guard = send.lock().await;
             let (send, send_buf) = &mut *guard;

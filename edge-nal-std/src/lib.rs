@@ -2,7 +2,7 @@
 #![allow(async_fn_in_trait)]
 #![warn(clippy::large_futures)]
 
-use core::net::{IpAddr, SocketAddr};
+use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use core::ops::Deref;
 use core::pin::pin;
 
@@ -19,8 +19,8 @@ use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 use embedded_io_async::{ErrorType, Read, Write};
 
 use edge_nal::{
-    AddrType, Dns, Multicast, Readable, TcpAccept, TcpBind, TcpConnect, TcpSplit, UdpBind,
-    UdpConnect, UdpReceive, UdpSend, UdpSplit,
+    AddrType, Dns, MulticastV4, MulticastV6, Readable, TcpAccept, TcpBind, TcpConnect, TcpSplit,
+    UdpBind, UdpConnect, UdpReceive, UdpSend, UdpSplit,
 };
 
 #[cfg(all(unix, not(target_os = "espidf")))]
@@ -297,35 +297,47 @@ impl UdpSend for &UdpSocket {
     }
 }
 
-impl Multicast for &UdpSocket {
-    async fn join(&mut self, multicast_addr: IpAddr) -> Result<(), Self::Error> {
-        match multicast_addr {
-            IpAddr::V4(addr) => self
-                .0
-                .as_ref()
-                .join_multicast_v4(&addr.octets().into(), &std::net::Ipv4Addr::UNSPECIFIED)?,
-            IpAddr::V6(addr) => self
-                .0
-                .as_ref()
-                .join_multicast_v6(&addr.octets().into(), 0)?,
-        }
-
-        Ok(())
+impl MulticastV4 for &UdpSocket {
+    async fn join_v4(
+        &mut self,
+        multicast_addr: Ipv4Addr,
+        interface: Ipv4Addr,
+    ) -> Result<(), Self::Error> {
+        self.0
+            .as_ref()
+            .join_multicast_v4(&multicast_addr, &interface)
     }
 
-    async fn leave(&mut self, multicast_addr: IpAddr) -> Result<(), Self::Error> {
-        match multicast_addr {
-            IpAddr::V4(addr) => self
-                .0
-                .as_ref()
-                .leave_multicast_v4(&addr.octets().into(), &std::net::Ipv4Addr::UNSPECIFIED)?,
-            IpAddr::V6(addr) => self
-                .0
-                .as_ref()
-                .leave_multicast_v6(&addr.octets().into(), 0)?,
-        }
+    async fn leave_v4(
+        &mut self,
+        multicast_addr: Ipv4Addr,
+        interface: Ipv4Addr,
+    ) -> Result<(), Self::Error> {
+        self.0
+            .as_ref()
+            .leave_multicast_v4(&multicast_addr, &interface)
+    }
+}
 
-        Ok(())
+impl MulticastV6 for &UdpSocket {
+    async fn join_v6(
+        &mut self,
+        multicast_addr: Ipv6Addr,
+        interface: u32,
+    ) -> Result<(), Self::Error> {
+        self.0
+            .as_ref()
+            .join_multicast_v6(&multicast_addr, interface)
+    }
+
+    async fn leave_v6(
+        &mut self,
+        multicast_addr: Ipv6Addr,
+        interface: u32,
+    ) -> Result<(), Self::Error> {
+        self.0
+            .as_ref()
+            .leave_multicast_v6(&multicast_addr, interface)
     }
 }
 
@@ -357,19 +369,47 @@ impl UdpSend for UdpSocket {
     }
 }
 
-impl Multicast for UdpSocket {
-    async fn join(&mut self, multicast_addr: IpAddr) -> Result<(), Self::Error> {
-        let mut rself = &*self;
-
-        let fut = pin!(rself.join(multicast_addr));
-        fut.await
+impl MulticastV4 for UdpSocket {
+    async fn join_v4(
+        &mut self,
+        multicast_addr: Ipv4Addr,
+        interface: Ipv4Addr,
+    ) -> Result<(), Self::Error> {
+        self.0
+            .as_ref()
+            .join_multicast_v4(&multicast_addr, &interface)
     }
 
-    async fn leave(&mut self, multicast_addr: IpAddr) -> Result<(), Self::Error> {
-        let mut rself = &*self;
+    async fn leave_v4(
+        &mut self,
+        multicast_addr: Ipv4Addr,
+        interface: Ipv4Addr,
+    ) -> Result<(), Self::Error> {
+        self.0
+            .as_ref()
+            .leave_multicast_v4(&multicast_addr, &interface)
+    }
+}
 
-        let fut = pin!(rself.leave(multicast_addr));
-        fut.await
+impl MulticastV6 for UdpSocket {
+    async fn join_v6(
+        &mut self,
+        multicast_addr: Ipv6Addr,
+        interface: u32,
+    ) -> Result<(), Self::Error> {
+        self.0
+            .as_ref()
+            .join_multicast_v6(&multicast_addr, interface)
+    }
+
+    async fn leave_v6(
+        &mut self,
+        multicast_addr: Ipv6Addr,
+        interface: u32,
+    ) -> Result<(), Self::Error> {
+        self.0
+            .as_ref()
+            .leave_multicast_v6(&multicast_addr, interface)
     }
 }
 

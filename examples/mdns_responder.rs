@@ -2,7 +2,7 @@ use core::net::Ipv4Addr;
 
 use edge_mdns::io::{self, MdnsIoError, MdnsRunBuffers, DEFAULT_SOCKET};
 use edge_mdns::Host;
-use edge_nal::{Multicast, UdpBind, UdpSplit};
+use edge_nal::{MulticastV4, MulticastV6, UdpBind, UdpSplit};
 
 use log::*;
 
@@ -37,7 +37,8 @@ async fn run<T>(
 ) -> Result<(), MdnsIoError<T::Error>>
 where
     T: UdpBind,
-    for<'a> <T as UdpBind>::Socket<'a>: Multicast<Error = T::Error> + UdpSplit<Error = T::Error>,
+    for<'a> <T as UdpBind>::Socket<'a>:
+        MulticastV4<Error = T::Error> + MulticastV6<Error = T::Error> + UdpSplit<Error = T::Error>,
 {
     info!("About to run an mDNS responder for our PC. It will be addressable using {our_name}.local, so try to `ping {our_name}.local`.");
 
@@ -48,5 +49,14 @@ where
         ipv6: None,
     };
 
-    io::run(&host, Some(0), [], stack, DEFAULT_SOCKET, buffers).await
+    io::run(
+        &host,
+        Some(Ipv4Addr::UNSPECIFIED),
+        Some(0),
+        [],
+        stack,
+        DEFAULT_SOCKET,
+        buffers,
+    )
+    .await
 }

@@ -1,7 +1,7 @@
-use core::net::{IpAddr, SocketAddr};
+use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use core::ptr::NonNull;
 
-use edge_nal::{Multicast, Readable, UdpBind, UdpReceive, UdpSend, UdpSplit};
+use edge_nal::{MulticastV4, MulticastV6, Readable, UdpBind, UdpReceive, UdpSend, UdpSplit};
 
 use embassy_net::driver::Driver;
 use embassy_net::udp::{BindError, PacketMetadata, RecvError, SendError};
@@ -180,32 +180,50 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
 }
 
 impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
-    Multicast for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+    MulticastV4 for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
 {
-    async fn join(&mut self, multicast_addr: IpAddr) -> Result<(), Self::Error> {
-        match multicast_addr {
-            IpAddr::V4(_) => {
-                self.stack
-                    .join_multicast_group(to_emb_addr(multicast_addr))
-                    .await?;
-            }
-            IpAddr::V6(_) => panic!("Joining an Ipv6 multicast group is not supported yet"),
-        }
+    async fn join_v4(
+        &mut self,
+        multicast_addr: Ipv4Addr,
+        _interface: Ipv4Addr,
+    ) -> Result<(), Self::Error> {
+        self.stack
+            .join_multicast_group(to_emb_addr(IpAddr::V4(multicast_addr)))
+            .await?;
 
         Ok(())
     }
 
-    async fn leave(&mut self, multicast_addr: IpAddr) -> Result<(), Self::Error> {
-        match multicast_addr {
-            IpAddr::V4(_) => {
-                self.stack
-                    .leave_multicast_group(to_emb_addr(multicast_addr))
-                    .await?;
-            }
-            IpAddr::V6(_) => panic!("Leaving an Ipv6 multicast group is not supported yet"),
-        }
+    async fn leave_v4(
+        &mut self,
+        multicast_addr: Ipv4Addr,
+        _interface: Ipv4Addr,
+    ) -> Result<(), Self::Error> {
+        self.stack
+            .leave_multicast_group(to_emb_addr(IpAddr::V4(multicast_addr)))
+            .await?;
 
         Ok(())
+    }
+}
+
+impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
+    MulticastV6 for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+{
+    async fn join_v6(
+        &mut self,
+        _multicast_addr: Ipv6Addr,
+        _interface: u32,
+    ) -> Result<(), Self::Error> {
+        panic!("Joining an Ipv6 multicast group is not supported yet")
+    }
+
+    async fn leave_v6(
+        &mut self,
+        _multicast_addr: Ipv6Addr,
+        _interface: u32,
+    ) -> Result<(), Self::Error> {
+        panic!("Leaving an Ipv6 multicast group is not supported yet")
     }
 }
 
