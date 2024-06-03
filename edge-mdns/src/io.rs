@@ -201,11 +201,22 @@ where
         };
 
         if len > 0 {
-            info!("Replying to mDNS query from {}", remote);
+            info!("Replying to mDNS query from {remote}");
 
             let fut = pin!(send.send(remote, &send_buf[..len]));
 
-            fut.await.map_err(MdnsIoError::IoError)?;
+            match fut.await {
+                Ok(_) => (),
+                Err(err) => {
+                    // Turns out we might receive queries from Ipv6 addresses which are actually unreachable by us
+                    // Still to be investigated why, but it does seem that we are receiving packets which contain
+                    // non-link-local Ipv6 addresses, to which we cannot respond
+                    //
+                    // A possible reason for this might be that we are receiving these packets via the broadcast group
+                    // - yet - it is still unclear how these arrive given that we are only listening on the link-local address
+                    warn!("IO error {err:?} while replying to {remote}");
+                }
+            }
         }
     }
 }
