@@ -233,7 +233,7 @@ impl UdpSocket {
         interface: &Ipv4Addr,
     ) -> Result<(), io::Error> {
         #[cfg(not(target_os = "espidf"))]
-        self.as_ref().join_multicast_v4(&multiaddr, &interface)?;
+        self.as_ref().join_multicast_v4(multiaddr, interface)?;
 
         #[cfg(target_os = "espidf")]
         self.setsockopt_ipproto_ip(
@@ -249,7 +249,7 @@ impl UdpSocket {
         interface: &Ipv4Addr,
     ) -> Result<(), io::Error> {
         #[cfg(not(target_os = "espidf"))]
-        self.as_ref().leave_multicast_v4(&multiaddr, &interface)?;
+        self.as_ref().leave_multicast_v4(multiaddr, interface)?;
 
         #[cfg(target_os = "espidf")]
         self.setsockopt_ipproto_ip(
@@ -272,26 +272,26 @@ impl UdpSocket {
         // leave_multicast_v4() is broken for ESP-IDF due to IP_ADD_MEMBERSHIP being wrongly defined to 12,
         // while it should be 4: https://github.com/rust-lang/libc/blob/main/src/unix/newlib/mod.rs#L569
 
-        let mreq = libc::ip_mreq {
-            imr_multiaddr: libc::in_addr {
+        let mreq = sys::ip_mreq {
+            imr_multiaddr: sys::in_addr {
                 s_addr: u32::from_ne_bytes(multiaddr.octets()),
             },
-            imr_interface: libc::in_addr {
+            imr_interface: sys::in_addr {
                 s_addr: u32::from_ne_bytes(interface.octets()),
             },
         };
 
         use std::os::fd::AsRawFd;
 
-        unsafe {
-            libc::setsockopt(
+        syscall_los!(unsafe {
+            sys::setsockopt(
                 self.0.as_raw_fd(),
-                libc::IPPROTO_IP as _,
+                sys::IPPROTO_IP as _,
                 option as _,
                 &mreq as *const _ as *const _,
-                core::mem::size_of::<libc::ip_mreq>() as _,
-            );
-        }
+                core::mem::size_of::<sys::ip_mreq>() as _,
+            )
+        })?;
 
         Ok(())
     }
@@ -547,6 +547,9 @@ mod raw {
     use edge_nal::{MacAddr, RawBind, RawReceive, RawSend, RawSplit, Readable};
     use embedded_io_async::ErrorType;
 
+    use crate::sys;
+    use crate::syscall_los;
+
     #[derive(Default)]
     pub struct Interface(u32);
 
@@ -562,17 +565,17 @@ mod raw {
         type Socket<'a> = RawSocket where Self: 'a;
 
         async fn bind(&self) -> Result<Self::Socket<'_>, Self::Error> {
-            let socket = cvt(unsafe {
-                libc::socket(
-                    libc::PF_PACKET,
-                    libc::SOCK_DGRAM,
-                    (libc::ETH_P_IP as u16).to_be() as _,
+            let socket = syscall_los!(unsafe {
+                sys::socket(
+                    sys::PF_PACKET,
+                    sys::SOCK_DGRAM,
+                    (sys::ETH_P_IP as u16).to_be() as _,
                 )
             })?;
 
-            let sockaddr = libc::sockaddr_ll {
-                sll_family: libc::AF_PACKET as _,
-                sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
+            let sockaddr = sys::sockaddr_ll {
+                sll_family: sys::AF_PACKET as _,
+                sll_protocol: (sys::ETH_P_IP as u16).to_be() as _,
                 sll_ifindex: self.0 as _,
                 sll_hatype: 0,
                 sll_pkttype: 0,
@@ -580,17 +583,17 @@ mod raw {
                 sll_addr: Default::default(),
             };
 
-            cvt(unsafe {
-                libc::bind(
+            syscall_los!(unsafe {
+                sys::bind(
                     socket,
                     &sockaddr as *const _ as *const _,
-                    core::mem::size_of::<libc::sockaddr_ll>() as _,
+                    core::mem::size_of::<sys::sockaddr_ll>() as _,
                 )
             })?;
 
             // TODO
-            // cvt(unsafe {
-            //     libc::setsockopt(socket, libc::SOL_PACKET, libc::PACKET_AUXDATA, &1_u32 as *const _ as *const _, 4)
+            // syscall_los!(unsafe {
+            //     sys::setsockopt(socket, sys::SOL_PACKET, sys::PACKET_AUXDATA, &1_u32 as *const _ as *const _, 4)
             // })?;
 
             let socket = {
@@ -632,11 +635,11 @@ mod raw {
     impl RawReceive for &RawSocket {
         async fn receive(&mut self, buffer: &mut [u8]) -> Result<(usize, MacAddr), Self::Error> {
             let fut = pin!(self.0.read_with(|io| {
-                let mut storage: libc::sockaddr_storage = unsafe { core::mem::zeroed() };
-                let mut addrlen = core::mem::size_of_val(&storage) as libc::socklen_t;
+                let mut storage: sys::sockaddr_storage = unsafe { core::mem::zeroed() };
+                let mut addrlen = core::mem::size_of_val(&storage) as sys::socklen_t;
 
-                let ret = cvti(unsafe {
-                    libc::recvfrom(
+                let ret = syscall_los!(unsafe {
+                    sys::recvfrom(
                         io.as_fd().as_raw_fd(),
                         buffer.as_mut_ptr() as *mut _,
                         buffer.len(),
@@ -660,9 +663,9 @@ mod raw {
 
     impl RawSend for &RawSocket {
         async fn send(&mut self, mac: MacAddr, data: &[u8]) -> Result<(), Self::Error> {
-            let mut sockaddr = libc::sockaddr_ll {
-                sll_family: libc::AF_PACKET as _,
-                sll_protocol: (libc::ETH_P_IP as u16).to_be() as _,
+            let mut sockaddr = sys::sockaddr_ll {
+                sll_family: sys::AF_PACKET as _,
+                sll_protocol: (sys::ETH_P_IP as u16).to_be() as _,
                 sll_ifindex: self.1 as _,
                 sll_hatype: 0,
                 sll_pkttype: 0,
@@ -676,14 +679,14 @@ mod raw {
             let fut = pin!(self.0.write_with(|io| {
                 let len = core::cmp::min(data.len(), u16::MAX as usize);
 
-                let ret = cvti(unsafe {
-                    libc::sendto(
+                let ret = syscall_los!(unsafe {
+                    sys::sendto(
                         io.as_fd().as_raw_fd(),
                         data.as_ptr() as *const _,
                         len,
-                        libc::MSG_NOSIGNAL,
+                        sys::MSG_NOSIGNAL,
                         &sockaddr as *const _ as *const _,
-                        core::mem::size_of::<libc::sockaddr_ll>() as _,
+                        core::mem::size_of::<sys::sockaddr_ll>() as _,
                     )
                 })?;
                 Ok(ret as usize)
@@ -746,41 +749,66 @@ mod raw {
     }
 
     fn as_sockaddr_ll(
-        storage: &libc::sockaddr_storage,
+        storage: &sys::sockaddr_storage,
         len: usize,
-    ) -> io::Result<&libc::sockaddr_ll> {
+    ) -> io::Result<&sys::sockaddr_ll> {
         match storage.ss_family as core::ffi::c_int {
-            libc::AF_PACKET => {
-                assert!(len >= core::mem::size_of::<libc::sockaddr_ll>());
-                Ok(unsafe { (storage as *const _ as *const libc::sockaddr_ll).as_ref() }.unwrap())
+            sys::AF_PACKET => {
+                assert!(len >= core::mem::size_of::<sys::sockaddr_ll>());
+                Ok(unsafe { (storage as *const _ as *const sys::sockaddr_ll).as_ref() }.unwrap())
             }
             _ => Err(io::Error::new(ErrorKind::InvalidInput, "invalid argument")),
         }
     }
+}
 
-    fn cvt<T>(res: T) -> io::Result<T>
-    where
-        T: Into<i64> + Copy,
-    {
-        let ires: i64 = res.into();
+mod sys {
+    pub use libc::*;
 
-        if ires == -1 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(res)
-        }
+    #[macro_export]
+    macro_rules! syscall {
+        ($ret:expr) => {{
+            let result = $ret;
+
+            if result != 0 {
+                Err(::std::io::Error::from_raw_os_error(result))
+            } else {
+                Ok(result)
+            }
+        }};
     }
 
-    fn cvti<T>(res: T) -> io::Result<T>
-    where
-        T: Into<isize> + Copy,
-    {
-        let ires: isize = res.into();
+    #[macro_export]
+    macro_rules! syscall_los {
+        ($ret:expr) => {{
+            let result = $ret;
 
-        if ires == -1 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(res)
-        }
+            if result == -1 {
+                Err(::std::io::Error::last_os_error())
+            } else {
+                Ok(result)
+            }
+        }};
+    }
+
+    #[macro_export]
+    macro_rules! syscall_los_eagain {
+        ($ret:expr) => {{
+            #[allow(unreachable_patterns)]
+            match syscall_los!($ret) {
+                Ok(_) => Ok(()),
+                Err(e)
+                    if matches!(
+                        e.raw_os_error(),
+                        Some(sys::EINPROGRESS) | Some(sys::EAGAIN) | Some(sys::EWOULDBLOCK)
+                    ) =>
+                {
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }?;
+
+            Ok::<_, io::Error>(())
+        }};
     }
 }
