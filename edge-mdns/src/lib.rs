@@ -1,26 +1,27 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::large_futures)]
 
-use core::fmt::{self, Display, Write};
+use core::{fmt::{self, Display, Write}, iter::once, ops::RangeBounds};
 
+use ::domain::base::{message_builder::QuestionBuilder, ParsedRecord};
 use domain::{
     base::{
-        header::Flags,
-        iana::Class,
-        message::ShortMessage,
-        message_builder::{AnswerBuilder, PushError},
-        name::FromStrError,
-        wire::{Composer, ParseError},
-        Dname, Message, MessageBuilder, Rtype, ToDname,
+        header::Flags, iana::Class, message::ShortMessage, message_builder::{AnswerBuilder, PushError}, name::{FlattenInto, FromStrError}, wire::{Composer, ParseError}, Dname, DnameBuilder, Message, MessageBuilder, ParsedDname, Record, Rtype, ToDname
     },
     dep::octseq::{OctetsBuilder, ShortBuf},
-    rdata::{Aaaa, Ptr, Srv, Txt, A},
+    rdata::{Aaaa, AllRecordData, Cname, Ptr, Srv, Txt, A},
 };
 use log::trace;
-use octseq::Truncate;
+use octseq::{EmptyBuilder, FreezeBuilder, FromBuilder, Octets, Truncate};
 
-#[cfg(feature = "io")]
-pub mod io;
+// #[cfg(feature = "io")]
+// pub mod io;
+
+/// Re-export the domain lib if the user would like to directly 
+/// assemble / parse mDNS messages.
+pub mod domain {
+    pub use domain::*;
+}
 
 #[derive(Debug)]
 pub enum MdnsError {
@@ -481,7 +482,242 @@ impl<'a> Service<'a> {
     }
 }
 
-struct Buf<'a>(pub &'a mut [u8], pub usize);
+pub enum Answer<'a> {
+    A {
+        name: &'a str,
+        ip: [u8; 4],
+    },
+    AAAA {
+        name: &'a str,
+        ip: [u8; 16],
+    },
+    Ptr {
+        name: &'a str,
+        ptr: &'a str,
+    },
+    Srv {
+        name: &'a str,
+        port: u16,
+        target: &'a str,
+    },
+    Txt {
+        name: &'a str,
+        txt: &'a [(&'a str, &'a str)],
+    },
+}
+
+impl<'a> Answer<'a> {
+    pub fn from<O: Octets>(record: ParsedRecord<O>, buf: &'a mut Buf) -> Result<Self, MdnsError> {
+        //let answer = answer?;
+
+        let record = record.into_record::<AllRecordData<_, _>>()?.ok_or(MdnsError::InvalidMessage)?;
+
+        write!(buf, "{}", record.owner())?;
+        let name = core::str::from_utf8(buf.as_ref()).map_err(|_| MdnsError::InvalidMessage)?;
+
+        let answer = match record.data() {
+            AllRecordData::A(a) => Self::A { name, ip: a.addr().octets() },
+            AllRecordData::Aaaa(aaaa) => Self::AAAA { name, ip: aaaa.addr().octets() },
+            // }
+            // AllRecordData::Ptr(ptr) => {
+            //     //let hostname: Dname<Buf> = ptr.ptrdname();
+            // }
+
+            // Rtype::Srv => {
+            // }
+            // Rtype::Ptr => {
+            //     let ipv6: Record<_, ParsedDname<_>> = answer.into_record()?.ok_or(MdnsError::InvalidMessage)?;
+
+            // }
+            // Rtype::Txt => {
+            // }
+            // AllRecordData::Srv(srv) => {
+            //     host.id = srv.port();
+            //     //host.hostname = srv.target().to_string();
+            // }
+            _ => todo!(),
+        };
+
+        Ok(answer)
+    }
+}
+
+pub enum Question<'a> {
+    A(&'a str),
+    AAAA(&'a str),
+    Ptr(&'a str),
+    Srv(&'a str),
+    Txt(&'a str),
+}
+
+// pub enum SimpleQueryDetails<'a> {
+//     Host(&'a str),
+//     Service(&'a str),
+//     ServiceType(&'a str),
+// }
+
+// pub enum IteratorWrapper<H, S, T> {
+//     Host(H),
+//     Service(S),
+//     ServiceType(T),
+// }
+
+// impl<'a, H, S, T> Iterator for IteratorWrapper<H, S, T>
+// where
+//     H: Iterator<Item = Question<'a>>,
+//     S: Iterator<Item = Question<'a>>,
+//     T: Iterator<Item = Question<'a>>,
+// {
+//     type Item = Question<'a>;
+
+//     fn next(&mut self) -> Option<Question<'a>> {
+//         match self {
+//             Self::Host(iter) => iter.next(),
+//             Self::Service(iter) => iter.next(),
+//             Self::ServiceType(iter) => iter.next(),
+//         }
+//     }
+// }
+
+// impl<'a> SimpleQueryDetails<'a> {
+//     pub fn questions(&self) -> impl Iterator<Item = Question<'_>> {
+//         match self {
+//             SimpleQueryDetails::Host(fqdn) => IteratorWrapper::Host(once(Question::A(fqdn)).chain(once(Question::AAAA(fqdn)))),
+//             SimpleQueryDetails::Service(fqdn) => IteratorWrapper::Service(once(Question::Ptr(fqdn))),
+//             SimpleQueryDetails::ServiceType(fqdn) => IteratorWrapper::ServiceType(once(Question::Ptr(fqdn))),
+//         }
+//     }
+// }
+
+// pub enum QueryDetails<'a> {
+//     Simple(SimpleQueryDetails<'a>),
+//     Complex(&'a [Question<'a>]),
+// }
+
+// pub struct Query<'a> {
+//     pub domain: &'a str,
+//     pub query_details: QueryDetails<'a>,
+// }
+
+impl<'a> Question<'a> {
+    // pub fn ask<'s>(questions: &'a [Self], buf: &mut [u8]) -> Result<usize, MdnsError> {
+    //     let buf = Buf(buf, 0);
+
+    //     let message = MessageBuilder::from_target(buf)?;
+
+    //     let mut qb = message.question();
+
+    //     for question in questions {
+    //         self.push(&mut qb)?;
+    //     }
+
+    //     let buf = qb.finish();
+
+    //     Ok(buf.1)
+    // }
+
+    // fn push(&self, qb: &mut QuestionBuilder<Buf>) -> Result<(), MdnsError> {
+    //     match self {
+    //         Self::A(fqdn) => qb.push(((*fqdn).try_into().unwrap(), Rtype::A, Class::In))?,
+    //         Self::AAAA(fqdn) => qb.push((fqdn.into(), Rtype::Aaaa, Class::In))?,
+    //         Self::Ptr(fqdn) => qb.push((fqdn.into(), Rtype::Ptr, Class::In))?,
+    //         Self::Srv(fqdn) => qb.push((fqdn.into(), Rtype::Srv, Class::In))?,
+    //         Self::Txt(fqdn) => qb.push((fqdn.into(), Rtype::Txt, Class::In))?,
+    //     }
+
+    //     Ok(())
+    // }
+    
+    // pub fn decode_reply<'s>(&self, data: &[u8], buf: &'s mut [u8]) -> Result<impl Iterator<Item = Answer<'s>>, MdnsError> {
+    //     // if self.set_response(data, services, &mut answer, ttl_sec)? {
+    //     //     let buf = answer.finish();
+
+    //     //     Ok(buf.1)
+    //     // } else {
+    //     //     Ok(0)
+    //     // }
+
+    //     // Ok(buf.1)
+
+    //     let message = Message::from_octets(data)?;
+
+    //     let mut replied = false;
+
+    //     let mut host = Host {
+    //         id: 0,
+    //         hostname: "",
+    //         ip: [0, 0, 0, 0],
+    //         ipv6: None,
+    //     };
+
+    //     let buf = Buf(buf, 0);
+
+    //     for answer in message.answer()? {
+    //         let answer = answer?;
+
+    //         //trace!("Handling answer {:?}", answer);
+
+    //         //let answer = answer?;
+
+    //         let record = answer.into_record::<AllRecordData<_, _>>()?.ok_or(MdnsError::InvalidMessage)?;
+
+    //         match record.into_data() {
+    //             AllRecordData::A(a) => {
+    //                 host.ip = a.addr().octets();
+    //             }
+    //             AllRecordData::Aaaa(aaaa) => {
+    //                 host.ipv6 = Some(aaaa.addr().octets());
+    //             }
+    //             AllRecordData::Ptr(ptr) => {
+    //                 //let hostname: Dname<Buf> = ptr.ptrdname();
+    //             }
+
+    //             // Rtype::Srv => {
+    //             // }
+    //             // Rtype::Ptr => {
+    //             //     let ipv6: Record<_, ParsedDname<_>> = answer.into_record()?.ok_or(MdnsError::InvalidMessage)?;
+
+    //             // }
+    //             // Rtype::Txt => {
+    //             // }
+    //             AllRecordData::Srv(srv) => {
+    //                 host.id = srv.port();
+    //                 //host.hostname = srv.target().to_string();
+    //             }
+    //             _ => (),
+    //         }
+    //     }
+
+    //     //Ok(host)
+    //     Ok(core::iter::empty())
+    // }
+}
+
+pub struct Buf<'a>(pub &'a mut [u8], pub usize);
+
+impl<'a> FreezeBuilder for Buf<'a> {
+    type Octets = Self;
+
+    fn freeze(self) -> Self {
+        self
+    }
+}
+
+impl<'a> Octets for Buf<'a> {
+    type Range<'r> = &'r [u8] where Self: 'r;
+
+    fn range(&self, range: impl RangeBounds<usize>) -> Self::Range<'_> {
+        self.0[..self.1].range(range)
+    }
+}
+
+impl<'a> FromBuilder for Buf<'a> {
+    type Builder = Buf<'a>;
+
+    fn from_builder(builder: Self::Builder) -> Self {
+        Buf(&mut builder.0[builder.1..], 0)
+    }
+}
 
 impl<'a> Composer for Buf<'a> {}
 

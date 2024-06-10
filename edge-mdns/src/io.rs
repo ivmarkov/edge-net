@@ -6,9 +6,9 @@ use core::pin::pin;
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 use embassy_sync::mutex::Mutex;
-use embassy_time::{Duration, Timer};
+use embassy_sync::signal::Signal;
 
-use edge_nal::{MulticastV4, MulticastV6, UdpBind, UdpReceive, UdpSend, UdpSplit};
+use edge_nal::{UdpReceive, UdpSend};
 
 use log::{info, warn};
 
@@ -20,9 +20,6 @@ const IP_BROADCAST_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 const IPV6_BROADCAST_ADDR: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0x00fb);
 
 const PORT: u16 = 5353;
-
-const MAX_TX_BUF_SIZE: usize = 1280 - 40/*IPV6 header size*/ - 8/*UDP header size*/;
-const MAX_RX_BUF_SIZE: usize = 1583;
 
 #[derive(Debug)]
 pub enum MdnsIoError<E> {
@@ -51,71 +48,92 @@ where
 #[cfg(feature = "std")]
 impl<E> std::error::Error for MdnsIoError<E> where E: std::error::Error {}
 
-pub struct MdnsRunBuffers {
-    tx_buf: core::mem::MaybeUninit<[u8; MAX_TX_BUF_SIZE]>,
-    rx_buf: core::mem::MaybeUninit<[u8; MAX_RX_BUF_SIZE]>,
+/// Handles an incoming mDNS message by parsing it and potentially preparing a response.
+/// 
+/// If incoming is `None`, the handler should prepare a broadcast message with 
+/// all its data.
+/// 
+/// Returns the length of the response message.
+/// If length is 0, the IO layer using the handler should not send a message.
+pub trait MdnsHandler {
+    fn handle(&self, incoming: Option<&[u8]>, buf: &mut [u8], ttl_sec: u32) -> Result<usize, MdnsError>;
 }
 
-impl MdnsRunBuffers {
-    #[inline(always)]
-    pub const fn new() -> Self {
-        Self {
-            tx_buf: core::mem::MaybeUninit::uninit(),
-            rx_buf: core::mem::MaybeUninit::uninit(),
+impl<T> MdnsHandler for &T
+where
+    T: MdnsHandler,
+{
+    fn handle(&self, incoming: Option<&[u8]>, buf: &mut [u8], ttl_sec: u32) -> Result<usize, MdnsError> {
+        (**self).handle(incoming, buf, ttl_sec)
+    }
+}
+
+/// An implementation of `Handler` based on information
+/// captured in `Host` and `Service` structures.
+pub struct HostHandler<'a, T> {
+    host: &'a Host<'a>,
+    services: T,
+}
+
+impl<'a, T> HostHandler<'a, T> {
+    /// Create a new `HostResponder` with the given `Host` structure and services
+    pub const fn new(host: &'a Host<'a>, services: T) -> Self {
+        Self { host, services }
+    }
+}
+
+impl<'a, T> MdnsHandler for HostHandler<'a, T>
+where
+    T: IntoIterator<Item = Service<'a>> + Clone,
+{
+    fn handle(&self, incoming: Option<&[u8]>, buf: &mut [u8], ttl_sec: u32) -> Result<usize, MdnsError> {
+        if let Some(incoming) = incoming {
+            self.host.respond(self.services.clone(), incoming, buf, ttl_sec)
+        } else {
+            self.host.broadcast(self.services.clone(), buf, ttl_sec)
         }
     }
 }
 
-impl Default for MdnsRunBuffers {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub async fn run<'s, T, S>(
-    host: &Host<'_>,
+pub async fn run<T, R, S>(
+    handler: T,
+    broadcast_signal: &Signal<impl RawMutex, ()>,
     ipv4_interface: Option<Ipv4Addr>,
     ipv6_interface: Option<u32>,
-    services: T,
-    stack: &S,
-    socket: SocketAddr,
-    buffers: &mut MdnsRunBuffers,
+    recv: R,
+    send: S,
+    recv_buf: &mut [u8],
+    send_buf: &mut [u8],
 ) -> Result<(), MdnsIoError<S::Error>>
 where
-    T: IntoIterator<Item = Service<'s>> + Clone,
-    S: UdpBind,
-    for<'a> S::Socket<'a>:
-        MulticastV4<Error = S::Error> + MulticastV6<Error = S::Error> + UdpSplit<Error = S::Error>,
+    T: MdnsHandler,
+    R: UdpReceive,
+    S: UdpSend<Error = R::Error>,
 {
-    let mut udp = stack.bind(socket).await.map_err(MdnsIoError::IoError)?;
+    // let mut udp = stack.bind(socket).await.map_err(MdnsIoError::IoError)?;
 
-    if let Some(v4) = ipv4_interface {
-        udp.join_v4(IP_BROADCAST_ADDR, v4)
-            .await
-            .map_err(MdnsIoError::IoError)?;
-    }
+    // if let Some(v4) = ipv4_interface {
+    //     udp.join_v4(IP_BROADCAST_ADDR, v4)
+    //         .await
+    //         .map_err(MdnsIoError::IoError)?;
+    // }
 
-    if let Some(v6) = ipv6_interface {
-        udp.join_v6(IPV6_BROADCAST_ADDR, v6)
-            .await
-            .map_err(MdnsIoError::IoError)?;
-    }
-
-    let (recv, send) = udp.split();
-
-    let send_buf: &mut [u8] = unsafe { buffers.tx_buf.assume_init_mut() };
-    let recv_buf = unsafe { buffers.rx_buf.assume_init_mut() };
+    // if let Some(v6) = ipv6_interface {
+    //     udp.join_v6(IPV6_BROADCAST_ADDR, v6)
+    //         .await
+    //         .map_err(MdnsIoError::IoError)?;
+    // }
 
     let send = Mutex::<NoopRawMutex, _>::new((send, send_buf));
 
     let mut broadcast = pin!(broadcast(
-        host,
-        services.clone(),
+        &handler, 
+        broadcast_signal,
         ipv4_interface.is_some(),
         ipv6_interface,
         &send
     ));
-    let mut respond = pin!(respond(host, services, recv, recv_buf, &send));
+    let mut respond = pin!(respond(&handler, recv, recv_buf, &send));
 
     let result = select(&mut broadcast, &mut respond).await;
 
@@ -125,15 +143,15 @@ where
     }
 }
 
-async fn broadcast<'s, T, S>(
-    host: &Host<'_>,
-    services: T,
+async fn broadcast<T, S>(
+    handler: T,
+    broadcast_signal: &Signal<impl RawMutex, ()>,
     ipv4: bool,
     ipv6_interface: Option<u32>,
     send: &Mutex<impl RawMutex, (S, &mut [u8])>,
 ) -> Result<(), MdnsIoError<S::Error>>
 where
-    T: IntoIterator<Item = Service<'s>> + Clone,
+    T: MdnsHandler,
     S: UdpSend,
 {
     loop {
@@ -156,7 +174,7 @@ where
             let mut guard = send.lock().await;
             let (send, send_buf) = &mut *guard;
 
-            let len = host.broadcast(services.clone(), send_buf, 60)?;
+            let len = handler.handle(None, send_buf, 60)?;
 
             if len > 0 {
                 info!("Broadcasting mDNS entry to {remote_addr}");
@@ -167,19 +185,18 @@ where
             }
         }
 
-        Timer::after(Duration::from_secs(30)).await;
+        broadcast_signal.wait().await;
     }
 }
 
-async fn respond<'s, T, R, S>(
-    host: &Host<'_>,
-    services: T,
+async fn respond<T, R, S>(
+    responder: T,
     mut recv: R,
     recv_buf: &mut [u8],
     send: &Mutex<impl RawMutex, (S, &mut [u8])>,
 ) -> Result<(), MdnsIoError<S::Error>>
 where
-    T: IntoIterator<Item = Service<'s>> + Clone,
+    T: MdnsHandler,
     R: UdpReceive,
     S: UdpSend<Error = R::Error>,
 {
@@ -189,7 +206,7 @@ where
         let mut guard = send.lock().await;
         let (send, send_buf) = &mut *guard;
 
-        let len = match host.respond(services.clone(), &recv_buf[..len], send_buf, 60) {
+        let len = match responder.handle(Some(&recv_buf[..len]), send_buf, 60) {
             Ok(len) => len,
             Err(err) => match err {
                 MdnsError::InvalidMessage => {
