@@ -23,8 +23,6 @@ io = ["embassy-futures", "embassy-sync", "embassy-time", "edge-nal"]
 log = { workspace = true }
 heapless = { workspace = true }
 domain = { workspace = true }
-octseq = { workspace = true }
-heapless07 = { package = "heapless", version = "0.7" }
 embassy-futures = { workspace = true, optional = true }
 embassy-sync = { workspace = true, optional = true }
 embassy-time = { workspace = true, optional = true }

@@ -23,5 +23,4 @@ io = ["edge-nal"]
 [dependencies]
 log = { workspace = true }
 domain = { workspace = true }
-octseq = { workspace = true }
 edge-nal = { workspace = true, optional = true }

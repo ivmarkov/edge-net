@@ -9,7 +9,7 @@ description = "no_std and no-alloc async implementations of various network prot
 repository = "https://github.com/ivmarkov/edge-net"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.77"
+rust-version = "1.78"
 
 [features]
 default = ["io"]
@@ -109,8 +109,7 @@ embedded-io-async = { version = "0.6", default-features = false }
 embedded-svc = { version = "0.28", default-features = false }
 log = { version = "0.4", default-features = false }
 heapless = { version = "0.8", default-features = false }
-domain = { version = "0.9.3", default-features = false, features = ["heapless"] }
-octseq = { version = "0.3.2", default-features = false }
+domain = { version = "0.10", default-features = false, features = ["heapless"] }
 
 edge-captive = { version = "0.2.0", path = "edge-captive", default-features = false }
 edge-dhcp = { version = "0.2.0", path = "edge-dhcp", default-features = false }

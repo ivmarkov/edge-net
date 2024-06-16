@@ -1,27 +1,37 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::large_futures)]
 
-use core::{fmt::{self, Display, Write}, iter::once, ops::RangeBounds};
+use core::fmt::{self, Display};
+use core::net::{Ipv4Addr, Ipv6Addr};
+use core::ops::RangeBounds;
 
-use ::domain::base::{message_builder::QuestionBuilder, ParsedRecord};
-use domain::{
-    base::{
-        header::Flags, iana::Class, message::ShortMessage, message_builder::{AnswerBuilder, PushError}, name::{FlattenInto, FromStrError}, wire::{Composer, ParseError}, Dname, DnameBuilder, Message, MessageBuilder, ParsedDname, Record, Rtype, ToDname
-    },
-    dep::octseq::{OctetsBuilder, ShortBuf},
-    rdata::{Aaaa, AllRecordData, Cname, Ptr, Srv, Txt, A},
-};
-use log::trace;
-use octseq::{EmptyBuilder, FreezeBuilder, FromBuilder, Octets, Truncate};
+//use bitflags::bitflags;
+
+use ::domain::base::message::Section;
+use ::domain::base::{Message, MessageBuilder, ParsedRecord, RecordSection};
+use ::domain::dep::octseq::{FreezeBuilder, FromBuilder, OctetsBuilder, Truncate};
+use domain::base::iana::Class;
+use domain::base::message::ShortMessage;
+use domain::base::message_builder::PushError;
+use domain::base::name::{FromStrError, Label, ToLabelIter};
+use domain::base::record::ComposeRecord;
+use domain::base::wire::{Composer, ParseError};
+use domain::base::ToName;
+use domain::base::{ParsedName, Record, Ttl};
+use domain::dep::octseq::Octets;
+use domain::dep::octseq::ShortBuf;
+use domain::rdata::{Aaaa, AllRecordData, Ptr, Srv, A};
 
 // #[cfg(feature = "io")]
 // pub mod io;
 
-/// Re-export the domain lib if the user would like to directly 
+/// Re-export the domain lib if the user would like to directly
 /// assemble / parse mDNS messages.
 pub mod domain {
     pub use domain::*;
 }
+
+pub mod host;
 
 #[derive(Debug)]
 pub enum MdnsError {
@@ -71,469 +81,181 @@ impl From<ParseError> for MdnsError {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Host<'a> {
-    pub id: u16,
-    pub hostname: &'a str,
-    pub ip: [u8; 4],
-    pub ipv6: Option<[u8; 16]>,
+#[derive(Clone)]
+pub struct NameLabels<'a>(&'a [&'a str]);
+
+impl<'a> NameLabels<'a> {
+    pub const fn new(labels: &'a [&'a str]) -> Self {
+        Self(labels)
+    }
 }
 
-impl<'a> Host<'a> {
-    pub fn broadcast<'s, T>(
-        &self,
-        services: T,
-        buf: &mut [u8],
-        ttl_sec: u32,
-    ) -> Result<usize, MdnsError>
-    where
-        T: IntoIterator<Item = Service<'s>> + Clone,
-    {
-        let buf = Buf(buf, 0);
+impl<'a> ToName for NameLabels<'a> {}
 
-        let message = MessageBuilder::from_target(buf)?;
+#[derive(Clone)]
+pub struct NameLabelsIter<'a> {
+    name: &'a NameLabels<'a>,
+    index: usize,
+}
 
-        let mut answer = message.answer();
+impl<'a> Iterator for NameLabelsIter<'a> {
+    type Item = &'a Label;
 
-        self.set_broadcast(services, &mut answer, ttl_sec)?;
-
-        let buf = answer.finish();
-
-        Ok(buf.1)
-    }
-
-    pub fn respond<'s, T>(
-        &self,
-        services: T,
-        data: &[u8],
-        buf: &mut [u8],
-        ttl_sec: u32,
-    ) -> Result<usize, MdnsError>
-    where
-        T: IntoIterator<Item = Service<'s>> + Clone,
-    {
-        let buf = Buf(buf, 0);
-
-        let message = MessageBuilder::from_target(buf)?;
-
-        let mut answer = message.answer();
-
-        if self.set_response(data, services, &mut answer, ttl_sec)? {
-            let buf = answer.finish();
-
-            Ok(buf.1)
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.name.0.len() {
+            let label = Label::from_slice(self.name.0[self.index].as_bytes()).unwrap();
+            self.index += 1;
+            Some(label)
         } else {
-            Ok(0)
+            None
         }
     }
+}
 
-    fn set_broadcast<'s, T, F>(
-        &self,
-        services: F,
-        answer: &mut AnswerBuilder<T>,
-        ttl_sec: u32,
-    ) -> Result<(), MdnsError>
-    where
-        T: Composer,
-        F: IntoIterator<Item = Service<'s>> + Clone,
-    {
-        self.set_header(answer);
-
-        self.add_ipv4(answer, ttl_sec)?;
-        self.add_ipv6(answer, ttl_sec)?;
-
-        for service in services.clone() {
-            service.add_service(answer, self.hostname, ttl_sec)?;
-            service.add_service_type(answer, ttl_sec)?;
-            service.add_service_subtypes(answer, ttl_sec)?;
-            service.add_txt(answer, ttl_sec)?;
-        }
-
-        Ok(())
-    }
-
-    fn set_response<'s, T, F>(
-        &self,
-        data: &[u8],
-        services: F,
-        answer: &mut AnswerBuilder<T>,
-        ttl_sec: u32,
-    ) -> Result<bool, MdnsError>
-    where
-        T: Composer,
-        F: IntoIterator<Item = Service<'s>> + Clone,
-    {
-        self.set_header(answer);
-
-        let message = Message::from_octets(data)?;
-
-        let mut replied = false;
-
-        for question in message.question() {
-            trace!("Handling question {:?}", question);
-
-            let question = question?;
-
-            match question.qtype() {
-                Rtype::A
-                    if question
-                        .qname()
-                        .name_eq(&Host::host_fqdn(self.hostname, true)?) =>
-                {
-                    self.add_ipv4(answer, ttl_sec)?;
-                    replied = true;
-                }
-                Rtype::Aaaa
-                    if question
-                        .qname()
-                        .name_eq(&Host::host_fqdn(self.hostname, true)?) =>
-                {
-                    self.add_ipv6(answer, ttl_sec)?;
-                    replied = true;
-                }
-                Rtype::Srv => {
-                    for service in services.clone() {
-                        if question.qname().name_eq(&service.service_fqdn(true)?) {
-                            self.add_ipv4(answer, ttl_sec)?;
-                            self.add_ipv6(answer, ttl_sec)?;
-                            service.add_service(answer, self.hostname, ttl_sec)?;
-                            replied = true;
-                        }
-                    }
-                }
-                Rtype::Ptr => {
-                    for service in services.clone() {
-                        if question.qname().name_eq(&Service::dns_sd_fqdn(true)?) {
-                            service.add_service_type(answer, ttl_sec)?;
-                            replied = true;
-                        } else if question.qname().name_eq(&service.service_type_fqdn(true)?) {
-                            // TODO
-                            self.add_ipv4(answer, ttl_sec)?;
-                            self.add_ipv6(answer, ttl_sec)?;
-                            service.add_service(answer, self.hostname, ttl_sec)?;
-                            service.add_service_type(answer, ttl_sec)?;
-                            service.add_service_subtypes(answer, ttl_sec)?;
-                            service.add_txt(answer, ttl_sec)?;
-                            replied = true;
-                        }
-                    }
-                }
-                Rtype::Txt => {
-                    for service in services.clone() {
-                        if question.qname().name_eq(&service.service_fqdn(true)?) {
-                            service.add_txt(answer, ttl_sec)?;
-                            replied = true;
-                        }
-                    }
-                }
-                Rtype::Any => {
-                    // A / AAAA
-                    if question
-                        .qname()
-                        .name_eq(&Host::host_fqdn(self.hostname, true)?)
-                    {
-                        self.add_ipv4(answer, ttl_sec)?;
-                        self.add_ipv6(answer, ttl_sec)?;
-                        replied = true;
-                    }
-
-                    // PTR
-                    for service in services.clone() {
-                        if question.qname().name_eq(&Service::dns_sd_fqdn(true)?) {
-                            service.add_service_type(answer, ttl_sec)?;
-                            replied = true;
-                        } else if question.qname().name_eq(&service.service_type_fqdn(true)?) {
-                            // TODO
-                            self.add_ipv4(answer, ttl_sec)?;
-                            self.add_ipv6(answer, ttl_sec)?;
-                            service.add_service(answer, self.hostname, ttl_sec)?;
-                            service.add_service_type(answer, ttl_sec)?;
-                            service.add_service_subtypes(answer, ttl_sec)?;
-                            service.add_txt(answer, ttl_sec)?;
-                            replied = true;
-                        }
-                    }
-
-                    // SRV
-                    for service in services.clone() {
-                        if question.qname().name_eq(&service.service_fqdn(true)?) {
-                            self.add_ipv4(answer, ttl_sec)?;
-                            self.add_ipv6(answer, ttl_sec)?;
-                            service.add_service(answer, self.hostname, ttl_sec)?;
-                            replied = true;
-                        }
-                    }
-                }
-                _ => (),
-            }
-        }
-
-        Ok(replied)
-    }
-
-    fn set_header<T: Composer>(&self, answer: &mut AnswerBuilder<T>) {
-        let header = answer.header_mut();
-        header.set_id(self.id);
-        header.set_opcode(domain::base::iana::Opcode::Query);
-        header.set_rcode(domain::base::iana::Rcode::NoError);
-
-        let mut flags = Flags::new();
-        flags.qr = true;
-        flags.aa = true;
-        header.set_flags(flags);
-    }
-
-    fn add_ipv4<T: Composer>(
-        &self,
-        answer: &mut AnswerBuilder<T>,
-        ttl_sec: u32,
-    ) -> Result<(), PushError> {
-        answer.push((
-            Self::host_fqdn(self.hostname, false).unwrap(),
-            Class::In,
-            ttl_sec,
-            A::from_octets(self.ip[0], self.ip[1], self.ip[2], self.ip[3]),
-        ))
-    }
-
-    fn add_ipv6<T: Composer>(
-        &self,
-        answer: &mut AnswerBuilder<T>,
-        ttl_sec: u32,
-    ) -> Result<(), PushError> {
-        if let Some(ip) = &self.ipv6 {
-            answer.push((
-                Self::host_fqdn(self.hostname, false).unwrap(),
-                Class::In,
-                ttl_sec,
-                Aaaa::new((*ip).into()),
-            ))
+impl<'a> DoubleEndedIterator for NameLabelsIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.index > 0 {
+            self.index -= 1;
+            let label = Label::from_slice(self.name.0[self.index].as_bytes()).unwrap();
+            Some(label)
         } else {
-            Ok(())
+            None
         }
-    }
-
-    fn host_fqdn(hostname: &str, suffix: bool) -> Result<impl ToDname, FromStrError> {
-        let suffix = if suffix { "." } else { "" };
-
-        let mut host_fqdn = heapless07::String::<60>::new();
-        write!(host_fqdn, "{}.local{}", hostname, suffix,).unwrap();
-
-        Dname::<heapless07::Vec<u8, 64>>::from_chars(host_fqdn.chars())
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Service<'a> {
-    pub name: &'a str,
-    pub service: &'a str,
-    pub protocol: &'a str,
-    pub port: u16,
-    pub service_subtypes: &'a [&'a str],
-    pub txt_kvs: &'a [(&'a str, &'a str)],
-}
+impl<'a> ToLabelIter for NameLabels<'a> {
+    type LabelIter<'t> = NameLabelsIter<'t> where Self: 't;
 
-impl<'a> Service<'a> {
-    fn add_service<T: Composer>(
-        &self,
-        answer: &mut AnswerBuilder<T>,
-        hostname: &str,
-        ttl_sec: u32,
-    ) -> Result<(), PushError> {
-        answer.push((
-            self.service_fqdn(false).unwrap(),
-            Class::In,
-            ttl_sec,
-            Srv::new(0, 0, self.port, Host::host_fqdn(hostname, false).unwrap()),
-        ))
-    }
-
-    fn add_service_type<T: Composer>(
-        &self,
-        answer: &mut AnswerBuilder<T>,
-        ttl_sec: u32,
-    ) -> Result<(), PushError> {
-        answer.push((
-            Self::dns_sd_fqdn(false).unwrap(),
-            Class::In,
-            ttl_sec,
-            Ptr::new(self.service_type_fqdn(false).unwrap()),
-        ))?;
-
-        answer.push((
-            self.service_type_fqdn(false).unwrap(),
-            Class::In,
-            ttl_sec,
-            Ptr::new(self.service_fqdn(false).unwrap()),
-        ))
-    }
-
-    fn add_service_subtypes<T: Composer>(
-        &self,
-        answer: &mut AnswerBuilder<T>,
-        ttl_sec: u32,
-    ) -> Result<(), PushError> {
-        for service_subtype in self.service_subtypes {
-            self.add_service_subtype(answer, service_subtype, ttl_sec)?;
+    fn iter_labels(&self) -> Self::LabelIter<'_> {
+        NameLabelsIter {
+            name: self,
+            index: 0,
         }
-
-        Ok(())
-    }
-
-    fn add_service_subtype<T: Composer>(
-        &self,
-        answer: &mut AnswerBuilder<T>,
-        service_subtype: &str,
-        ttl_sec: u32,
-    ) -> Result<(), PushError> {
-        answer.push((
-            Self::dns_sd_fqdn(false).unwrap(),
-            Class::In,
-            ttl_sec,
-            Ptr::new(self.service_subtype_fqdn(service_subtype, false).unwrap()),
-        ))?;
-
-        answer.push((
-            self.service_subtype_fqdn(service_subtype, false).unwrap(),
-            Class::In,
-            ttl_sec,
-            Ptr::new(self.service_fqdn(false).unwrap()),
-        ))
-    }
-
-    fn add_txt<T: Composer>(
-        &self,
-        answer: &mut AnswerBuilder<T>,
-        ttl_sec: u32,
-    ) -> Result<(), PushError> {
-        // only way I found to create multiple parts in a Txt
-        // each slice is the length and then the data
-        let mut octets = heapless07::Vec::<_, 256>::new();
-        //octets.append_slice(&[1u8, b'X'])?;
-        //octets.append_slice(&[2u8, b'A', b'B'])?;
-        //octets.append_slice(&[0u8])?;
-        for (k, v) in self.txt_kvs {
-            octets.append_slice(&[(k.len() + v.len() + 1) as u8])?;
-            octets.append_slice(k.as_bytes())?;
-            octets.append_slice(&[b'='])?;
-            octets.append_slice(v.as_bytes())?;
-        }
-
-        let txt = Txt::from_octets(&mut octets).unwrap();
-
-        answer.push((self.service_fqdn(false).unwrap(), Class::In, ttl_sec, txt))
-    }
-
-    fn service_fqdn(&self, suffix: bool) -> Result<impl ToDname, FromStrError> {
-        let suffix = if suffix { "." } else { "" };
-
-        let mut service_fqdn = heapless07::String::<60>::new();
-        write!(
-            service_fqdn,
-            "{}.{}.{}.local{}",
-            self.name, self.service, self.protocol, suffix,
-        )
-        .unwrap();
-
-        Dname::<heapless07::Vec<u8, 64>>::from_chars(service_fqdn.chars())
-    }
-
-    fn service_type_fqdn(&self, suffix: bool) -> Result<impl ToDname, FromStrError> {
-        let suffix = if suffix { "." } else { "" };
-
-        let mut service_type_fqdn = heapless07::String::<60>::new();
-        write!(
-            service_type_fqdn,
-            "{}.{}.local{}",
-            self.service, self.protocol, suffix,
-        )
-        .unwrap();
-
-        Dname::<heapless07::Vec<u8, 64>>::from_chars(service_type_fqdn.chars())
-    }
-
-    fn service_subtype_fqdn(
-        &self,
-        service_subtype: &str,
-        suffix: bool,
-    ) -> Result<impl ToDname, FromStrError> {
-        let suffix = if suffix { "." } else { "" };
-
-        let mut service_subtype_fqdn = heapless07::String::<40>::new();
-        write!(
-            service_subtype_fqdn,
-            "{}._sub.{}.{}.local{}",
-            service_subtype, self.service, self.protocol, suffix,
-        )
-        .unwrap();
-
-        Dname::<heapless07::Vec<u8, 64>>::from_chars(service_subtype_fqdn.chars())
-    }
-
-    fn dns_sd_fqdn(suffix: bool) -> Result<impl ToDname, FromStrError> {
-        Dname::<heapless07::Vec<u8, 64>>::from_chars(
-            if suffix {
-                "_services._dns-sd._udp.local."
-            } else {
-                "_services._dns-sd._udp.local"
-            }
-            .chars(),
-        )
     }
 }
 
-pub enum Answer<'a> {
+pub enum Answer<N, T> {
     A {
-        name: &'a str,
-        ip: [u8; 4],
+        owner: N,
+        ip: Ipv4Addr,
     },
     AAAA {
-        name: &'a str,
-        ip: [u8; 16],
+        owner: N,
+        ip: Ipv6Addr,
     },
     Ptr {
-        name: &'a str,
-        ptr: &'a str,
+        owner: N,
+        ptr: T,
     },
     Srv {
-        name: &'a str,
+        owner: N,
         port: u16,
-        target: &'a str,
+        target: T,
     },
     Txt {
-        name: &'a str,
-        txt: &'a [(&'a str, &'a str)],
+        owner: N,
+        //txt: &'a [(&'a str, &'a str)],
     },
 }
+impl<N, T> Answer<N, T>
+where
+    N: ToName,
+    T: ToName,
+{
+    pub fn owner(&self) -> &N {
+        match self {
+            Self::A { owner, .. } => owner,
+            Self::AAAA { owner, .. } => owner,
+            Self::Ptr { owner, .. } => owner,
+            Self::Srv { owner, .. } => owner,
+            Self::Txt { owner, .. } => owner,
+        }
+    }
+}
 
-impl<'a> Answer<'a> {
-    pub fn from<O: Octets>(record: ParsedRecord<O>, buf: &'a mut Buf) -> Result<Self, MdnsError> {
-        //let answer = answer?;
+impl<'a, O, N> TryFrom<Record<ParsedName<O>, AllRecordData<O, N>>> for Answer<ParsedName<O>, N>
+where
+    O: Octets,
+    N: ToName,
+{
+    type Error = MdnsError;
 
-        let record = record.into_record::<AllRecordData<_, _>>()?.ok_or(MdnsError::InvalidMessage)?;
+    fn try_from(record: Record<ParsedName<O>, AllRecordData<O, N>>) -> Result<Self, Self::Error> {
+        Answer::parse(record)
+    }
+}
 
-        write!(buf, "{}", record.owner())?;
-        let name = core::str::from_utf8(buf.as_ref()).map_err(|_| MdnsError::InvalidMessage)?;
+impl<'a, O, N> ComposeRecord for Answer<O, N>
+where
+    O: ToName,
+    N: ToName,
+{
+    fn compose_record<Target: Composer + ?Sized>(
+        &self,
+        tgt: &mut Target,
+    ) -> Result<(), Target::AppendError> {
+        let ttl = Ttl::from_secs(60);
 
-        let answer = match record.data() {
-            AllRecordData::A(a) => Self::A { name, ip: a.addr().octets() },
-            AllRecordData::Aaaa(aaaa) => Self::AAAA { name, ip: aaaa.addr().octets() },
+        match self {
+            Self::A { owner, ip } => Record::new(
+                owner,
+                Class::IN,
+                ttl,
+                A::new(domain::base::net::Ipv4Addr::from(ip.octets())),
+            )
+            .compose(tgt),
+            Self::AAAA { owner, ip } => Record::new(
+                owner,
+                Class::IN,
+                ttl,
+                Aaaa::new(domain::base::net::Ipv6Addr::from(ip.octets())),
+            )
+            .compose(tgt),
+            Self::Ptr { owner, ptr } => {
+                Record::new(owner, Class::IN, ttl, Ptr::new(ptr)).compose(tgt)
+            }
+            Self::Srv {
+                owner,
+                port,
+                target,
+            } => Record::new(owner, Class::IN, ttl, Srv::new(0, 0, *port, target)).compose(tgt),
+            _ => todo!(),
+            // Self::Txt { owner } => {
+            //     Record::new(owner, Class::IN, Ttl::from_secs(60), AllRecordData::Txt(&[]))
+            //         .compose(target)
             // }
-            // AllRecordData::Ptr(ptr) => {
-            //     //let hostname: Dname<Buf> = ptr.ptrdname();
-            // }
+        }
+    }
+}
 
-            // Rtype::Srv => {
-            // }
-            // Rtype::Ptr => {
-            //     let ipv6: Record<_, ParsedDname<_>> = answer.into_record()?.ok_or(MdnsError::InvalidMessage)?;
+impl<O, N> Answer<ParsedName<O>, N> {
+    pub fn parse(record: Record<ParsedName<O>, AllRecordData<O, N>>) -> Result<Self, MdnsError>
+    where
+        O: Octets,
+        N: ToName,
+    {
+        let (owner, data) = record.into_owner_and_data();
 
-            // }
+        let answer = match data {
+            AllRecordData::A(a) => Self::A {
+                owner,
+                ip: a.addr().octets().into(),
+            },
+            AllRecordData::Aaaa(aaaa) => Self::AAAA {
+                owner,
+                ip: aaaa.addr().octets().into(),
+            },
+            AllRecordData::Ptr(ptr) => Self::Ptr {
+                owner,
+                ptr: ptr.into_ptrdname(),
+            },
+            AllRecordData::Srv(srv) => Self::Srv {
+                owner,
+                port: srv.port(),
+                target: srv.into_target(),
+            },
             // Rtype::Txt => {
-            // }
-            // AllRecordData::Srv(srv) => {
-            //     host.id = srv.port();
-            //     //host.hostname = srv.target().to_string();
             // }
             _ => todo!(),
         };
@@ -542,156 +264,259 @@ impl<'a> Answer<'a> {
     }
 }
 
-pub enum Question<'a> {
-    A(&'a str),
-    AAAA(&'a str),
-    Ptr(&'a str),
-    Srv(&'a str),
-    Txt(&'a str),
+pub trait Answers {
+    type Owner: ToName;
+    type Target: ToName;
+
+    fn for_each<F, E>(&self, f: F) -> Result<(), E>
+    where
+        F: FnMut(&Answer<Self::Owner, Self::Target>) -> Result<(), E>,
+        E: From<MdnsError>;
+
+    fn serialize(&self, buf: &mut [u8], ttl_sec: u32) -> Result<usize, MdnsError> {
+        let buf = Buf(buf, 0);
+
+        let message = MessageBuilder::from_target(buf)?;
+
+        let mut ab = message.answer();
+
+        //self.set_answer_header(&mut answer);
+
+        self.for_each(|answer| {
+            ab.push(answer)?;
+
+            Ok::<_, MdnsError>(())
+        })?;
+
+        let buf = ab.finish();
+
+        Ok(buf.1)
+    }
 }
 
-// pub enum SimpleQueryDetails<'a> {
-//     Host(&'a str),
-//     Service(&'a str),
-//     ServiceType(&'a str),
-// }
+impl<'a, O: Octets> IntoIterator for Pr<&'a Message<O>> {
+    type Item = Answer<ParsedName<O::Range<'a>>, ParsedName<O::Range<'a>>>;
+    type IntoIter = Pr<RecordSection<'a, O>>;
 
-// pub enum IteratorWrapper<H, S, T> {
-//     Host(H),
-//     Service(S),
-//     ServiceType(T),
-// }
+    fn into_iter(self) -> Self::IntoIter {
+        let answers = self.0.answer().unwrap();
 
-// impl<'a, H, S, T> Iterator for IteratorWrapper<H, S, T>
+        Pr(answers)
+    }
+}
+
+pub struct Pr<T>(T);
+
+impl<'a, O: Octets> Iterator for Pr<RecordSection<'a, O>> {
+    type Item = Answer<ParsedName<O::Range<'a>>, ParsedName<O::Range<'a>>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let answer = self.0.next();
+
+        if let Some(answer) = answer {
+            let answer = answer.unwrap();
+
+            let record = answer
+                .into_record::<AllRecordData<_, _>>()
+                .unwrap()
+                .ok_or(MdnsError::InvalidMessage)
+                .unwrap();
+
+            let answer = Answer::try_from(record).unwrap();
+
+            Some(answer)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> Answers for &'a [u8] {
+    type Owner = ParsedName<&'a [u8]> where Self: 'a;
+    type Target = ParsedName<&'a [u8]> where Self: 'a;
+
+    fn for_each<F, E>(&self, mut f: F) -> Result<(), E>
+    where
+        F: FnMut(&Answer<Self::Owner, Self::Target>) -> Result<(), E>,
+        E: From<MdnsError>,
+    {
+        let message = Message::from_octets(self).unwrap();
+
+        for answer in message.answer().unwrap() {
+            let answer = answer.unwrap();
+
+            let record = answer
+                .into_record::<AllRecordData<_, _>>()
+                .unwrap()
+                .ok_or(MdnsError::InvalidMessage)?;
+
+            let answer = Answer::try_from(record)?;
+
+            f(&answer)?;
+        }
+
+        Ok(())
+    }
+}
+
+//impl<T, F>
+
+// impl<N> Answer<N>
 // where
-//     H: Iterator<Item = Question<'a>>,
-//     S: Iterator<Item = Question<'a>>,
-//     T: Iterator<Item = Question<'a>>,
+//     N: ToName,
 // {
-//     type Item = Question<'a>;
-
-//     fn next(&mut self) -> Option<Question<'a>> {
-//         match self {
-//             Self::Host(iter) => iter.next(),
-//             Self::Service(iter) => iter.next(),
-//             Self::ServiceType(iter) => iter.next(),
-//         }
-//     }
 // }
 
-// impl<'a> SimpleQueryDetails<'a> {
-//     pub fn questions(&self) -> impl Iterator<Item = Question<'_>> {
-//         match self {
-//             SimpleQueryDetails::Host(fqdn) => IteratorWrapper::Host(once(Question::A(fqdn)).chain(once(Question::AAAA(fqdn)))),
-//             SimpleQueryDetails::Service(fqdn) => IteratorWrapper::Service(once(Question::Ptr(fqdn))),
-//             SimpleQueryDetails::ServiceType(fqdn) => IteratorWrapper::ServiceType(once(Question::Ptr(fqdn))),
-//         }
-//     }
+// pub enum Question<'a> {
+//     A(&'a str),
+//     AAAA(&'a str),
+//     Ptr(&'a str),
+//     Srv(&'a str),
+//     Txt(&'a str),
 // }
 
-// pub enum QueryDetails<'a> {
-//     Simple(SimpleQueryDetails<'a>),
-//     Complex(&'a [Question<'a>]),
+// // pub enum SimpleQueryDetails<'a> {
+// //     Host(&'a str),
+// //     Service(&'a str),
+// //     ServiceType(&'a str),
+// // }
+
+// // pub enum IteratorWrapper<H, S, T> {
+// //     Host(H),
+// //     Service(S),
+// //     ServiceType(T),
+// // }
+
+// // impl<'a, H, S, T> Iterator for IteratorWrapper<H, S, T>
+// // where
+// //     H: Iterator<Item = Question<'a>>,
+// //     S: Iterator<Item = Question<'a>>,
+// //     T: Iterator<Item = Question<'a>>,
+// // {
+// //     type Item = Question<'a>;
+
+// //     fn next(&mut self) -> Option<Question<'a>> {
+// //         match self {
+// //             Self::Host(iter) => iter.next(),
+// //             Self::Service(iter) => iter.next(),
+// //             Self::ServiceType(iter) => iter.next(),
+// //         }
+// //     }
+// // }
+
+// // impl<'a> SimpleQueryDetails<'a> {
+// //     pub fn questions(&self) -> impl Iterator<Item = Question<'_>> {
+// //         match self {
+// //             SimpleQueryDetails::Host(fqdn) => IteratorWrapper::Host(once(Question::A(fqdn)).chain(once(Question::AAAA(fqdn)))),
+// //             SimpleQueryDetails::Service(fqdn) => IteratorWrapper::Service(once(Question::Ptr(fqdn))),
+// //             SimpleQueryDetails::ServiceType(fqdn) => IteratorWrapper::ServiceType(once(Question::Ptr(fqdn))),
+// //         }
+// //     }
+// // }
+
+// // pub enum QueryDetails<'a> {
+// //     Simple(SimpleQueryDetails<'a>),
+// //     Complex(&'a [Question<'a>]),
+// // }
+
+// // pub struct Query<'a> {
+// //     pub domain: &'a str,
+// //     pub query_details: QueryDetails<'a>,
+// // }
+
+// impl<'a> Question<'a> {
+//     // pub fn ask<'s>(questions: &'a [Self], buf: &mut [u8]) -> Result<usize, MdnsError> {
+//     //     let buf = Buf(buf, 0);
+
+//     //     let message = MessageBuilder::from_target(buf)?;
+
+//     //     let mut qb = message.question();
+
+//     //     for question in questions {
+//     //         self.push(&mut qb)?;
+//     //     }
+
+//     //     let buf = qb.finish();
+
+//     //     Ok(buf.1)
+//     // }
+
+//     // fn push(&self, qb: &mut QuestionBuilder<Buf>) -> Result<(), MdnsError> {
+//     //     match self {
+//     //         Self::A(fqdn) => qb.push(((*fqdn).try_into().unwrap(), Rtype::A, Class::In))?,
+//     //         Self::AAAA(fqdn) => qb.push((fqdn.into(), Rtype::Aaaa, Class::In))?,
+//     //         Self::Ptr(fqdn) => qb.push((fqdn.into(), Rtype::Ptr, Class::In))?,
+//     //         Self::Srv(fqdn) => qb.push((fqdn.into(), Rtype::Srv, Class::In))?,
+//     //         Self::Txt(fqdn) => qb.push((fqdn.into(), Rtype::Txt, Class::In))?,
+//     //     }
+
+//     //     Ok(())
+//     // }
+
+//     // pub fn decode_reply<'s>(&self, data: &[u8], buf: &'s mut [u8]) -> Result<impl Iterator<Item = Answer<'s>>, MdnsError> {
+//     //     // if self.set_response(data, services, &mut answer, ttl_sec)? {
+//     //     //     let buf = answer.finish();
+
+//     //     //     Ok(buf.1)
+//     //     // } else {
+//     //     //     Ok(0)
+//     //     // }
+
+//     //     // Ok(buf.1)
+
+//     //     let message = Message::from_octets(data)?;
+
+//     //     let mut replied = false;
+
+//     //     let mut host = Host {
+//     //         id: 0,
+//     //         hostname: "",
+//     //         ip: [0, 0, 0, 0],
+//     //         ipv6: None,
+//     //     };
+
+//     //     let buf = Buf(buf, 0);
+
+//     //     for answer in message.answer()? {
+//     //         let answer = answer?;
+
+//     //         //trace!("Handling answer {:?}", answer);
+
+//     //         //let answer = answer?;
+
+//     //         let record = answer.into_record::<AllRecordData<_, _>>()?.ok_or(MdnsError::InvalidMessage)?;
+
+//     //         match record.into_data() {
+//     //             AllRecordData::A(a) => {
+//     //                 host.ip = a.addr().octets();
+//     //             }
+//     //             AllRecordData::Aaaa(aaaa) => {
+//     //                 host.ipv6 = Some(aaaa.addr().octets());
+//     //             }
+//     //             AllRecordData::Ptr(ptr) => {
+//     //                 //let hostname: Dname<Buf> = ptr.ptrdname();
+//     //             }
+
+//     //             // Rtype::Srv => {
+//     //             // }
+//     //             // Rtype::Ptr => {
+//     //             //     let ipv6: Record<_, ParsedDname<_>> = answer.into_record()?.ok_or(MdnsError::InvalidMessage)?;
+
+//     //             // }
+//     //             // Rtype::Txt => {
+//     //             // }
+//     //             AllRecordData::Srv(srv) => {
+//     //                 host.id = srv.port();
+//     //                 //host.hostname = srv.target().to_string();
+//     //             }
+//     //             _ => (),
+//     //         }
+//     //     }
+
+//     //     //Ok(host)
+//     //     Ok(core::iter::empty())
+//     // }
 // }
-
-// pub struct Query<'a> {
-//     pub domain: &'a str,
-//     pub query_details: QueryDetails<'a>,
-// }
-
-impl<'a> Question<'a> {
-    // pub fn ask<'s>(questions: &'a [Self], buf: &mut [u8]) -> Result<usize, MdnsError> {
-    //     let buf = Buf(buf, 0);
-
-    //     let message = MessageBuilder::from_target(buf)?;
-
-    //     let mut qb = message.question();
-
-    //     for question in questions {
-    //         self.push(&mut qb)?;
-    //     }
-
-    //     let buf = qb.finish();
-
-    //     Ok(buf.1)
-    // }
-
-    // fn push(&self, qb: &mut QuestionBuilder<Buf>) -> Result<(), MdnsError> {
-    //     match self {
-    //         Self::A(fqdn) => qb.push(((*fqdn).try_into().unwrap(), Rtype::A, Class::In))?,
-    //         Self::AAAA(fqdn) => qb.push((fqdn.into(), Rtype::Aaaa, Class::In))?,
-    //         Self::Ptr(fqdn) => qb.push((fqdn.into(), Rtype::Ptr, Class::In))?,
-    //         Self::Srv(fqdn) => qb.push((fqdn.into(), Rtype::Srv, Class::In))?,
-    //         Self::Txt(fqdn) => qb.push((fqdn.into(), Rtype::Txt, Class::In))?,
-    //     }
-
-    //     Ok(())
-    // }
-    
-    // pub fn decode_reply<'s>(&self, data: &[u8], buf: &'s mut [u8]) -> Result<impl Iterator<Item = Answer<'s>>, MdnsError> {
-    //     // if self.set_response(data, services, &mut answer, ttl_sec)? {
-    //     //     let buf = answer.finish();
-
-    //     //     Ok(buf.1)
-    //     // } else {
-    //     //     Ok(0)
-    //     // }
-
-    //     // Ok(buf.1)
-
-    //     let message = Message::from_octets(data)?;
-
-    //     let mut replied = false;
-
-    //     let mut host = Host {
-    //         id: 0,
-    //         hostname: "",
-    //         ip: [0, 0, 0, 0],
-    //         ipv6: None,
-    //     };
-
-    //     let buf = Buf(buf, 0);
-
-    //     for answer in message.answer()? {
-    //         let answer = answer?;
-
-    //         //trace!("Handling answer {:?}", answer);
-
-    //         //let answer = answer?;
-
-    //         let record = answer.into_record::<AllRecordData<_, _>>()?.ok_or(MdnsError::InvalidMessage)?;
-
-    //         match record.into_data() {
-    //             AllRecordData::A(a) => {
-    //                 host.ip = a.addr().octets();
-    //             }
-    //             AllRecordData::Aaaa(aaaa) => {
-    //                 host.ipv6 = Some(aaaa.addr().octets());
-    //             }
-    //             AllRecordData::Ptr(ptr) => {
-    //                 //let hostname: Dname<Buf> = ptr.ptrdname();
-    //             }
-
-    //             // Rtype::Srv => {
-    //             // }
-    //             // Rtype::Ptr => {
-    //             //     let ipv6: Record<_, ParsedDname<_>> = answer.into_record()?.ok_or(MdnsError::InvalidMessage)?;
-
-    //             // }
-    //             // Rtype::Txt => {
-    //             // }
-    //             AllRecordData::Srv(srv) => {
-    //                 host.id = srv.port();
-    //                 //host.hostname = srv.target().to_string();
-    //             }
-    //             _ => (),
-    //         }
-    //     }
-
-    //     //Ok(host)
-    //     Ok(core::iter::empty())
-    // }
-}
 
 pub struct Buf<'a>(pub &'a mut [u8], pub usize);
 
