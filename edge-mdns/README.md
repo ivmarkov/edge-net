@@ -15,9 +15,12 @@ For other protocols, look at the [edge-net](https://github.com/ivmarkov/edge-net
 ```rust
 use core::net::Ipv4Addr;
 
-use edge_mdns::io::{self, MdnsIoError, MdnsRunBuffers, DEFAULT_SOCKET};
-use edge_mdns::Host;
-use edge_nal::{Multicast, UdpBind, UdpSplit};
+use edge_mdns::domain::base::Ttl;
+use edge_mdns::io::{self, MdnsIoError, DEFAULT_SOCKET};
+use edge_mdns::{host::Host, HostAnswersMdnsHandler};
+use edge_nal::{UdpBind, UdpSplit};
+
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 
 use log::*;
 
@@ -33,11 +36,12 @@ fn main() {
 
     let stack = edge_nal_std::Stack::new();
 
-    let mut buffers = MdnsRunBuffers::new();
+    let (mut recv_buf, mut send_buf) = ([0; 1500], [0; 1500]);
 
     futures_lite::future::block_on(run::<edge_nal_std::Stack>(
         &stack,
-        &mut buffers,
+        &mut recv_buf,
+        &mut send_buf,
         OUR_NAME,
         OUR_IP,
     ))
@@ -46,32 +50,37 @@ fn main() {
 
 async fn run<T>(
     stack: &T,
-    buffers: &mut MdnsRunBuffers,
+    recv_buf: &mut [u8],
+    send_buf: &mut [u8],
     our_name: &str,
     our_ip: Ipv4Addr,
 ) -> Result<(), MdnsIoError<T::Error>>
 where
     T: UdpBind,
-    for<'a> <T as UdpBind>::Socket<'a>: Multicast<Error = T::Error> + UdpSplit<Error = T::Error>,
 {
     info!("About to run an mDNS responder for our PC. It will be addressable using {our_name}.local, so try to `ping {our_name}.local`.");
 
+    let mut socket = io::bind(stack, DEFAULT_SOCKET, Some(Ipv4Addr::UNSPECIFIED), Some(0)).await?;
+
+    let (recv, send) = socket.split();
+
     let host = Host {
-        id: 0,
         hostname: our_name,
-        ip: our_ip.octets(),
+        ip: our_ip,
         ipv6: None,
+        ttl: Ttl::from_secs(60),
     };
 
-    io::run(
-        &host,
+    let mdns = io::Mdns::<NoopRawMutex, _, _, _>::new(
+        HostAnswersMdnsHandler::new(&host),
         Some(Ipv4Addr::UNSPECIFIED),
         Some(0),
-        [],
-        stack,
-        DEFAULT_SOCKET,
-        buffers,
-    )
-    .await
+        recv,
+        recv_buf,
+        send,
+        send_buf,
+    );
+
+    mdns.run().await
 }
 ```

@@ -2,28 +2,23 @@
 #![warn(clippy::large_futures)]
 
 use core::fmt::{self, Display};
-use core::net::{Ipv4Addr, Ipv6Addr};
 use core::ops::RangeBounds;
 
-//use bitflags::bitflags;
-
-use ::domain::base::message::Section;
-use ::domain::base::{Message, MessageBuilder, ParsedRecord, RecordSection};
-use ::domain::dep::octseq::{FreezeBuilder, FromBuilder, OctetsBuilder, Truncate};
-use domain::base::iana::Class;
+use ::domain::base::header::Flags;
+use ::domain::base::iana::{Opcode, Rcode};
 use domain::base::message::ShortMessage;
 use domain::base::message_builder::PushError;
 use domain::base::name::{FromStrError, Label, ToLabelIter};
-use domain::base::record::ComposeRecord;
+use domain::base::rdata::ComposeRecordData;
 use domain::base::wire::{Composer, ParseError};
-use domain::base::ToName;
-use domain::base::{ParsedName, Record, Ttl};
-use domain::dep::octseq::Octets;
-use domain::dep::octseq::ShortBuf;
-use domain::rdata::{Aaaa, AllRecordData, Ptr, Srv, A};
+use domain::base::{
+    Message, MessageBuilder, ParsedName, Question, Record, RecordData, Rtype, ToName,
+};
+use domain::dep::octseq::{FreezeBuilder, FromBuilder, Octets, OctetsBuilder, ShortBuf, Truncate};
+use domain::rdata::AllRecordData;
 
-// #[cfg(feature = "io")]
-// pub mod io;
+#[cfg(feature = "io")]
+pub mod io;
 
 /// Re-export the domain lib if the user would like to directly
 /// assemble / parse mDNS messages.
@@ -33,6 +28,11 @@ pub mod domain {
 
 pub mod host;
 
+/// The DNS-SD owner name.
+pub const DNS_SD_OWNER: NameLabels = NameLabels(&["_services", "_dns-sd", "_udp", "local"]);
+
+/// A wrapper type for the errors returned by the `domain` library during parsing and
+/// constructing mDNS messages.
 #[derive(Debug)]
 pub enum MdnsError {
     ShortBuf,
@@ -81,10 +81,15 @@ impl From<ParseError> for MdnsError {
     }
 }
 
+/// This struct allows the construction of a `domain` lib Name from
+/// a bunch of `&str` labels.
+///
+/// Implements the `domain` lib `ToName` trait.
 #[derive(Clone)]
 pub struct NameLabels<'a>(&'a [&'a str]);
 
 impl<'a> NameLabels<'a> {
+    /// Create a new `NameLabels` instance from a slice of `&str` labels.
     pub const fn new(labels: &'a [&'a str]) -> Self {
         Self(labels)
     }
@@ -92,6 +97,7 @@ impl<'a> NameLabels<'a> {
 
 impl<'a> ToName for NameLabels<'a> {}
 
+/// An iterator over the labels in a `NameLabels` instance.
 #[derive(Clone)]
 pub struct NameLabelsIter<'a> {
     name: &'a NameLabels<'a>,
@@ -135,390 +141,119 @@ impl<'a> ToLabelIter for NameLabels<'a> {
     }
 }
 
-pub enum Answer<N, T> {
-    A {
-        owner: N,
-        ip: Ipv4Addr,
-    },
-    AAAA {
-        owner: N,
-        ip: Ipv6Addr,
-    },
-    Ptr {
-        owner: N,
-        ptr: T,
-    },
-    Srv {
-        owner: N,
-        port: u16,
-        target: T,
-    },
-    Txt {
-        owner: N,
-        //txt: &'a [(&'a str, &'a str)],
-    },
-}
-impl<N, T> Answer<N, T>
-where
-    N: ToName,
-    T: ToName,
-{
-    pub fn owner(&self) -> &N {
-        match self {
-            Self::A { owner, .. } => owner,
-            Self::AAAA { owner, .. } => owner,
-            Self::Ptr { owner, .. } => owner,
-            Self::Srv { owner, .. } => owner,
-            Self::Txt { owner, .. } => owner,
-        }
+/// A custom struct for representing a TXT data record off from a slice of
+/// key-value `&str` pairs.
+pub struct Txt<'a>(&'a [(&'a str, &'a str)]);
+
+impl<'a> Txt<'a> {
+    pub const fn new(txt: &'a [(&'a str, &'a str)]) -> Self {
+        Self(txt)
     }
 }
 
-impl<'a, O, N> TryFrom<Record<ParsedName<O>, AllRecordData<O, N>>> for Answer<ParsedName<O>, N>
-where
-    O: Octets,
-    N: ToName,
-{
-    type Error = MdnsError;
-
-    fn try_from(record: Record<ParsedName<O>, AllRecordData<O, N>>) -> Result<Self, Self::Error> {
-        Answer::parse(record)
+impl<'a> RecordData for Txt<'a> {
+    fn rtype(&self) -> Rtype {
+        Rtype::TXT
     }
 }
 
-impl<'a, O, N> ComposeRecord for Answer<O, N>
-where
-    O: ToName,
-    N: ToName,
-{
-    fn compose_record<Target: Composer + ?Sized>(
+impl<'a> ComposeRecordData for Txt<'a> {
+    fn rdlen(&self, _compress: bool) -> Option<u16> {
+        None
+    }
+
+    fn compose_rdata<Target: Composer + ?Sized>(
         &self,
-        tgt: &mut Target,
+        target: &mut Target,
     ) -> Result<(), Target::AppendError> {
-        let ttl = Ttl::from_secs(60);
-
-        match self {
-            Self::A { owner, ip } => Record::new(
-                owner,
-                Class::IN,
-                ttl,
-                A::new(domain::base::net::Ipv4Addr::from(ip.octets())),
-            )
-            .compose(tgt),
-            Self::AAAA { owner, ip } => Record::new(
-                owner,
-                Class::IN,
-                ttl,
-                Aaaa::new(domain::base::net::Ipv6Addr::from(ip.octets())),
-            )
-            .compose(tgt),
-            Self::Ptr { owner, ptr } => {
-                Record::new(owner, Class::IN, ttl, Ptr::new(ptr)).compose(tgt)
-            }
-            Self::Srv {
-                owner,
-                port,
-                target,
-            } => Record::new(owner, Class::IN, ttl, Srv::new(0, 0, *port, target)).compose(tgt),
-            _ => todo!(),
-            // Self::Txt { owner } => {
-            //     Record::new(owner, Class::IN, Ttl::from_secs(60), AllRecordData::Txt(&[]))
-            //         .compose(target)
-            // }
-        }
-    }
-}
-
-impl<O, N> Answer<ParsedName<O>, N> {
-    pub fn parse(record: Record<ParsedName<O>, AllRecordData<O, N>>) -> Result<Self, MdnsError>
-    where
-        O: Octets,
-        N: ToName,
-    {
-        let (owner, data) = record.into_owner_and_data();
-
-        let answer = match data {
-            AllRecordData::A(a) => Self::A {
-                owner,
-                ip: a.addr().octets().into(),
-            },
-            AllRecordData::Aaaa(aaaa) => Self::AAAA {
-                owner,
-                ip: aaaa.addr().octets().into(),
-            },
-            AllRecordData::Ptr(ptr) => Self::Ptr {
-                owner,
-                ptr: ptr.into_ptrdname(),
-            },
-            AllRecordData::Srv(srv) => Self::Srv {
-                owner,
-                port: srv.port(),
-                target: srv.into_target(),
-            },
-            // Rtype::Txt => {
-            // }
-            _ => todo!(),
-        };
-
-        Ok(answer)
-    }
-}
-
-pub trait Answers {
-    type Owner: ToName;
-    type Target: ToName;
-
-    fn for_each<F, E>(&self, f: F) -> Result<(), E>
-    where
-        F: FnMut(&Answer<Self::Owner, Self::Target>) -> Result<(), E>,
-        E: From<MdnsError>;
-
-    fn serialize(&self, buf: &mut [u8], ttl_sec: u32) -> Result<usize, MdnsError> {
-        let buf = Buf(buf, 0);
-
-        let message = MessageBuilder::from_target(buf)?;
-
-        let mut ab = message.answer();
-
-        //self.set_answer_header(&mut answer);
-
-        self.for_each(|answer| {
-            ab.push(answer)?;
-
-            Ok::<_, MdnsError>(())
-        })?;
-
-        let buf = ab.finish();
-
-        Ok(buf.1)
-    }
-}
-
-impl<'a, O: Octets> IntoIterator for Pr<&'a Message<O>> {
-    type Item = Answer<ParsedName<O::Range<'a>>, ParsedName<O::Range<'a>>>;
-    type IntoIter = Pr<RecordSection<'a, O>>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        let answers = self.0.answer().unwrap();
-
-        Pr(answers)
-    }
-}
-
-pub struct Pr<T>(T);
-
-impl<'a, O: Octets> Iterator for Pr<RecordSection<'a, O>> {
-    type Item = Answer<ParsedName<O::Range<'a>>, ParsedName<O::Range<'a>>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let answer = self.0.next();
-
-        if let Some(answer) = answer {
-            let answer = answer.unwrap();
-
-            let record = answer
-                .into_record::<AllRecordData<_, _>>()
-                .unwrap()
-                .ok_or(MdnsError::InvalidMessage)
-                .unwrap();
-
-            let answer = Answer::try_from(record).unwrap();
-
-            Some(answer)
+        if self.0.is_empty() {
+            target.append_slice(&[0])?;
         } else {
-            None
-        }
-    }
-}
-
-impl<'a> Answers for &'a [u8] {
-    type Owner = ParsedName<&'a [u8]> where Self: 'a;
-    type Target = ParsedName<&'a [u8]> where Self: 'a;
-
-    fn for_each<F, E>(&self, mut f: F) -> Result<(), E>
-    where
-        F: FnMut(&Answer<Self::Owner, Self::Target>) -> Result<(), E>,
-        E: From<MdnsError>,
-    {
-        let message = Message::from_octets(self).unwrap();
-
-        for answer in message.answer().unwrap() {
-            let answer = answer.unwrap();
-
-            let record = answer
-                .into_record::<AllRecordData<_, _>>()
-                .unwrap()
-                .ok_or(MdnsError::InvalidMessage)?;
-
-            let answer = Answer::try_from(record)?;
-
-            f(&answer)?;
+            // TODO: Will not work for (k, v) pairs larger than 254 bytes in length
+            for (k, v) in self.0 {
+                target.append_slice(&[(k.len() + v.len() + 1) as u8])?;
+                target.append_slice(k.as_bytes())?;
+                target.append_slice(&[b'='])?;
+                target.append_slice(v.as_bytes())?;
+            }
         }
 
         Ok(())
     }
+
+    fn compose_canonical_rdata<Target: Composer + ?Sized>(
+        &self,
+        target: &mut Target,
+    ) -> Result<(), Target::AppendError> {
+        self.compose_rdata(target)
+    }
 }
 
-//impl<T, F>
+/// A custom struct allowing to chain together multiple custom record data types.
+/// Allows e.g. using the custom `Txt` struct from above and chain it with `domain`'s `AllRecordData`,
+pub enum RecordDataChain<T, U> {
+    This(T),
+    Next(U),
+}
 
-// impl<N> Answer<N>
-// where
-//     N: ToName,
-// {
-// }
+impl<T, U> RecordData for RecordDataChain<T, U>
+where
+    T: RecordData,
+    U: RecordData,
+{
+    fn rtype(&self) -> Rtype {
+        match self {
+            Self::This(data) => data.rtype(),
+            Self::Next(data) => data.rtype(),
+        }
+    }
+}
 
-// pub enum Question<'a> {
-//     A(&'a str),
-//     AAAA(&'a str),
-//     Ptr(&'a str),
-//     Srv(&'a str),
-//     Txt(&'a str),
-// }
+impl<T, U> ComposeRecordData for RecordDataChain<T, U>
+where
+    T: ComposeRecordData,
+    U: ComposeRecordData,
+{
+    fn rdlen(&self, compress: bool) -> Option<u16> {
+        match self {
+            Self::This(data) => data.rdlen(compress),
+            Self::Next(data) => data.rdlen(compress),
+        }
+    }
 
-// // pub enum SimpleQueryDetails<'a> {
-// //     Host(&'a str),
-// //     Service(&'a str),
-// //     ServiceType(&'a str),
-// // }
+    fn compose_rdata<Target: Composer + ?Sized>(
+        &self,
+        target: &mut Target,
+    ) -> Result<(), Target::AppendError> {
+        match self {
+            Self::This(data) => data.compose_rdata(target),
+            Self::Next(data) => data.compose_rdata(target),
+        }
+    }
 
-// // pub enum IteratorWrapper<H, S, T> {
-// //     Host(H),
-// //     Service(S),
-// //     ServiceType(T),
-// // }
+    fn compose_canonical_rdata<Target: Composer + ?Sized>(
+        &self,
+        target: &mut Target,
+    ) -> Result<(), Target::AppendError> {
+        match self {
+            Self::This(data) => data.compose_canonical_rdata(target),
+            Self::Next(data) => data.compose_canonical_rdata(target),
+        }
+    }
+}
 
-// // impl<'a, H, S, T> Iterator for IteratorWrapper<H, S, T>
-// // where
-// //     H: Iterator<Item = Question<'a>>,
-// //     S: Iterator<Item = Question<'a>>,
-// //     T: Iterator<Item = Question<'a>>,
-// // {
-// //     type Item = Question<'a>;
-
-// //     fn next(&mut self) -> Option<Question<'a>> {
-// //         match self {
-// //             Self::Host(iter) => iter.next(),
-// //             Self::Service(iter) => iter.next(),
-// //             Self::ServiceType(iter) => iter.next(),
-// //         }
-// //     }
-// // }
-
-// // impl<'a> SimpleQueryDetails<'a> {
-// //     pub fn questions(&self) -> impl Iterator<Item = Question<'_>> {
-// //         match self {
-// //             SimpleQueryDetails::Host(fqdn) => IteratorWrapper::Host(once(Question::A(fqdn)).chain(once(Question::AAAA(fqdn)))),
-// //             SimpleQueryDetails::Service(fqdn) => IteratorWrapper::Service(once(Question::Ptr(fqdn))),
-// //             SimpleQueryDetails::ServiceType(fqdn) => IteratorWrapper::ServiceType(once(Question::Ptr(fqdn))),
-// //         }
-// //     }
-// // }
-
-// // pub enum QueryDetails<'a> {
-// //     Simple(SimpleQueryDetails<'a>),
-// //     Complex(&'a [Question<'a>]),
-// // }
-
-// // pub struct Query<'a> {
-// //     pub domain: &'a str,
-// //     pub query_details: QueryDetails<'a>,
-// // }
-
-// impl<'a> Question<'a> {
-//     // pub fn ask<'s>(questions: &'a [Self], buf: &mut [u8]) -> Result<usize, MdnsError> {
-//     //     let buf = Buf(buf, 0);
-
-//     //     let message = MessageBuilder::from_target(buf)?;
-
-//     //     let mut qb = message.question();
-
-//     //     for question in questions {
-//     //         self.push(&mut qb)?;
-//     //     }
-
-//     //     let buf = qb.finish();
-
-//     //     Ok(buf.1)
-//     // }
-
-//     // fn push(&self, qb: &mut QuestionBuilder<Buf>) -> Result<(), MdnsError> {
-//     //     match self {
-//     //         Self::A(fqdn) => qb.push(((*fqdn).try_into().unwrap(), Rtype::A, Class::In))?,
-//     //         Self::AAAA(fqdn) => qb.push((fqdn.into(), Rtype::Aaaa, Class::In))?,
-//     //         Self::Ptr(fqdn) => qb.push((fqdn.into(), Rtype::Ptr, Class::In))?,
-//     //         Self::Srv(fqdn) => qb.push((fqdn.into(), Rtype::Srv, Class::In))?,
-//     //         Self::Txt(fqdn) => qb.push((fqdn.into(), Rtype::Txt, Class::In))?,
-//     //     }
-
-//     //     Ok(())
-//     // }
-
-//     // pub fn decode_reply<'s>(&self, data: &[u8], buf: &'s mut [u8]) -> Result<impl Iterator<Item = Answer<'s>>, MdnsError> {
-//     //     // if self.set_response(data, services, &mut answer, ttl_sec)? {
-//     //     //     let buf = answer.finish();
-
-//     //     //     Ok(buf.1)
-//     //     // } else {
-//     //     //     Ok(0)
-//     //     // }
-
-//     //     // Ok(buf.1)
-
-//     //     let message = Message::from_octets(data)?;
-
-//     //     let mut replied = false;
-
-//     //     let mut host = Host {
-//     //         id: 0,
-//     //         hostname: "",
-//     //         ip: [0, 0, 0, 0],
-//     //         ipv6: None,
-//     //     };
-
-//     //     let buf = Buf(buf, 0);
-
-//     //     for answer in message.answer()? {
-//     //         let answer = answer?;
-
-//     //         //trace!("Handling answer {:?}", answer);
-
-//     //         //let answer = answer?;
-
-//     //         let record = answer.into_record::<AllRecordData<_, _>>()?.ok_or(MdnsError::InvalidMessage)?;
-
-//     //         match record.into_data() {
-//     //             AllRecordData::A(a) => {
-//     //                 host.ip = a.addr().octets();
-//     //             }
-//     //             AllRecordData::Aaaa(aaaa) => {
-//     //                 host.ipv6 = Some(aaaa.addr().octets());
-//     //             }
-//     //             AllRecordData::Ptr(ptr) => {
-//     //                 //let hostname: Dname<Buf> = ptr.ptrdname();
-//     //             }
-
-//     //             // Rtype::Srv => {
-//     //             // }
-//     //             // Rtype::Ptr => {
-//     //             //     let ipv6: Record<_, ParsedDname<_>> = answer.into_record()?.ok_or(MdnsError::InvalidMessage)?;
-
-//     //             // }
-//     //             // Rtype::Txt => {
-//     //             // }
-//     //             AllRecordData::Srv(srv) => {
-//     //                 host.id = srv.port();
-//     //                 //host.hostname = srv.target().to_string();
-//     //             }
-//     //             _ => (),
-//     //         }
-//     //     }
-
-//     //     //Ok(host)
-//     //     Ok(core::iter::empty())
-//     // }
-// }
-
+/// This struct allows one to use a regular `&mut [u8]` slice as an octet buffer
+/// with the `domain` library.
+///
+/// Useful when a `domain` message needs to be constructed in a `&mut [u8]` slice.
 pub struct Buf<'a>(pub &'a mut [u8], pub usize);
+
+impl<'a> Buf<'a> {
+    /// Create a new `Buf` instance from a mutable slice.
+    pub fn new(buf: &'a mut [u8]) -> Self {
+        Self(buf, 0)
+    }
+}
 
 impl<'a> FreezeBuilder for Buf<'a> {
     type Octets = Self;
@@ -578,4 +313,405 @@ impl<'a> AsRef<[u8]> for Buf<'a> {
     fn as_ref(&self) -> &[u8] {
         &self.0[..self.1]
     }
+}
+
+/// A trait that abstracts the processing logic for an incoming mDNS message.
+///
+/// Handles an incoming mDNS message by parsing it and potentially preparing a response.
+///
+/// If incoming is `None`, the handler should prepare a broadcast message with
+/// all its data (i.e. mDNS responder brodcasts on internal state changes).
+///
+/// Returns the length of the response message.
+/// If length is 0, the IO layer using the handler should not send a message.
+pub trait MdnsHandler {
+    fn handle(&mut self, incoming: Option<&[u8]>, buf: &mut [u8]) -> Result<usize, MdnsError>;
+}
+
+impl<T> MdnsHandler for &mut T
+where
+    T: MdnsHandler,
+{
+    fn handle(&mut self, incoming: Option<&[u8]>, buf: &mut [u8]) -> Result<usize, MdnsError> {
+        (**self).handle(incoming, buf)
+    }
+}
+
+/// A structure representing a handler that does not do any processing.
+///
+/// Useful only when chaining multiple `MdnsHandler` instances.
+pub struct NoHandler;
+
+impl NoHandler {
+    /// Chains a `NoHandler` with another handler.
+    pub fn chain<T>(handler: T) -> ChainedHandler<T, Self> {
+        ChainedHandler::new(handler, Self)
+    }
+}
+
+impl MdnsHandler for NoHandler {
+    fn handle(&mut self, _incoming: Option<&[u8]>, _buf: &mut [u8]) -> Result<usize, MdnsError> {
+        Ok(0)
+    }
+}
+
+/// A composite handler that chains two handlers together.
+pub struct ChainedHandler<T, U> {
+    first: T,
+    second: U,
+}
+
+impl<T, U> ChainedHandler<T, U> {
+    /// Create a new `ChainedHandler` instance from two handlers.
+    pub const fn new(first: T, second: U) -> Self {
+        Self { first, second }
+    }
+
+    /// Chains a `ChainedHandler` with another handler,
+    /// where our instance would be the first one to be called.
+    ///
+    /// Chaining works by calling each chained handler from the first to the last,
+    /// until a handler in the chain returns a non-zero `usize` result.
+    ///
+    /// Once that happens, traversing the handlers down the chain stops.
+    pub fn chain<V>(self, handler: V) -> ChainedHandler<Self, V> {
+        ChainedHandler::new(self, handler)
+    }
+}
+
+impl<T, U> MdnsHandler for ChainedHandler<T, U>
+where
+    T: MdnsHandler,
+    U: MdnsHandler,
+{
+    fn handle(&mut self, incoming: Option<&[u8]>, buf: &mut [u8]) -> Result<usize, MdnsError> {
+        let len = self.first.handle(incoming, buf)?;
+
+        if len == 0 {
+            self.second.handle(incoming, buf)
+        } else {
+            Ok(len)
+        }
+    }
+}
+
+/// A type alias for the answer which is expected to be returned by instances
+/// implementing the `HostAnswers` trait.
+pub type HostAnswer<'a> =
+    Record<NameLabels<'a>, RecordDataChain<Txt<'a>, AllRecordData<&'a [u8], NameLabels<'a>>>>;
+
+/// A trait that abstracts the logic for providing answers to incoming mDNS queries.
+///
+/// The visitor-pattern-with-a-callback is chosen on purpose, as that allows `domain`
+/// Names to be constructed on-the-fly, possibly without interim buffer allocations.
+///
+/// Look at the implementation of `HostAnswers` for `host::Host` and `host::Service`
+/// for examples of this technique.
+pub trait HostAnswers {
+    /// Visits an entity that does have answers to mDNS queries.
+    ///
+    /// The answers will be provided to the supplied `f` callback.
+    ///
+    /// Note that the entity should provide ALL of its answers, regardless of the
+    /// concrete questions.
+    ///
+    /// The filtering of the answers relevant for the asked questions is done by the caller,
+    /// and only if necessary (i.e. only if these answers are used to reply to a concrete mDNS query,
+    /// rather than just broadcasting all answers that the entity has, which is also a valid mDNS
+    /// operation, that should be done when the entity providing answers has changes ot its internal state).
+    fn visit<F, E>(&self, f: F) -> Result<(), E>
+    where
+        F: FnMut(HostAnswer) -> Result<(), E>,
+        E: From<MdnsError>;
+}
+
+impl<T> HostAnswers for &T
+where
+    T: HostAnswers,
+{
+    fn visit<F, E>(&self, f: F) -> Result<(), E>
+    where
+        F: FnMut(HostAnswer) -> Result<(), E>,
+        E: From<MdnsError>,
+    {
+        (*self).visit(f)
+    }
+}
+
+impl<T> HostAnswers for &mut T
+where
+    T: HostAnswers,
+{
+    fn visit<F, E>(&self, f: F) -> Result<(), E>
+    where
+        F: FnMut(HostAnswer) -> Result<(), E>,
+        E: From<MdnsError>,
+    {
+        (**self).visit(f)
+    }
+}
+
+/// A structure modeling an entity that does not generate any answers.
+///
+/// Useful only when chaining multiple `HostAnswers` instances.
+pub struct NoHostAnswers;
+
+impl NoHostAnswers {
+    /// Chains a `NoHostAnswers` with another `HostAnswers` instance.
+    pub fn chain<T>(answers: T) -> ChainedHostAnswers<T, Self> {
+        ChainedHostAnswers::new(answers, Self)
+    }
+}
+
+impl HostAnswers for NoHostAnswers {
+    fn visit<F, E>(&self, _f: F) -> Result<(), E>
+    where
+        F: FnMut(HostAnswer) -> Result<(), E>,
+    {
+        Ok(())
+    }
+}
+
+/// A composite `HostAnswers` that chains two `HostAnswers` instances together.
+pub struct ChainedHostAnswers<T, U> {
+    first: T,
+    second: U,
+}
+
+impl<T, U> ChainedHostAnswers<T, U> {
+    /// Create a new `ChainedHostAnswers` instance from two `HostAnswers` instances.
+    pub const fn new(first: T, second: U) -> Self {
+        Self { first, second }
+    }
+
+    /// Chains this instance with another `HostAnswers` instance,
+    pub fn chain<V>(self, answers: V) -> ChainedHostAnswers<Self, V> {
+        ChainedHostAnswers::new(self, answers)
+    }
+}
+
+impl<T, U> HostAnswers for ChainedHostAnswers<T, U>
+where
+    T: HostAnswers,
+    U: HostAnswers,
+{
+    fn visit<F, E>(&self, mut f: F) -> Result<(), E>
+    where
+        F: FnMut(HostAnswer) -> Result<(), E>,
+        E: From<MdnsError>,
+    {
+        self.first.visit(&mut f)?;
+        self.second.visit(f)
+    }
+}
+
+/// An `MdnsHandler` implementation that answers mDNS queries with the answers
+/// provided by an entity implementing the `HostAnswers` trait.
+///
+/// Typically, this structure will be used to provide answers to other peers that broadcast
+/// mDNS queries - i.e. this is the "responder" aspect of the mDNS protocol.
+pub struct HostAnswersMdnsHandler<T> {
+    answers: T,
+}
+
+impl<T> HostAnswersMdnsHandler<T> {
+    /// Create a new `HostAnswersMdnsHandler` instance from an entity that provides answers.
+    pub const fn new(answers: T) -> Self {
+        Self { answers }
+    }
+}
+
+impl<T> MdnsHandler for HostAnswersMdnsHandler<T>
+where
+    T: HostAnswers,
+{
+    fn handle(&mut self, incoming: Option<&[u8]>, buf: &mut [u8]) -> Result<usize, MdnsError> {
+        // TODO: Detect and handle unicast requests from legacy clients
+        // (by checking if the source port is 5353).
+        // This means:
+        // - Re-use the ID from the incoming query and put it in the response
+        // - Do not include the answers in the additional section
+        // - Include the questions from the incoming query in the response
+
+        let buf = Buf(buf, 0);
+
+        let mut mb = MessageBuilder::from_target(buf)?;
+
+        set_header(&mut mb, 0, true);
+
+        let mut ab = mb.answer();
+
+        let mut pushed = false;
+
+        if let Some(incoming) = incoming {
+            let message = Message::from_octets(incoming)?;
+
+            for question in message.question() {
+                let question = question?;
+
+                self.answers.visit(|answer| {
+                    if question.qname().name_eq(answer.owner()) {
+                        ab.push(answer)?;
+
+                        pushed = true;
+                    }
+
+                    Ok::<_, MdnsError>(())
+                })?;
+            }
+        } else {
+            self.answers.visit(|answer| {
+                ab.push(answer)?;
+
+                pushed = true;
+
+                Ok::<_, MdnsError>(())
+            })?;
+        }
+
+        let buf = ab.finish();
+
+        if pushed {
+            Ok(buf.1)
+        } else {
+            Ok(0)
+        }
+    }
+}
+
+/// A type alias for the answer which is expected to be returned by instances
+/// implementing the `PeerAnswers` trait.
+pub type PeerAnswer<'a> =
+    Record<ParsedName<&'a [u8]>, AllRecordData<&'a [u8], ParsedName<&'a [u8]>>>;
+
+/// A trait that abstracts the logic for processing answers from incoming mDNS queries.
+///
+/// Rather than dealing with the whole mDNS message, this trait is focused on processing
+/// the answers from the message (in the `answer` and `additional` mDNS message sections).
+pub trait PeerAnswers {
+    /// Processes the answers from an incoming mDNS message.
+    fn answers<'a, T, A>(&mut self, answers: T, additional: A) -> Result<(), MdnsError>
+    where
+        T: IntoIterator<Item = PeerAnswer<'a>> + Clone + 'a,
+        A: IntoIterator<Item = PeerAnswer<'a>> + Clone + 'a;
+}
+
+impl<T> PeerAnswers for &mut T
+where
+    T: PeerAnswers,
+{
+    fn answers<'a, U, V>(&mut self, answers: U, additional: V) -> Result<(), MdnsError>
+    where
+        U: IntoIterator<Item = PeerAnswer<'a>> + Clone + 'a,
+        V: IntoIterator<Item = PeerAnswer<'a>> + Clone + 'a,
+    {
+        (**self).answers(answers, additional)
+    }
+}
+
+/// A structure implementing the `MdnsHandler` trait by processing all answers from an
+/// incoming mDNS message via delegating to an entity implementing the `PeerAnswers` trait.
+///
+/// Typically, this structure will be used to process answers which are replies to mDNS
+/// queries that we have sent using the `query` method, i.e., this is the "querying" part
+/// of the mDNS protocol.
+///
+/// Since the "querying" aspect of the mDNS protocol is modeled here, this handler never
+/// answers anything, i.e. it always returns a 0 `usize`, because - unlike the
+/// `HostAnswersMdnsHandler` - it does not have any answers to provide, as it - itself -
+/// processes answers provided by peers, which were themselves sent because we issued a query
+/// using e.g. the `query` method at an earlier point in time.
+pub struct PeerAnswersMdnsHandler<T> {
+    answers: T,
+}
+
+impl<T> PeerAnswersMdnsHandler<T> {
+    /// Create a new `PeerAnswersMdnsHandler` instance from an entity that processes answers.
+    pub const fn new(answers: T) -> Self {
+        Self { answers }
+    }
+}
+
+impl<T> MdnsHandler for PeerAnswersMdnsHandler<T>
+where
+    T: PeerAnswers,
+{
+    fn handle(&mut self, incoming: Option<&[u8]>, _buf: &mut [u8]) -> Result<usize, MdnsError> {
+        let Some(incoming) = incoming else {
+            return Ok(0);
+        };
+
+        let message = Message::from_octets(incoming)?;
+
+        let answers = message.answer()?;
+        let additional = message.additional()?;
+
+        let answers = answers.filter_map(|answer| {
+            answer
+                .unwrap()
+                .into_record::<AllRecordData<_, _>>()
+                .unwrap()
+        });
+
+        let additional = additional.filter_map(|answer| {
+            answer
+                .unwrap()
+                .into_record::<AllRecordData<_, _>>()
+                .unwrap()
+        });
+
+        //.ok_or(MdnsError::InvalidMessage)?;
+
+        self.answers.answers(answers, additional)?;
+
+        Ok(0)
+    }
+}
+
+/// A function that constructs an mDNS query message in a `&mut [u8]` buffer.
+///
+/// The `questions` iterator should yield `Question` instances that will be included
+/// in the mDNS query message.
+pub fn query<I, N>(buf: &mut [u8], questions: I) -> Result<usize, MdnsError>
+where
+    I: Iterator<Item = Question<N>>,
+    N: ToName,
+{
+    let buf = Buf(buf, 0);
+
+    let mut mb = MessageBuilder::from_target(buf)?;
+
+    set_header(&mut mb, 0, false);
+
+    let mut qb = mb.question();
+
+    let mut pushed = false;
+
+    for question in questions {
+        qb.push(question)?;
+
+        pushed = true;
+    }
+
+    let buf = qb.finish();
+
+    if pushed {
+        Ok(buf.1)
+    } else {
+        Ok(0)
+    }
+}
+
+/// Utility function that sets the header of an mDNS `domain` message builder
+/// to be a response or a query.
+pub fn set_header<T: Composer>(answer: &mut MessageBuilder<T>, id: u16, response: bool) {
+    let header = answer.header_mut();
+    header.set_id(id);
+    header.set_opcode(Opcode::QUERY);
+    header.set_rcode(Rcode::NOERROR);
+
+    let mut flags = Flags::new();
+    flags.qr = response;
+    flags.aa = true;
+    header.set_flags(flags);
 }
