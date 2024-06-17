@@ -12,6 +12,7 @@ use embassy_sync::signal::Signal;
 
 use edge_nal::{MulticastV4, MulticastV6, UdpBind, UdpReceive, UdpSend};
 
+use embassy_time::{Duration, Timer};
 use log::{info, warn};
 
 use super::*;
@@ -107,6 +108,7 @@ where
     ipv6_interface: Option<u32>,
     recv: Mutex<M, (R, &'a mut [u8])>,
     send: Mutex<M, (S, &'a mut [u8])>,
+    rand: fn(&mut [u8]),
 }
 
 impl<'a, T, R, S, M> Mdns<'a, M, T, R, S>
@@ -117,6 +119,7 @@ where
     S: UdpSend<Error = R::Error>,
 {
     /// Creates a new mDNS service with the provided handler, interfaces, and UDP receiver and sender.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         handler: T,
         ipv4_interface: Option<Ipv4Addr>,
@@ -125,6 +128,7 @@ where
         recv_buf: &'a mut [u8],
         send: S,
         send_buf: &'a mut [u8],
+        rand: fn(&mut [u8]),
     ) -> Self {
         Self {
             handler: blocking_mutex::Mutex::new(RefCell::new(handler)),
@@ -133,6 +137,7 @@ where
             ipv6_interface,
             recv: Mutex::new((recv, recv_buf)),
             send: Mutex::new((send, send_buf)),
+            rand,
         }
     }
 
@@ -195,13 +200,16 @@ where
             let mut guard = self.send.lock().await;
             let (send, send_buf) = &mut *guard;
 
-            let len = self
+            let response = self
                 .handler
                 .lock(|handler| handler.borrow_mut().handle(None, send_buf))?;
 
-            if len > 0 {
-                self.broadcast_once(send, &send_buf[..len], true, true)
-                    .await?;
+            if let MdnsResponse::Reply { data, delay } = response {
+                if delay {
+                    self.delay().await;
+                }
+
+                self.broadcast_once(send, data, true, true).await?;
             }
 
             self.broadcast_signal.wait().await;
@@ -220,7 +228,7 @@ where
             let mut guard = self.send.lock().await;
             let (send, send_buf) = &mut *guard;
 
-            let len = match self.handler.lock(|handler| {
+            let response = match self.handler.lock(|handler| {
                 handler
                     .borrow_mut()
                     .handle(Some(&recv_buf[..len]), send_buf)
@@ -235,12 +243,16 @@ where
                 },
             };
 
-            if len > 0 {
+            if let MdnsResponse::Reply { data, delay } = response {
+                if delay {
+                    self.delay().await;
+                }
+
                 info!("Replying to mDNS query from {remote}");
 
                 self.broadcast_once(
                     send,
-                    &send_buf[..len],
+                    data,
                     matches!(remote, SocketAddr::V4(_)),
                     matches!(remote, SocketAddr::V6(_)),
                 )
@@ -283,5 +295,15 @@ where
         }
 
         Ok(())
+    }
+
+    async fn delay(&self) {
+        let mut b = [0];
+        (self.rand)(&mut b);
+
+        // Generate a delay between 20 and 120 ms, as per spec
+        let delay_ms = 20 + (b[0] as u32 * 100 / 256);
+
+        Timer::after(Duration::from_millis(delay_ms as _)).await;
     }
 }

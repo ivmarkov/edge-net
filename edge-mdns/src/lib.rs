@@ -315,6 +315,13 @@ impl<'a> AsRef<[u8]> for Buf<'a> {
     }
 }
 
+/// Return type for `MdnsHandler::handle`.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum MdnsResponse<'a> {
+    None,
+    Reply { data: &'a [u8], delay: bool },
+}
+
 /// A trait that abstracts the processing logic for an incoming mDNS message.
 ///
 /// Handles an incoming mDNS message by parsing it and potentially preparing a response.
@@ -322,18 +329,27 @@ impl<'a> AsRef<[u8]> for Buf<'a> {
 /// If incoming is `None`, the handler should prepare a broadcast message with
 /// all its data (i.e. mDNS responder brodcasts on internal state changes).
 ///
-/// Returns the length of the response message.
-/// If length is 0, the IO layer using the handler should not send a message.
+/// Returns an `MdnsResponse` instance that instructs the caller
+/// what data to send as a response (if any) and whether to generate a random delay
+/// before sending (as per spec).
 pub trait MdnsHandler {
-    fn handle(&mut self, incoming: Option<&[u8]>, buf: &mut [u8]) -> Result<usize, MdnsError>;
+    fn handle<'a>(
+        &mut self,
+        incoming: Option<&[u8]>,
+        response_buf: &'a mut [u8],
+    ) -> Result<MdnsResponse<'a>, MdnsError>;
 }
 
 impl<T> MdnsHandler for &mut T
 where
     T: MdnsHandler,
 {
-    fn handle(&mut self, incoming: Option<&[u8]>, buf: &mut [u8]) -> Result<usize, MdnsError> {
-        (**self).handle(incoming, buf)
+    fn handle<'a>(
+        &mut self,
+        incoming: Option<&[u8]>,
+        response_buf: &'a mut [u8],
+    ) -> Result<MdnsResponse<'a>, MdnsError> {
+        (**self).handle(incoming, response_buf)
     }
 }
 
@@ -350,8 +366,12 @@ impl NoHandler {
 }
 
 impl MdnsHandler for NoHandler {
-    fn handle(&mut self, _incoming: Option<&[u8]>, _buf: &mut [u8]) -> Result<usize, MdnsError> {
-        Ok(0)
+    fn handle<'a>(
+        &mut self,
+        _incoming: Option<&[u8]>,
+        _response_buf: &'a mut [u8],
+    ) -> Result<MdnsResponse<'a>, MdnsError> {
+        Ok(MdnsResponse::None)
     }
 }
 
@@ -384,13 +404,21 @@ where
     T: MdnsHandler,
     U: MdnsHandler,
 {
-    fn handle(&mut self, incoming: Option<&[u8]>, buf: &mut [u8]) -> Result<usize, MdnsError> {
-        let len = self.first.handle(incoming, buf)?;
+    fn handle<'a>(
+        &mut self,
+        incoming: Option<&[u8]>,
+        response_buf: &'a mut [u8],
+    ) -> Result<MdnsResponse<'a>, MdnsError> {
+        match self.first.handle(incoming, response_buf)? {
+            MdnsResponse::None => self.second.handle(incoming, response_buf),
+            MdnsResponse::Reply { data, delay } => {
+                let len = data.len();
 
-        if len == 0 {
-            self.second.handle(incoming, buf)
-        } else {
-            Ok(len)
+                Ok(MdnsResponse::Reply {
+                    data: &response_buf[..len],
+                    delay,
+                })
+            }
         }
     }
 }
@@ -525,7 +553,11 @@ impl<T> MdnsHandler for HostAnswersMdnsHandler<T>
 where
     T: HostAnswers,
 {
-    fn handle(&mut self, incoming: Option<&[u8]>, buf: &mut [u8]) -> Result<usize, MdnsError> {
+    fn handle<'a>(
+        &mut self,
+        incoming: Option<&[u8]>,
+        response_buf: &'a mut [u8],
+    ) -> Result<MdnsResponse<'a>, MdnsError> {
         // TODO: Detect and handle unicast requests from legacy clients
         // (by checking if the source port is 5353).
         // This means:
@@ -533,7 +565,7 @@ where
         // - Do not include the answers in the additional section
         // - Include the questions from the incoming query in the response
 
-        let buf = Buf(buf, 0);
+        let buf = Buf(response_buf, 0);
 
         let mut mb = MessageBuilder::from_target(buf)?;
 
@@ -572,9 +604,12 @@ where
         let buf = ab.finish();
 
         if pushed {
-            Ok(buf.1)
+            Ok(MdnsResponse::Reply {
+                data: &buf.0[..buf.1],
+                delay: false,
+            })
         } else {
-            Ok(0)
+            Ok(MdnsResponse::None)
         }
     }
 }
@@ -636,9 +671,13 @@ impl<T> MdnsHandler for PeerAnswersMdnsHandler<T>
 where
     T: PeerAnswers,
 {
-    fn handle(&mut self, incoming: Option<&[u8]>, _buf: &mut [u8]) -> Result<usize, MdnsError> {
+    fn handle<'a>(
+        &mut self,
+        incoming: Option<&[u8]>,
+        _response_buf: &'a mut [u8],
+    ) -> Result<MdnsResponse<'a>, MdnsError> {
         let Some(incoming) = incoming else {
-            return Ok(0);
+            return Ok(MdnsResponse::None);
         };
 
         let message = Message::from_octets(incoming)?;
@@ -664,7 +703,7 @@ where
 
         self.answers.answers(answers, additional)?;
 
-        Ok(0)
+        Ok(MdnsResponse::None)
     }
 }
 

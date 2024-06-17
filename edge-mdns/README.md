@@ -24,6 +24,8 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 
 use log::*;
 
+use rand::{thread_rng, RngCore};
+
 // Change this to the IP address of the machine where you'll run this example
 const OUR_IP: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
 
@@ -79,6 +81,7 @@ where
         recv_buf,
         send,
         send_buf,
+        |buf| thread_rng().fill_bytes(buf),
     );
 
     mdns.run().await
