@@ -58,8 +58,7 @@ where
         ttl: Ttl::from_secs(60),
     };
 
-    let mdns = io::Mdns::<NoopRawMutex, _, _, _>::new(
-        HostAnswersMdnsHandler::new(&host),
+    let mdns = io::Mdns::<NoopRawMutex, _, _>::new(
         Some(Ipv4Addr::UNSPECIFIED),
         Some(0),
         recv,
@@ -69,5 +68,5 @@ where
         |buf| thread_rng().fill_bytes(buf),
     );
 
-    mdns.run().await
+    mdns.run(HostAnswersMdnsHandler::new(&host)).await
 }

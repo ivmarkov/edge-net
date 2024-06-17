@@ -98,11 +98,10 @@ where
 /// The handler is expected to be a type that implements the `MdnsHandler` trait, which
 /// allows it to handle mDNS queries and generate responses, as well as to handle mDNS
 /// responses to queries which we might have issues using the `query` method.
-pub struct Mdns<'a, M, T, R, S>
+pub struct Mdns<'a, M, R, S>
 where
     M: RawMutex,
 {
-    handler: blocking_mutex::Mutex<M, RefCell<T>>,
     broadcast_signal: Signal<M, ()>,
     ipv4_interface: Option<Ipv4Addr>,
     ipv6_interface: Option<u32>,
@@ -111,17 +110,15 @@ where
     rand: fn(&mut [u8]),
 }
 
-impl<'a, T, R, S, M> Mdns<'a, M, T, R, S>
+impl<'a, M, R, S> Mdns<'a, M, R, S>
 where
     M: RawMutex,
-    T: MdnsHandler,
     R: UdpReceive,
     S: UdpSend<Error = R::Error>,
 {
     /// Creates a new mDNS service with the provided handler, interfaces, and UDP receiver and sender.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        handler: T,
         ipv4_interface: Option<Ipv4Addr>,
         ipv6_interface: Option<u32>,
         recv: R,
@@ -131,7 +128,6 @@ where
         rand: fn(&mut [u8]),
     ) -> Self {
         Self {
-            handler: blocking_mutex::Mutex::new(RefCell::new(handler)),
             broadcast_signal: Signal::new(),
             ipv4_interface,
             ipv6_interface,
@@ -144,17 +140,19 @@ where
     /// Runs the mDNS service, handling queries and responding to them, as well as broadcasting
     /// mDNS answers and handling responses to our own queries.
     ///
-    /// All of the handling logic is expected to be implemented in the handler provided when
-    /// creating the mDNS service.
-    ///
-    /// I.e. hanbdling responses to our own queries cannot happen, unless the supplied handler
-    /// is capable of doing that (i.e. it is a `PeerMdnsHandler`, or a chain containing it, or similar).
-    ///
-    /// Ditto for handling queries coming from other peers - this can only happen if the handler
-    /// is capable of doing that. I.e., it is a `HostMdnsHandler`, or a chain containing it, or similar.
-    pub async fn run(&self) -> Result<(), MdnsIoError<S::Error>> {
-        let mut broadcast = pin!(self.broadcast());
-        let mut respond = pin!(self.respond());
+    /// All of the handling logic is expected to be implemented by the provided handler:
+    /// - I.e. hanbdling responses to our own queries cannot happen, unless the supplied handler
+    ///   is capable of doing that (i.e. it is a `PeerMdnsHandler`, or a chain containing it, or similar).
+    /// - Ditto for handling queries coming from other peers - this can only happen if the handler
+    ///   is capable of doing that. I.e., it is a `HostMdnsHandler`, or a chain containing it, or similar.
+    pub async fn run<T>(&self, handler: T) -> Result<(), MdnsIoError<S::Error>>
+    where
+        T: MdnsHandler,
+    {
+        let handler = blocking_mutex::Mutex::<M, _>::new(RefCell::new(handler));
+
+        let mut broadcast = pin!(self.broadcast(&handler));
+        let mut respond = pin!(self.respond(&handler));
 
         let result = select(&mut broadcast, &mut respond).await;
 
@@ -195,14 +193,18 @@ where
         self.broadcast_signal.signal(());
     }
 
-    async fn broadcast(&self) -> Result<(), MdnsIoError<S::Error>> {
+    async fn broadcast<T>(
+        &self,
+        handler: &blocking_mutex::Mutex<M, RefCell<T>>,
+    ) -> Result<(), MdnsIoError<S::Error>>
+    where
+        T: MdnsHandler,
+    {
         loop {
             let mut guard = self.send.lock().await;
             let (send, send_buf) = &mut *guard;
 
-            let response = self
-                .handler
-                .lock(|handler| handler.borrow_mut().handle(None, send_buf))?;
+            let response = handler.lock(|handler| handler.borrow_mut().handle(None, send_buf))?;
 
             if let MdnsResponse::Reply { data, delay } = response {
                 if delay {
@@ -216,7 +218,13 @@ where
         }
     }
 
-    async fn respond(&self) -> Result<(), MdnsIoError<S::Error>> {
+    async fn respond<T>(
+        &self,
+        handler: &blocking_mutex::Mutex<M, RefCell<T>>,
+    ) -> Result<(), MdnsIoError<S::Error>>
+    where
+        T: MdnsHandler,
+    {
         let mut guard = self.recv.lock().await;
         let (recv, recv_buf) = &mut *guard;
 
@@ -228,7 +236,7 @@ where
             let mut guard = self.send.lock().await;
             let (send, send_buf) = &mut *guard;
 
-            let response = match self.handler.lock(|handler| {
+            let response = match handler.lock(|handler| {
                 handler
                     .borrow_mut()
                     .handle(Some(&recv_buf[..len]), send_buf)
