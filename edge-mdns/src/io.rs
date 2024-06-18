@@ -102,12 +102,12 @@ pub struct Mdns<'a, M, R, S>
 where
     M: RawMutex,
 {
-    broadcast_signal: Signal<M, ()>,
     ipv4_interface: Option<Ipv4Addr>,
     ipv6_interface: Option<u32>,
     recv: Mutex<M, (R, &'a mut [u8])>,
     send: Mutex<M, (S, &'a mut [u8])>,
     rand: fn(&mut [u8]),
+    broadcast_signal: &'a Signal<M, ()>,
 }
 
 impl<'a, M, R, S> Mdns<'a, M, R, S>
@@ -126,14 +126,15 @@ where
         send: S,
         send_buf: &'a mut [u8],
         rand: fn(&mut [u8]),
+        broadcast_signal: &'a Signal<M, ()>,
     ) -> Self {
         Self {
-            broadcast_signal: Signal::new(),
             ipv4_interface,
             ipv6_interface,
             recv: Mutex::new((recv, recv_buf)),
             send: Mutex::new((send, send_buf)),
             rand,
+            broadcast_signal,
         }
     }
 
@@ -185,12 +186,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Notifies the mDNS service that the answers have changed, and that it should
-    /// broadcast the new answers.
-    pub fn notify_answers_changed(&self) {
-        self.broadcast_signal.signal(());
     }
 
     async fn broadcast<T>(

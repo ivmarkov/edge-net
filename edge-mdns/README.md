@@ -22,6 +22,7 @@ use edge_nal::{UdpBind, UdpSplit};
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 
+use embassy_sync::signal::Signal;
 use log::*;
 
 use rand::{thread_rng, RngCore};
@@ -73,6 +74,10 @@ where
         ttl: Ttl::from_secs(60),
     };
 
+    // A way to notify the mDNS responder that the data in `Host` had changed
+    // We don't use it in this example, because the data is hard-coded
+    let signal = Signal::new();
+
     let mdns = io::Mdns::<NoopRawMutex, _, _>::new(
         Some(Ipv4Addr::UNSPECIFIED),
         Some(0),
@@ -81,6 +86,7 @@ where
         send,
         send_buf,
         |buf| thread_rng().fill_bytes(buf),
+        &signal,
     );
 
     mdns.run(HostAnswersMdnsHandler::new(&host)).await
