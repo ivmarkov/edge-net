@@ -575,13 +575,30 @@ where
 
         let mut pushed = false;
 
-        if let Some(incoming) = incoming {
+        let mut additional_a = false;
+        let mut additional_srv_txt = false;
+
+        let buf = if let Some(incoming) = incoming {
             let message = Message::from_octets(incoming)?;
 
             for question in message.question() {
                 let question = question?;
 
                 self.answers.visit(|answer| {
+                    if matches!(answer.data(), RecordDataChain::Next(AllRecordData::Srv(_))) {
+                        additional_a = true;
+                    }
+
+                    if !answer.owner().name_eq(&DNS_SD_OWNER)
+                        && matches!(answer.data(), RecordDataChain::Next(AllRecordData::Ptr(_)))
+                    {
+                        additional_a = true;
+
+                        // Over-simplifying here in that we'll send all our SRV and TXT records, however
+                        // sending only some SRV and PTR records is too complex to implement.
+                        additional_srv_txt = true;
+                    }
+
                     if question.qname().name_eq(answer.owner()) {
                         ab.push(answer)?;
 
@@ -591,6 +608,33 @@ where
                     Ok::<_, MdnsError>(())
                 })?;
             }
+
+            if additional_a || additional_srv_txt {
+                // Fill-in the additional section as well
+
+                let mut aa = ab.additional();
+
+                self.answers.visit(|answer| {
+                    if matches!(
+                        answer.data(),
+                        RecordDataChain::Next(AllRecordData::A(_))
+                            | RecordDataChain::Next(AllRecordData::Aaaa(_))
+                            | RecordDataChain::Next(AllRecordData::Srv(_))
+                            | RecordDataChain::Next(AllRecordData::Txt(_))
+                            | RecordDataChain::This(Txt(_))
+                    ) {
+                        aa.push(answer)?;
+
+                        pushed = true;
+                    }
+
+                    Ok::<_, MdnsError>(())
+                })?;
+
+                aa.finish()
+            } else {
+                ab.finish()
+            }
         } else {
             self.answers.visit(|answer| {
                 ab.push(answer)?;
@@ -599,9 +643,9 @@ where
 
                 Ok::<_, MdnsError>(())
             })?;
-        }
 
-        let buf = ab.finish();
+            ab.finish()
+        };
 
         if pushed {
             Ok(MdnsResponse::Reply {
