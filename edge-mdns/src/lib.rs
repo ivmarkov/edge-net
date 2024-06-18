@@ -705,8 +705,8 @@ pub trait PeerAnswers {
     /// Processes the answers from an incoming mDNS message.
     fn answers<'a, T, A>(&mut self, answers: T, additional: A) -> Result<(), MdnsError>
     where
-        T: IntoIterator<Item = PeerAnswer<'a>> + Clone + 'a,
-        A: IntoIterator<Item = PeerAnswer<'a>> + Clone + 'a;
+        T: IntoIterator<Item = Result<PeerAnswer<'a>, MdnsError>> + Clone + 'a,
+        A: IntoIterator<Item = Result<PeerAnswer<'a>, MdnsError>> + Clone + 'a;
 }
 
 impl<T> PeerAnswers for &mut T
@@ -715,8 +715,8 @@ where
 {
     fn answers<'a, U, V>(&mut self, answers: U, additional: V) -> Result<(), MdnsError>
     where
-        U: IntoIterator<Item = PeerAnswer<'a>> + Clone + 'a,
-        V: IntoIterator<Item = PeerAnswer<'a>> + Clone + 'a,
+        U: IntoIterator<Item = Result<PeerAnswer<'a>, MdnsError>> + Clone + 'a,
+        V: IntoIterator<Item = Result<PeerAnswer<'a>, MdnsError>> + Clone + 'a,
     {
         (**self).answers(answers, additional)
     }
@@ -777,20 +777,22 @@ where
         let additional = message.additional()?;
 
         let answers = answers.filter_map(|answer| {
-            answer
-                .unwrap()
-                .into_record::<AllRecordData<_, _>>()
-                .unwrap()
+            match answer {
+                Ok(answer) => answer.into_record::<AllRecordData<_, _>>(),
+                Err(e) => Err(e),
+            }
+            .map_err(|_| MdnsError::InvalidMessage)
+            .transpose()
         });
 
         let additional = additional.filter_map(|answer| {
-            answer
-                .unwrap()
-                .into_record::<AllRecordData<_, _>>()
-                .unwrap()
+            match answer {
+                Ok(answer) => answer.into_record::<AllRecordData<_, _>>(),
+                Err(e) => Err(e),
+            }
+            .map_err(|_| MdnsError::InvalidMessage)
+            .transpose()
         });
-
-        //.ok_or(MdnsError::InvalidMessage)?;
 
         self.answers.answers(answers, additional)?;
 
