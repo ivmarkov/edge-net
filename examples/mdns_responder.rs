@@ -1,4 +1,4 @@
-use core::net::Ipv4Addr;
+use core::net::{Ipv4Addr, Ipv6Addr};
 
 use edge_mdns::domain::base::Ttl;
 use edge_mdns::io::{self, MdnsIoError, DEFAULT_SOCKET};
@@ -53,8 +53,8 @@ where
 
     let host = Host {
         hostname: our_name,
-        ip: our_ip,
-        ipv6: None,
+        ipv4: our_ip,
+        ipv6: Ipv6Addr::UNSPECIFIED,
         ttl: Ttl::from_secs(60),
     };
 

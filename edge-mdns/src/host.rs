@@ -14,9 +14,11 @@ pub struct Host<'a> {
     /// The name of the host. I.e. a name "foo" will be pingable as "foo.local"
     pub hostname: &'a str,
     /// The IPv4 address of the host.
-    pub ip: Ipv4Addr,
-    /// The IPv6 address of the host. Optional.
-    pub ipv6: Option<Ipv6Addr>,
+    /// Leaving it as `Ipv4Addr::UNSPECIFIED` means that the host will not aswer it to A queries.
+    pub ipv4: Ipv4Addr,
+    /// The IPv6 address of the host.
+    /// Leaving it as `Ipv6Addr::UNSPECIFIED` means that the host will not aswer it to AAAA queries.
+    pub ipv6: Ipv6Addr,
     /// The time-to-live of the mDNS answers.
     pub ttl: Ttl,
 }
@@ -29,22 +31,24 @@ impl<'a> Host<'a> {
     {
         let owner = &[self.hostname, "local"];
 
-        f(Record::new(
-            NameLabels(owner),
-            Class::IN,
-            self.ttl,
-            RecordDataChain::Next(AllRecordData::A(A::new(domain::base::net::Ipv4Addr::from(
-                self.ip.octets(),
-            )))),
-        ))?;
+        if !self.ipv4.is_unspecified() {
+            f(Record::new(
+                NameLabels(owner),
+                Class::IN,
+                self.ttl,
+                RecordDataChain::Next(AllRecordData::A(A::new(domain::base::net::Ipv4Addr::from(
+                    self.ipv4.octets(),
+                )))),
+            ))?;
+        }
 
-        if let Some(ipv6) = self.ipv6 {
+        if !self.ipv6.is_unspecified() {
             f(Record::new(
                 NameLabels(owner),
                 Class::IN,
                 self.ttl,
                 RecordDataChain::Next(AllRecordData::Aaaa(Aaaa::new(
-                    domain::base::net::Ipv6Addr::from(ipv6.octets()),
+                    domain::base::net::Ipv6Addr::from(self.ipv6.octets()),
                 ))),
             ))?;
         }
@@ -72,6 +76,10 @@ impl<'a> HostAnswers for Host<'a> {
 pub struct Service<'a> {
     /// The name of the service.
     pub name: &'a str,
+    /// The priority of the service.
+    pub priority: u16,
+    /// The weight of the service.
+    pub weight: u16,
     /// The service type. I.e. "_http"
     pub service: &'a str,
     /// The protocol of the service. I.e. "_tcp" or "_udp"
@@ -99,8 +107,8 @@ impl<'a> Service<'a> {
             Class::IN,
             host.ttl,
             RecordDataChain::Next(AllRecordData::Srv(Srv::new(
-                0,
-                0,
+                self.priority,
+                self.weight,
                 self.port,
                 NameLabels(target),
             ))),
