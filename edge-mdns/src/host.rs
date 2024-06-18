@@ -91,6 +91,7 @@ impl<'a> Service<'a> {
         E: From<MdnsError>,
     {
         let owner = &[self.name, self.service, self.protocol, "local"];
+        let stype = &[self.service, self.protocol, "local"];
         let target = &[host.hostname, "local"];
 
         f(Record::new(
@@ -116,29 +117,39 @@ impl<'a> Service<'a> {
             DNS_SD_OWNER,
             Class::IN,
             host.ttl,
+            RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels(stype)))),
+        ))?;
+
+        f(Record::new(
+            NameLabels(stype),
+            Class::IN,
+            host.ttl,
             RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels(owner)))),
         ))?;
 
         for subtype in self.service_subtypes {
             let subtype_owner = &[subtype, self.name, self.service, self.protocol, "local"];
+            let subtype = &[subtype, "_sub", self.service, self.protocol, "local"];
 
             f(Record::new(
                 NameLabels(subtype_owner),
                 Class::IN,
                 host.ttl,
-                RecordDataChain::Next(AllRecordData::Srv(Srv::new(
-                    0,
-                    0,
-                    self.port,
-                    NameLabels(owner),
-                ))),
+                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels(owner)))),
+            ))?;
+
+            f(Record::new(
+                NameLabels(subtype),
+                Class::IN,
+                host.ttl,
+                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels(subtype_owner)))),
             ))?;
 
             f(Record::new(
                 DNS_SD_OWNER,
                 Class::IN,
                 host.ttl,
-                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels(subtype_owner)))),
+                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels(subtype)))),
             ))?;
         }
 
