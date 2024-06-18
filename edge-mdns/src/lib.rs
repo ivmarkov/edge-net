@@ -315,6 +315,22 @@ impl<'a> AsRef<[u8]> for Buf<'a> {
     }
 }
 
+/// Type of request for `MdnsHandler::handle`.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum MdnsRequest<'a> {
+    /// No incoming mDNS request. Send a broadcast message
+    None,
+    /// Incoming mDNS request
+    Request {
+        /// Whether it is a legacy request (i.e. UDP packet source port is not 5353, as per spec)
+        legacy: bool,
+        /// Whether the request arrived on the multicast address
+        multicast: bool,
+        /// The data of the request
+        data: &'a [u8],
+    },
+}
+
 /// Return type for `MdnsHandler::handle`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum MdnsResponse<'a> {
@@ -326,7 +342,7 @@ pub enum MdnsResponse<'a> {
 ///
 /// Handles an incoming mDNS message by parsing it and potentially preparing a response.
 ///
-/// If incoming is `None`, the handler should prepare a broadcast message with
+/// If request is `None`, the handler should prepare a broadcast message with
 /// all its data (i.e. mDNS responder brodcasts on internal state changes).
 ///
 /// Returns an `MdnsResponse` instance that instructs the caller
@@ -335,7 +351,7 @@ pub enum MdnsResponse<'a> {
 pub trait MdnsHandler {
     fn handle<'a>(
         &mut self,
-        incoming: Option<&[u8]>,
+        request: MdnsRequest<'_>,
         response_buf: &'a mut [u8],
     ) -> Result<MdnsResponse<'a>, MdnsError>;
 }
@@ -346,10 +362,10 @@ where
 {
     fn handle<'a>(
         &mut self,
-        incoming: Option<&[u8]>,
+        request: MdnsRequest<'_>,
         response_buf: &'a mut [u8],
     ) -> Result<MdnsResponse<'a>, MdnsError> {
-        (**self).handle(incoming, response_buf)
+        (**self).handle(request, response_buf)
     }
 }
 
@@ -368,7 +384,7 @@ impl NoHandler {
 impl MdnsHandler for NoHandler {
     fn handle<'a>(
         &mut self,
-        _incoming: Option<&[u8]>,
+        _request: MdnsRequest<'_>,
         _response_buf: &'a mut [u8],
     ) -> Result<MdnsResponse<'a>, MdnsError> {
         Ok(MdnsResponse::None)
@@ -406,11 +422,11 @@ where
 {
     fn handle<'a>(
         &mut self,
-        incoming: Option<&[u8]>,
+        request: MdnsRequest<'_>,
         response_buf: &'a mut [u8],
     ) -> Result<MdnsResponse<'a>, MdnsError> {
-        match self.first.handle(incoming, response_buf)? {
-            MdnsResponse::None => self.second.handle(incoming, response_buf),
+        match self.first.handle(request, response_buf)? {
+            MdnsResponse::None => self.second.handle(request, response_buf),
             MdnsResponse::Reply { data, delay } => {
                 let len = data.len();
 
@@ -555,31 +571,45 @@ where
 {
     fn handle<'a>(
         &mut self,
-        incoming: Option<&[u8]>,
+        request: MdnsRequest<'_>,
         response_buf: &'a mut [u8],
     ) -> Result<MdnsResponse<'a>, MdnsError> {
-        // TODO: Detect and handle unicast requests from legacy clients
-        // (by checking if the source port is 5353).
-        // This means:
-        // - Re-use the ID from the incoming query and put it in the response
-        // - Do not include the answers in the additional section
-        // - Include the questions from the incoming query in the response
-
         let buf = Buf(response_buf, 0);
 
         let mut mb = MessageBuilder::from_target(buf)?;
 
-        set_header(&mut mb, 0, true);
-
-        let mut ab = mb.answer();
-
         let mut pushed = false;
 
-        let mut additional_a = false;
-        let mut additional_srv_txt = false;
+        let buf = if let MdnsRequest::Request { legacy, data, .. } = request {
+            let message = Message::from_octets(data)?;
 
-        let buf = if let Some(incoming) = incoming {
-            let message = Message::from_octets(incoming)?;
+            if !matches!(message.header().opcode(), Opcode::QUERY)
+                || !matches!(message.header().rcode(), Rcode::NOERROR)
+                || message.header().qr()
+            // Not a query but a response
+            {
+                return Ok(MdnsResponse::None);
+            }
+
+            let mut ab = if legacy {
+                set_header(&mut mb, message.header().id(), true);
+
+                let mut qb = mb.question();
+
+                // As per spec, for legacy requests we need to fill-in the questions section
+                for question in message.question() {
+                    qb.push(question?)?;
+                }
+
+                qb.answer()
+            } else {
+                set_header(&mut mb, 0, true);
+
+                mb.answer()
+            };
+
+            let mut additional_a = false;
+            let mut additional_srv_txt = false;
 
             for question in message.question() {
                 let question = question?;
@@ -636,6 +666,10 @@ where
                 ab.finish()
             }
         } else {
+            set_header(&mut mb, 0, true);
+
+            let mut ab = mb.answer();
+
             self.answers.visit(|answer| {
                 ab.push(answer)?;
 
@@ -717,14 +751,27 @@ where
 {
     fn handle<'a>(
         &mut self,
-        incoming: Option<&[u8]>,
+        request: MdnsRequest<'_>,
         _response_buf: &'a mut [u8],
     ) -> Result<MdnsResponse<'a>, MdnsError> {
-        let Some(incoming) = incoming else {
+        let MdnsRequest::Request { data, legacy, .. } = request else {
             return Ok(MdnsResponse::None);
         };
 
-        let message = Message::from_octets(incoming)?;
+        if legacy {
+            // Legacy packets should not contain mDNS answers anyway, per spec
+            return Ok(MdnsResponse::None);
+        }
+
+        let message = Message::from_octets(data)?;
+
+        if !matches!(message.header().opcode(), Opcode::QUERY)
+            || !matches!(message.header().rcode(), Rcode::NOERROR)
+            || !message.header().qr()
+        // Not a response but a query
+        {
+            return Ok(MdnsResponse::None);
+        }
 
         let answers = message.answer()?;
         let additional = message.additional()?;
@@ -795,6 +842,6 @@ pub fn set_header<T: Composer>(answer: &mut MessageBuilder<T>, id: u16, response
 
     let mut flags = Flags::new();
     flags.qr = response;
-    flags.aa = true;
+    flags.aa = response;
     header.set_flags(flags);
 }

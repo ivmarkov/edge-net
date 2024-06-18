@@ -204,7 +204,8 @@ where
             let mut guard = self.send.lock().await;
             let (send, send_buf) = &mut *guard;
 
-            let response = handler.lock(|handler| handler.borrow_mut().handle(None, send_buf))?;
+            let response =
+                handler.lock(|handler| handler.borrow_mut().handle(MdnsRequest::None, send_buf))?;
 
             if let MdnsResponse::Reply { data, delay } = response {
                 if delay {
@@ -237,9 +238,14 @@ where
             let (send, send_buf) = &mut *guard;
 
             let response = match handler.lock(|handler| {
-                handler
-                    .borrow_mut()
-                    .handle(Some(&recv_buf[..len]), send_buf)
+                handler.borrow_mut().handle(
+                    MdnsRequest::Request {
+                        data: &recv_buf[..len],
+                        legacy: remote.port() != PORT,
+                        multicast: true, // TODO: Cannot determine this
+                    },
+                    send_buf,
+                )
             }) {
                 Ok(len) => len,
                 Err(err) => match err {
