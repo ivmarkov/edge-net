@@ -230,7 +230,7 @@ where
         loop {
             let (len, remote) = recv.receive(recv_buf).await.map_err(MdnsIoError::IoError)?;
 
-            info!("Got mDNS query from {remote}");
+            debug!("Got mDNS query from {remote}");
 
             let mut guard = self.send.lock().await;
             let (send, send_buf) = &mut *guard;
