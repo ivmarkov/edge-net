@@ -4,8 +4,8 @@
 use core::fmt::{self, Display};
 use core::ops::RangeBounds;
 
-use ::domain::base::header::Flags;
-use ::domain::base::iana::{Opcode, Rcode};
+use domain::base::header::Flags;
+use domain::base::iana::{Opcode, Rcode};
 use domain::base::message::ShortMessage;
 use domain::base::message_builder::PushError;
 use domain::base::name::{FromStrError, Label, ToLabelIter};
@@ -16,6 +16,8 @@ use domain::base::{
 };
 use domain::dep::octseq::{FreezeBuilder, FromBuilder, Octets, OctetsBuilder, ShortBuf, Truncate};
 use domain::rdata::AllRecordData;
+
+use log::debug;
 
 #[cfg(feature = "io")]
 pub mod io;
@@ -29,7 +31,7 @@ pub mod domain {
 pub mod host;
 
 /// The DNS-SD owner name.
-pub const DNS_SD_OWNER: NameLabels = NameLabels(&["_services", "_dns-sd", "_udp", "local"]);
+pub const DNS_SD_OWNER: NameLabels = NameLabels(&["_services", "_dns-sd", "_udp", "local", ""]);
 
 /// A wrapper type for the errors returned by the `domain` library during parsing and
 /// constructing mDNS messages.
@@ -85,13 +87,27 @@ impl From<ParseError> for MdnsError {
 /// a bunch of `&str` labels.
 ///
 /// Implements the `domain` lib `ToName` trait.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct NameLabels<'a>(&'a [&'a str]);
 
 impl<'a> NameLabels<'a> {
     /// Create a new `NameLabels` instance from a slice of `&str` labels.
     pub const fn new(labels: &'a [&'a str]) -> Self {
         Self(labels)
+    }
+}
+
+impl<'a> fmt::Display for NameLabels<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, label) in self.0.iter().enumerate() {
+            if i > 0 {
+                write!(f, ".")?;
+            }
+
+            write!(f, "{}", label)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -143,11 +159,30 @@ impl<'a> ToLabelIter for NameLabels<'a> {
 
 /// A custom struct for representing a TXT data record off from a slice of
 /// key-value `&str` pairs.
+#[derive(Debug, Clone)]
 pub struct Txt<'a>(&'a [(&'a str, &'a str)]);
 
 impl<'a> Txt<'a> {
     pub const fn new(txt: &'a [(&'a str, &'a str)]) -> Self {
         Self(txt)
+    }
+}
+
+impl<'a> fmt::Display for Txt<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Txt [")?;
+
+        for (i, (k, v)) in self.0.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+
+            write!(f, "{}={}", k, v)?;
+        }
+
+        write!(f, "]")?;
+
+        Ok(())
     }
 }
 
@@ -191,9 +226,23 @@ impl<'a> ComposeRecordData for Txt<'a> {
 
 /// A custom struct allowing to chain together multiple custom record data types.
 /// Allows e.g. using the custom `Txt` struct from above and chain it with `domain`'s `AllRecordData`,
+#[derive(Debug, Clone)]
 pub enum RecordDataChain<T, U> {
     This(T),
     Next(U),
+}
+
+impl<T, U> fmt::Display for RecordDataChain<T, U>
+where
+    T: fmt::Display,
+    U: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::This(data) => write!(f, "{}", data),
+            Self::Next(data) => write!(f, "{}", data),
+        }
+    }
 }
 
 impl<T, U> RecordData for RecordDataChain<T, U>
@@ -316,7 +365,7 @@ impl<'a> AsRef<[u8]> for Buf<'a> {
 }
 
 /// Type of request for `MdnsHandler::handle`.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum MdnsRequest<'a> {
     /// No incoming mDNS request. Send a broadcast message
     None,
@@ -332,7 +381,7 @@ pub enum MdnsRequest<'a> {
 }
 
 /// Return type for `MdnsHandler::handle`.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum MdnsResponse<'a> {
     None,
     Reply { data: &'a [u8], delay: bool },
@@ -410,8 +459,8 @@ impl<T, U> ChainedHandler<T, U> {
     /// until a handler in the chain returns a non-zero `usize` result.
     ///
     /// Once that happens, traversing the handlers down the chain stops.
-    pub fn chain<V>(self, handler: V) -> ChainedHandler<Self, V> {
-        ChainedHandler::new(self, handler)
+    pub fn chain<V>(self, handler: V) -> ChainedHandler<V, Self> {
+        ChainedHandler::new(handler, self)
     }
 }
 
@@ -425,7 +474,7 @@ where
         request: MdnsRequest<'_>,
         response_buf: &'a mut [u8],
     ) -> Result<MdnsResponse<'a>, MdnsError> {
-        match self.first.handle(request, response_buf)? {
+        match self.first.handle(request.clone(), response_buf)? {
             MdnsResponse::None => self.second.handle(request, response_buf),
             MdnsResponse::Reply { data, delay } => {
                 let len = data.len();
@@ -529,8 +578,8 @@ impl<T, U> ChainedHostAnswers<T, U> {
     }
 
     /// Chains this instance with another `HostAnswers` instance,
-    pub fn chain<V>(self, answers: V) -> ChainedHostAnswers<Self, V> {
-        ChainedHostAnswers::new(self, answers)
+    pub fn chain<V>(self, answers: V) -> ChainedHostAnswers<V, Self> {
+        ChainedHostAnswers::new(answers, self)
     }
 }
 
@@ -630,6 +679,8 @@ where
                     }
 
                     if question.qname().name_eq(answer.owner()) {
+                        debug!("Answering question [{question}] with: [{answer}]");
+
                         ab.push(answer)?;
 
                         pushed = true;
@@ -653,6 +704,8 @@ where
                             | RecordDataChain::Next(AllRecordData::Txt(_))
                             | RecordDataChain::This(Txt(_))
                     ) {
+                        debug!("Additional answer: [{answer}]");
+
                         aa.push(answer)?;
 
                         pushed = true;

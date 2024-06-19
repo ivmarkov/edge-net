@@ -196,18 +196,21 @@ where
         T: MdnsHandler,
     {
         loop {
-            let mut guard = self.send.lock().await;
-            let (send, send_buf) = &mut *guard;
+            {
+                let mut guard = self.send.lock().await;
+                let (send, send_buf) = &mut *guard;
 
-            let response =
-                handler.lock(|handler| handler.borrow_mut().handle(MdnsRequest::None, send_buf))?;
+                let response = handler
+                    .lock(|handler| handler.borrow_mut().handle(MdnsRequest::None, send_buf))?;
 
-            if let MdnsResponse::Reply { data, delay } = response {
-                if delay {
-                    self.delay().await;
+                if let MdnsResponse::Reply { data, delay } = response {
+                    if delay {
+                        // TODO: Not ideal, as we hold the lock during the delay
+                        self.delay().await;
+                    }
+
+                    self.broadcast_once(send, data, true, true).await?;
                 }
-
-                self.broadcast_once(send, data, true, true).await?;
             }
 
             self.broadcast_signal.wait().await;

@@ -29,7 +29,7 @@ impl<'a> Host<'a> {
         F: FnMut(HostAnswer) -> Result<(), E>,
         E: From<MdnsError>,
     {
-        let owner = &[self.hostname, "local"];
+        let owner = &[self.hostname, "local", ""];
 
         if !self.ipv4.is_unspecified() {
             f(Record::new(
@@ -98,9 +98,9 @@ impl<'a> Service<'a> {
         F: FnMut(HostAnswer) -> Result<(), E>,
         E: From<MdnsError>,
     {
-        let owner = &[self.name, self.service, self.protocol, "local"];
-        let stype = &[self.service, self.protocol, "local"];
-        let target = &[host.hostname, "local"];
+        let owner = &[self.name, self.service, self.protocol, "local", ""];
+        let stype = &[self.service, self.protocol, "local", ""];
+        let target = &[host.hostname, "local", ""];
 
         f(Record::new(
             NameLabels(owner),
@@ -136,8 +136,8 @@ impl<'a> Service<'a> {
         ))?;
 
         for subtype in self.service_subtypes {
-            let subtype_owner = &[subtype, self.name, self.service, self.protocol, "local"];
-            let subtype = &[subtype, "_sub", self.service, self.protocol, "local"];
+            let subtype_owner = &[subtype, self.name, self.service, self.protocol, "local", ""];
+            let subtype = &[subtype, "_sub", self.service, self.protocol, "local", ""];
 
             f(Record::new(
                 NameLabels(subtype_owner),
