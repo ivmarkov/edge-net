@@ -3,7 +3,7 @@ use core::net::{Ipv4Addr, Ipv6Addr};
 use crate::domain::base::{iana::Class, Record, Ttl};
 use crate::domain::rdata::{Aaaa, AllRecordData, Ptr, Srv, A};
 
-use crate::{HostAnswer, HostAnswers, MdnsError, NameLabels, RecordDataChain, Txt, DNS_SD_OWNER};
+use crate::{HostAnswer, HostAnswers, MdnsError, NameSlice, RecordDataChain, Txt, DNS_SD_OWNER};
 
 /// A simple representation of a host that can be used to generate mDNS answers.
 ///
@@ -33,7 +33,7 @@ impl<'a> Host<'a> {
 
         if !self.ipv4.is_unspecified() {
             f(Record::new(
-                NameLabels::new(owner),
+                NameSlice::new(owner),
                 Class::IN,
                 self.ttl,
                 RecordDataChain::Next(AllRecordData::A(A::new(domain::base::net::Ipv4Addr::from(
@@ -44,7 +44,7 @@ impl<'a> Host<'a> {
 
         if !self.ipv6.is_unspecified() {
             f(Record::new(
-                NameLabels::new(owner),
+                NameSlice::new(owner),
                 Class::IN,
                 self.ttl,
                 RecordDataChain::Next(AllRecordData::Aaaa(Aaaa::new(
@@ -103,19 +103,19 @@ impl<'a> Service<'a> {
         let target = &[host.hostname, "local"];
 
         f(Record::new(
-            NameLabels::new(owner),
+            NameSlice::new(owner),
             Class::IN,
             host.ttl,
             RecordDataChain::Next(AllRecordData::Srv(Srv::new(
                 self.priority,
                 self.weight,
                 self.port,
-                NameLabels::new(target),
+                NameSlice::new(target),
             ))),
         ))?;
 
         f(Record::new(
-            NameLabels::new(owner),
+            NameSlice::new(owner),
             Class::IN,
             host.ttl,
             RecordDataChain::This(Txt::new(self.txt_kvs)),
@@ -125,14 +125,14 @@ impl<'a> Service<'a> {
             DNS_SD_OWNER,
             Class::IN,
             host.ttl,
-            RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels::new(stype)))),
+            RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameSlice::new(stype)))),
         ))?;
 
         f(Record::new(
-            NameLabels::new(stype),
+            NameSlice::new(stype),
             Class::IN,
             host.ttl,
-            RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels::new(owner)))),
+            RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameSlice::new(owner)))),
         ))?;
 
         for subtype in self.service_subtypes {
@@ -140,24 +140,24 @@ impl<'a> Service<'a> {
             let subtype = &[subtype, "_sub", self.service, self.protocol, "local"];
 
             f(Record::new(
-                NameLabels::new(subtype_owner),
+                NameSlice::new(subtype_owner),
                 Class::IN,
                 host.ttl,
-                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels::new(owner)))),
+                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameSlice::new(owner)))),
             ))?;
 
             f(Record::new(
-                NameLabels::new(subtype),
+                NameSlice::new(subtype),
                 Class::IN,
                 host.ttl,
-                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels::new(subtype_owner)))),
+                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameSlice::new(subtype_owner)))),
             ))?;
 
             f(Record::new(
                 DNS_SD_OWNER,
                 Class::IN,
                 host.ttl,
-                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels::new(subtype)))),
+                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameSlice::new(subtype)))),
             ))?;
         }
 

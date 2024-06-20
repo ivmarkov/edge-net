@@ -32,7 +32,7 @@ pub mod domain {
 pub mod host;
 
 /// The DNS-SD owner name.
-pub const DNS_SD_OWNER: NameLabels = NameLabels::new(&["_services", "_dns-sd", "_udp", "local"]);
+pub const DNS_SD_OWNER: NameSlice = NameSlice::new(&["_services", "_dns-sd", "_udp", "local"]);
 
 /// A wrapper type for the errors returned by the `domain` library during parsing and
 /// constructing mDNS messages.
@@ -84,21 +84,21 @@ impl From<ParseError> for MdnsError {
     }
 }
 
-/// This struct allows the construction of a `domain` lib Name from
-/// a bunch of `&str` labels.
+/// This newtype struct allows the construction of a `domain` lib Name from
+/// a bunch of `&str` labels represented as a slice.
 ///
 /// Implements the `domain` lib `ToName` trait.
 #[derive(Debug, Clone)]
-pub struct NameLabels<'a>(&'a [&'a str]);
+pub struct NameSlice<'a>(&'a [&'a str]);
 
-impl<'a> NameLabels<'a> {
-    /// Create a new `NameLabels` instance from a slice of `&str` labels.
+impl<'a> NameSlice<'a> {
+    /// Create a new `NameSlice` instance from a slice of `&str` labels.
     pub const fn new(labels: &'a [&'a str]) -> Self {
         Self(labels)
     }
 }
 
-impl<'a> fmt::Display for NameLabels<'a> {
+impl<'a> fmt::Display for NameSlice<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for label in self.0 {
             write!(f, "{}.", label)?;
@@ -108,16 +108,16 @@ impl<'a> fmt::Display for NameLabels<'a> {
     }
 }
 
-impl<'a> ToName for NameLabels<'a> {}
+impl<'a> ToName for NameSlice<'a> {}
 
-/// An iterator over the labels in a `NameLabels` instance.
+/// An iterator over the labels in a `NameSlice` instance.
 #[derive(Clone)]
-pub struct NameLabelsIter<'a> {
-    name: &'a NameLabels<'a>,
+pub struct NameSliceIter<'a> {
+    name: &'a NameSlice<'a>,
     index: usize,
 }
 
-impl<'a> Iterator for NameLabelsIter<'a> {
+impl<'a> Iterator for NameSliceIter<'a> {
     type Item = &'a Label;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -137,7 +137,7 @@ impl<'a> Iterator for NameLabelsIter<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for NameLabelsIter<'a> {
+impl<'a> DoubleEndedIterator for NameSliceIter<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.index > 0 {
             self.index -= 1;
@@ -154,11 +154,11 @@ impl<'a> DoubleEndedIterator for NameLabelsIter<'a> {
     }
 }
 
-impl<'a> ToLabelIter for NameLabels<'a> {
-    type LabelIter<'t> = NameLabelsIter<'t> where Self: 't;
+impl<'a> ToLabelIter for NameSlice<'a> {
+    type LabelIter<'t> = NameSliceIter<'t> where Self: 't;
 
     fn iter_labels(&self) -> Self::LabelIter<'_> {
-        NameLabelsIter {
+        NameSliceIter {
             name: self,
             index: 0,
         }
@@ -499,7 +499,7 @@ where
 /// A type alias for the answer which is expected to be returned by instances
 /// implementing the `HostAnswers` trait.
 pub type HostAnswer<'a> =
-    Record<NameLabels<'a>, RecordDataChain<Txt<'a>, AllRecordData<&'a [u8], NameLabels<'a>>>>;
+    Record<NameSlice<'a>, RecordDataChain<Txt<'a>, AllRecordData<&'a [u8], NameSlice<'a>>>>;
 
 /// A trait that abstracts the logic for providing answers to incoming mDNS queries.
 ///
