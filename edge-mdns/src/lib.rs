@@ -626,6 +626,60 @@ where
     }
 }
 
+/// A structure modeling an entity that does not generate any questions.
+///
+/// Useful only when chaining multiple `HostQuestions` instances.
+pub struct NoHostQuestions;
+
+impl NoHostQuestions {
+    /// Chains a `HostQuestions` with another `HostAnswers` instance.
+    pub fn chain<T>(questions: T) -> ChainedHostQuestions<T, Self> {
+        ChainedHostQuestions::new(questions, Self)
+    }
+}
+
+impl HostQuestions for NoHostQuestions {
+    fn visit<F, E>(&self, _f: F) -> Result<(), E>
+    where
+        F: FnMut(HostQuestion) -> Result<(), E>,
+    {
+        Ok(())
+    }
+}
+
+/// A composite `HostQuestions` that chains two `HostQuestions` instances together.
+pub struct ChainedHostQuestions<T, U> {
+    first: T,
+    second: U,
+}
+
+impl<T, U> ChainedHostQuestions<T, U> {
+    /// Create a new `ChainedHostQuestions` instance from two `HostQuestions` instances.
+    pub const fn new(first: T, second: U) -> Self {
+        Self { first, second }
+    }
+
+    /// Chains this instance with another `HostQuestions` instance,
+    pub fn chain<V>(self, answers: V) -> ChainedHostQuestions<V, Self> {
+        ChainedHostQuestions::new(answers, self)
+    }
+}
+
+impl<T, U> HostQuestions for ChainedHostQuestions<T, U>
+where
+    T: HostQuestions,
+    U: HostQuestions,
+{
+    fn visit<F, E>(&self, mut f: F) -> Result<(), E>
+    where
+        F: FnMut(HostQuestion) -> Result<(), E>,
+        E: From<MdnsError>,
+    {
+        self.first.visit(&mut f)?;
+        self.second.visit(f)
+    }
+}
+
 /// A structure modeling an entity that does not generate any answers.
 ///
 /// Useful only when chaining multiple `HostAnswers` instances.
