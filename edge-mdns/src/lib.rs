@@ -892,7 +892,7 @@ pub type PeerAnswer<'a> =
 /// the answers from the message (in the `answer` and `additional` mDNS message sections).
 pub trait PeerAnswers {
     /// Processes the answers from an incoming mDNS message.
-    fn answers<'a, T, A>(&mut self, answers: T, additional: A) -> Result<(), MdnsError>
+    fn answers<'a, T, A>(&self, answers: T, additional: A) -> Result<(), MdnsError>
     where
         T: IntoIterator<Item = Result<PeerAnswer<'a>, MdnsError>> + Clone + 'a,
         A: IntoIterator<Item = Result<PeerAnswer<'a>, MdnsError>> + Clone + 'a;
@@ -902,12 +902,25 @@ impl<T> PeerAnswers for &mut T
 where
     T: PeerAnswers,
 {
-    fn answers<'a, U, V>(&mut self, answers: U, additional: V) -> Result<(), MdnsError>
+    fn answers<'a, U, V>(&self, answers: U, additional: V) -> Result<(), MdnsError>
     where
         U: IntoIterator<Item = Result<PeerAnswer<'a>, MdnsError>> + Clone + 'a,
         V: IntoIterator<Item = Result<PeerAnswer<'a>, MdnsError>> + Clone + 'a,
     {
         (**self).answers(answers, additional)
+    }
+}
+
+impl<T> PeerAnswers for &T
+where
+    T: PeerAnswers,
+{
+    fn answers<'a, U, V>(&self, answers: U, additional: V) -> Result<(), MdnsError>
+    where
+        U: IntoIterator<Item = Result<PeerAnswer<'a>, MdnsError>> + Clone + 'a,
+        V: IntoIterator<Item = Result<PeerAnswer<'a>, MdnsError>> + Clone + 'a,
+    {
+        (*self).answers(answers, additional)
     }
 }
 
