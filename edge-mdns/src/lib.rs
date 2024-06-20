@@ -1,6 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::large_futures)]
 
+use core::cmp::Ordering;
 use core::fmt::{self, Display};
 use core::ops::RangeBounds;
 
@@ -31,7 +32,7 @@ pub mod domain {
 pub mod host;
 
 /// The DNS-SD owner name.
-pub const DNS_SD_OWNER: NameLabels = NameLabels(&["_services", "_dns-sd", "_udp", "local", ""]);
+pub const DNS_SD_OWNER: NameLabels = NameLabels::new(&["_services", "_dns-sd", "_udp", "local"]);
 
 /// A wrapper type for the errors returned by the `domain` library during parsing and
 /// constructing mDNS messages.
@@ -99,12 +100,8 @@ impl<'a> NameLabels<'a> {
 
 impl<'a> fmt::Display for NameLabels<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, label) in self.0.iter().enumerate() {
-            if i > 0 {
-                write!(f, ".")?;
-            }
-
-            write!(f, "{}", label)?;
+        for label in self.0 {
+            write!(f, "{}.", label)?;
         }
 
         Ok(())
@@ -124,12 +121,18 @@ impl<'a> Iterator for NameLabelsIter<'a> {
     type Item = &'a Label;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.name.0.len() {
-            let label = Label::from_slice(self.name.0[self.index].as_bytes()).unwrap();
-            self.index += 1;
-            Some(label)
-        } else {
-            None
+        match self.index.cmp(&self.name.0.len()) {
+            Ordering::Less => {
+                let label = Label::from_slice(self.name.0[self.index].as_bytes()).unwrap();
+                self.index += 1;
+                Some(label)
+            }
+            Ordering::Equal => {
+                let label = Label::root();
+                self.index += 1;
+                Some(label)
+            }
+            Ordering::Greater => None,
         }
     }
 }
@@ -138,8 +141,13 @@ impl<'a> DoubleEndedIterator for NameLabelsIter<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.index > 0 {
             self.index -= 1;
-            let label = Label::from_slice(self.name.0[self.index].as_bytes()).unwrap();
-            Some(label)
+            if self.index == self.name.0.len() {
+                let label = Label::root();
+                Some(label)
+            } else {
+                let label = Label::from_slice(self.name.0[self.index].as_bytes()).unwrap();
+                Some(label)
+            }
         } else {
             None
         }
@@ -678,7 +686,7 @@ where
                         additional_srv_txt = true;
                     }
 
-                    if question.qname().name_eq(answer.owner()) {
+                    if question.qname().name_eq(&answer.owner()) {
                         debug!("Answering question [{question}] with: [{answer}]");
 
                         ab.push(answer)?;

@@ -29,11 +29,11 @@ impl<'a> Host<'a> {
         F: FnMut(HostAnswer) -> Result<(), E>,
         E: From<MdnsError>,
     {
-        let owner = &[self.hostname, "local", ""];
+        let owner = &[self.hostname, "local"];
 
         if !self.ipv4.is_unspecified() {
             f(Record::new(
-                NameLabels(owner),
+                NameLabels::new(owner),
                 Class::IN,
                 self.ttl,
                 RecordDataChain::Next(AllRecordData::A(A::new(domain::base::net::Ipv4Addr::from(
@@ -44,7 +44,7 @@ impl<'a> Host<'a> {
 
         if !self.ipv6.is_unspecified() {
             f(Record::new(
-                NameLabels(owner),
+                NameLabels::new(owner),
                 Class::IN,
                 self.ttl,
                 RecordDataChain::Next(AllRecordData::Aaaa(Aaaa::new(
@@ -98,24 +98,24 @@ impl<'a> Service<'a> {
         F: FnMut(HostAnswer) -> Result<(), E>,
         E: From<MdnsError>,
     {
-        let owner = &[self.name, self.service, self.protocol, "local", ""];
-        let stype = &[self.service, self.protocol, "local", ""];
-        let target = &[host.hostname, "local", ""];
+        let owner = &[self.name, self.service, self.protocol, "local"];
+        let stype = &[self.service, self.protocol, "local"];
+        let target = &[host.hostname, "local"];
 
         f(Record::new(
-            NameLabels(owner),
+            NameLabels::new(owner),
             Class::IN,
             host.ttl,
             RecordDataChain::Next(AllRecordData::Srv(Srv::new(
                 self.priority,
                 self.weight,
                 self.port,
-                NameLabels(target),
+                NameLabels::new(target),
             ))),
         ))?;
 
         f(Record::new(
-            NameLabels(owner),
+            NameLabels::new(owner),
             Class::IN,
             host.ttl,
             RecordDataChain::This(Txt::new(self.txt_kvs)),
@@ -125,39 +125,39 @@ impl<'a> Service<'a> {
             DNS_SD_OWNER,
             Class::IN,
             host.ttl,
-            RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels(stype)))),
+            RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels::new(stype)))),
         ))?;
 
         f(Record::new(
-            NameLabels(stype),
+            NameLabels::new(stype),
             Class::IN,
             host.ttl,
-            RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels(owner)))),
+            RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels::new(owner)))),
         ))?;
 
         for subtype in self.service_subtypes {
-            let subtype_owner = &[subtype, self.name, self.service, self.protocol, "local", ""];
-            let subtype = &[subtype, "_sub", self.service, self.protocol, "local", ""];
+            let subtype_owner = &[subtype, self.name, self.service, self.protocol, "local"];
+            let subtype = &[subtype, "_sub", self.service, self.protocol, "local"];
 
             f(Record::new(
-                NameLabels(subtype_owner),
+                NameLabels::new(subtype_owner),
                 Class::IN,
                 host.ttl,
-                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels(owner)))),
+                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels::new(owner)))),
             ))?;
 
             f(Record::new(
-                NameLabels(subtype),
+                NameLabels::new(subtype),
                 Class::IN,
                 host.ttl,
-                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels(subtype_owner)))),
+                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels::new(subtype_owner)))),
             ))?;
 
             f(Record::new(
                 DNS_SD_OWNER,
                 Class::IN,
                 host.ttl,
-                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels(subtype)))),
+                RecordDataChain::Next(AllRecordData::Ptr(Ptr::new(NameLabels::new(subtype)))),
             ))?;
         }
 
