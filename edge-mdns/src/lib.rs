@@ -433,8 +433,8 @@ pub struct NoHandler;
 
 impl NoHandler {
     /// Chains a `NoHandler` with another handler.
-    pub fn chain<T>(handler: T) -> ChainedHandler<T, Self> {
-        ChainedHandler::new(handler, Self)
+    pub fn chain<T>(self, handler: T) -> ChainedHandler<T, Self> {
+        ChainedHandler::new(handler, self)
     }
 }
 
@@ -633,8 +633,8 @@ pub struct NoHostQuestions;
 
 impl NoHostQuestions {
     /// Chains a `HostQuestions` with another `HostAnswers` instance.
-    pub fn chain<T>(questions: T) -> ChainedHostQuestions<T, Self> {
-        ChainedHostQuestions::new(questions, Self)
+    pub fn chain<T>(self, questions: T) -> ChainedHostQuestions<T, Self> {
+        ChainedHostQuestions::new(questions, self)
     }
 }
 
@@ -687,8 +687,8 @@ pub struct NoHostAnswers;
 
 impl NoHostAnswers {
     /// Chains a `NoHostAnswers` with another `HostAnswers` instance.
-    pub fn chain<T>(answers: T) -> ChainedHostAnswers<T, Self> {
-        ChainedHostAnswers::new(answers, Self)
+    pub fn chain<T>(self, answers: T) -> ChainedHostAnswers<T, Self> {
+        ChainedHostAnswers::new(answers, self)
     }
 }
 
