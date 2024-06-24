@@ -38,7 +38,7 @@ anyhow = "1"
 env_logger = "0.10"
 embedded-io-async = "0.6"
 embassy-time = { version = "0.3", features = ["std", "generic-queue"] }
-embassy-sync = "0.5"
+embassy-sync = "0.6"
 embassy-futures = "0.1"
 embedded-svc = { version = "0.27", features = ["std"] }
 futures-lite = "1"
@@ -103,10 +103,10 @@ members = [
 
 [workspace.dependencies]
 embassy-futures = { version = "0.1", default-features = false }
-embassy-sync = { version = "0.5", default-features = false }
+embassy-sync = { version = "0.6", default-features = false }
 embassy-time = { version = "0.3", default-features = false }
 embedded-io-async = { version = "0.6", default-features = false }
-embedded-svc = { version = "0.27", default-features = false }
+embedded-svc = { version = "0.28", default-features = false }
 log = { version = "0.4", default-features = false }
 heapless = { version = "0.8", default-features = false }
 domain = { version = "0.9.3", default-features = false, features = ["heapless"] }
