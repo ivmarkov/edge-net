@@ -122,10 +122,8 @@ where
     M: RawMutex,
     R: UdpReceive + Readable,
     S: UdpSend<Error = R::Error>,
-    RB: BufferAccess,
-    SB: BufferAccess,
-    RB::BufferSurface: AsMut<[u8]>,
-    SB::BufferSurface: AsMut<[u8]>,
+    RB: BufferAccess<[u8]>,
+    SB: BufferAccess<[u8]>,
 {
     /// Creates a new mDNS service with the provided handler, interfaces, and UDP receiver and sender.
     #[allow(clippy::too_many_arguments)]

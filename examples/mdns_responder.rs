@@ -1,15 +1,14 @@
 use core::net::{Ipv4Addr, Ipv6Addr};
 
-use edge_mdns::buf::BufferAccess;
+use edge_mdns::buf::{BufferAccess, VecBufAccess};
 use edge_mdns::domain::base::Ttl;
 use edge_mdns::io::{self, MdnsIoError, DEFAULT_SOCKET};
 use edge_mdns::{host::Host, HostAnswersMdnsHandler};
 use edge_nal::{UdpBind, UdpSplit};
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-
-use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
+
 use log::*;
 
 use rand::{thread_rng, RngCore};
@@ -27,8 +26,8 @@ fn main() {
     let stack = edge_nal_std::Stack::new();
 
     let (recv_buf, send_buf) = (
-        Mutex::<NoopRawMutex, _>::new([0; 1500]),
-        Mutex::<NoopRawMutex, _>::new([0; 1500]),
+        VecBufAccess::<NoopRawMutex, 1500>::new(),
+        VecBufAccess::<NoopRawMutex, 1500>::new(),
     );
 
     futures_lite::future::block_on(run::<edge_nal_std::Stack, _, _>(
@@ -46,10 +45,8 @@ async fn run<T, RB, SB>(
 ) -> Result<(), MdnsIoError<T::Error>>
 where
     T: UdpBind,
-    RB: BufferAccess,
-    SB: BufferAccess,
-    RB::BufferSurface: AsMut<[u8]>,
-    SB::BufferSurface: AsMut<[u8]>,
+    RB: BufferAccess<[u8]>,
+    SB: BufferAccess<[u8]>,
 {
     info!("About to run an mDNS responder for our PC. It will be addressable using {our_name}.local, so try to `ping {our_name}.local`.");
 
