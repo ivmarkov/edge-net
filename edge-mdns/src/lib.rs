@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::large_futures)]
+#![allow(async_fn_in_trait)]
 
 use core::cmp::Ordering;
 use core::fmt::{self, Display};
@@ -20,16 +21,15 @@ use domain::rdata::AllRecordData;
 
 use log::debug;
 
-#[cfg(feature = "io")]
-pub mod io;
-
+pub mod buf; // TODO: Maybe move to a generic `edge-buf` crate in future
 /// Re-export the domain lib if the user would like to directly
 /// assemble / parse mDNS messages.
 pub mod domain {
     pub use domain::*;
 }
-
 pub mod host;
+#[cfg(feature = "io")]
+pub mod io;
 
 /// The DNS-SD owner name.
 pub const DNS_SD_OWNER: NameSlice = NameSlice::new(&["_services", "_dns-sd", "_udp", "local"]);

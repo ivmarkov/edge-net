@@ -4,13 +4,14 @@ use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddr
 
 use core::pin::pin;
 
+use buf::BufferAccess;
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex;
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 
-use edge_nal::{MulticastV4, MulticastV6, UdpBind, UdpReceive, UdpSend};
+use edge_nal::{MulticastV4, MulticastV6, Readable, UdpBind, UdpReceive, UdpSend};
 
 use embassy_time::{Duration, Timer};
 use log::{info, warn};
@@ -33,6 +34,8 @@ pub const PORT: u16 = 5353;
 #[derive(Debug)]
 pub enum MdnsIoError<E> {
     MdnsError(MdnsError),
+    NoRecvBufError,
+    NoSendBufError,
     IoError(E),
 }
 
@@ -49,6 +52,8 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MdnsError(err) => write!(f, "mDNS error: {}", err),
+            Self::NoRecvBufError => write!(f, "No recv buf available"),
+            Self::NoSendBufError => write!(f, "No send buf available"),
             Self::IoError(err) => write!(f, "IO error: {}", err),
         }
     }
@@ -98,23 +103,29 @@ where
 /// The handler is expected to be a type that implements the `MdnsHandler` trait, which
 /// allows it to handle mDNS queries and generate responses, as well as to handle mDNS
 /// responses to queries which we might have issues using the `query` method.
-pub struct Mdns<'a, M, R, S>
+pub struct Mdns<'a, M, R, S, RB, SB>
 where
     M: RawMutex,
 {
     ipv4_interface: Option<Ipv4Addr>,
     ipv6_interface: Option<u32>,
-    recv: Mutex<M, (R, &'a mut [u8])>,
-    send: Mutex<M, (S, &'a mut [u8])>,
+    recv: Mutex<M, R>,
+    send: Mutex<M, S>,
+    recv_buf: RB,
+    send_buf: SB,
     rand: fn(&mut [u8]),
     broadcast_signal: &'a Signal<M, ()>,
 }
 
-impl<'a, M, R, S> Mdns<'a, M, R, S>
+impl<'a, M, R, S, RB, SB> Mdns<'a, M, R, S, RB, SB>
 where
     M: RawMutex,
-    R: UdpReceive,
+    R: UdpReceive + Readable,
     S: UdpSend<Error = R::Error>,
+    RB: BufferAccess,
+    SB: BufferAccess,
+    RB::BufferSurface: AsMut<[u8]>,
+    SB::BufferSurface: AsMut<[u8]>,
 {
     /// Creates a new mDNS service with the provided handler, interfaces, and UDP receiver and sender.
     #[allow(clippy::too_many_arguments)]
@@ -122,17 +133,19 @@ where
         ipv4_interface: Option<Ipv4Addr>,
         ipv6_interface: Option<u32>,
         recv: R,
-        recv_buf: &'a mut [u8],
         send: S,
-        send_buf: &'a mut [u8],
+        recv_buf: RB,
+        send_buf: SB,
         rand: fn(&mut [u8]),
         broadcast_signal: &'a Signal<M, ()>,
     ) -> Self {
         Self {
             ipv4_interface,
             ipv6_interface,
-            recv: Mutex::new((recv, recv_buf)),
-            send: Mutex::new((send, send_buf)),
+            recv: Mutex::new(recv),
+            send: Mutex::new(send),
+            recv_buf,
+            send_buf,
             rand,
             broadcast_signal,
         }
@@ -175,13 +188,19 @@ where
     where
         Q: FnOnce(&mut [u8]) -> Result<usize, MdnsError>,
     {
-        let mut guard = self.send.lock().await;
-        let (send, send_buf) = &mut *guard;
+        let mut send_buf = self
+            .send_buf
+            .get()
+            .await
+            .ok_or(MdnsIoError::NoSendBufError)?;
 
-        let len = q(send_buf)?;
+        let mut send_guard = self.send.lock().await;
+        let send = &mut *send_guard;
+
+        let len = q(send_buf.as_mut())?;
 
         if len > 0 {
-            self.broadcast_once(send, &send_buf[..len], true, true)
+            self.broadcast_once(send, &send_buf.as_mut()[..len], true, true)
                 .await?;
         }
 
@@ -197,11 +216,20 @@ where
     {
         loop {
             {
-                let mut guard = self.send.lock().await;
-                let (send, send_buf) = &mut *guard;
+                let mut send_buf = self
+                    .send_buf
+                    .get()
+                    .await
+                    .ok_or(MdnsIoError::NoSendBufError)?;
 
-                let response = handler
-                    .lock(|handler| handler.borrow_mut().handle(MdnsRequest::None, send_buf))?;
+                let mut send_guard = self.send.lock().await;
+                let send = &mut *send_guard;
+
+                let response = handler.lock(|handler| {
+                    handler
+                        .borrow_mut()
+                        .handle(MdnsRequest::None, send_buf.as_mut())
+                })?;
 
                 if let MdnsResponse::Reply { data, delay } = response {
                     if delay {
@@ -224,51 +252,68 @@ where
     where
         T: MdnsHandler,
     {
-        let mut guard = self.recv.lock().await;
-        let (recv, recv_buf) = &mut *guard;
+        let mut recv = self.recv.lock().await;
 
         loop {
-            let (len, remote) = recv.receive(recv_buf).await.map_err(MdnsIoError::IoError)?;
+            recv.readable().await.map_err(MdnsIoError::IoError)?;
 
-            debug!("Got mDNS query from {remote}");
+            {
+                let mut recv_buf = self
+                    .recv_buf
+                    .get()
+                    .await
+                    .ok_or(MdnsIoError::NoRecvBufError)?;
+                let mut send_buf = self
+                    .send_buf
+                    .get()
+                    .await
+                    .ok_or(MdnsIoError::NoSendBufError)?;
 
-            let mut guard = self.send.lock().await;
-            let (send, send_buf) = &mut *guard;
+                let (len, remote) = recv
+                    .receive(recv_buf.as_mut())
+                    .await
+                    .map_err(MdnsIoError::IoError)?;
 
-            let response = match handler.lock(|handler| {
-                handler.borrow_mut().handle(
-                    MdnsRequest::Request {
-                        data: &recv_buf[..len],
-                        legacy: remote.port() != PORT,
-                        multicast: true, // TODO: Cannot determine this
+                debug!("Got mDNS query from {remote}");
+
+                let mut send_guard = self.send.lock().await;
+                let send = &mut *send_guard;
+
+                let response = match handler.lock(|handler| {
+                    handler.borrow_mut().handle(
+                        MdnsRequest::Request {
+                            data: &recv_buf.as_mut()[..len],
+                            legacy: remote.port() != PORT,
+                            multicast: true, // TODO: Cannot determine this
+                        },
+                        send_buf.as_mut(),
+                    )
+                }) {
+                    Ok(len) => len,
+                    Err(err) => match err {
+                        MdnsError::InvalidMessage => {
+                            warn!("Got invalid message from {remote}, skipping");
+                            continue;
+                        }
+                        other => Err(other)?,
                     },
-                    send_buf,
-                )
-            }) {
-                Ok(len) => len,
-                Err(err) => match err {
-                    MdnsError::InvalidMessage => {
-                        warn!("Got invalid message from {remote}, skipping");
-                        continue;
+                };
+
+                if let MdnsResponse::Reply { data, delay } = response {
+                    if delay {
+                        self.delay().await;
                     }
-                    other => Err(other)?,
-                },
-            };
 
-            if let MdnsResponse::Reply { data, delay } = response {
-                if delay {
-                    self.delay().await;
+                    info!("Replying to mDNS query from {remote}");
+
+                    self.broadcast_once(
+                        send,
+                        data,
+                        matches!(remote, SocketAddr::V4(_)),
+                        matches!(remote, SocketAddr::V6(_)),
+                    )
+                    .await?;
                 }
-
-                info!("Replying to mDNS query from {remote}");
-
-                self.broadcast_once(
-                    send,
-                    data,
-                    matches!(remote, SocketAddr::V4(_)),
-                    matches!(remote, SocketAddr::V6(_)),
-                )
-                .await?;
             }
         }
     }

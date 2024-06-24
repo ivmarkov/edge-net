@@ -1,5 +1,6 @@
 use core::net::{Ipv4Addr, Ipv6Addr};
 
+use edge_mdns::buf::BufferAccess;
 use edge_mdns::domain::base::Ttl;
 use edge_mdns::io::{self, MdnsIoError, DEFAULT_SOCKET};
 use edge_mdns::{host::Host, HostAnswersMdnsHandler};
@@ -7,6 +8,7 @@ use edge_nal::{UdpBind, UdpSplit};
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 
+use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use log::*;
 
@@ -24,27 +26,30 @@ fn main() {
 
     let stack = edge_nal_std::Stack::new();
 
-    let (mut recv_buf, mut send_buf) = ([0; 1500], [0; 1500]);
+    let (recv_buf, send_buf) = (
+        Mutex::<NoopRawMutex, _>::new([0; 1500]),
+        Mutex::<NoopRawMutex, _>::new([0; 1500]),
+    );
 
-    futures_lite::future::block_on(run::<edge_nal_std::Stack>(
-        &stack,
-        &mut recv_buf,
-        &mut send_buf,
-        OUR_NAME,
-        OUR_IP,
+    futures_lite::future::block_on(run::<edge_nal_std::Stack, _, _>(
+        &stack, &recv_buf, &send_buf, OUR_NAME, OUR_IP,
     ))
     .unwrap();
 }
 
-async fn run<T>(
+async fn run<T, RB, SB>(
     stack: &T,
-    recv_buf: &mut [u8],
-    send_buf: &mut [u8],
+    recv_buf: RB,
+    send_buf: SB,
     our_name: &str,
     our_ip: Ipv4Addr,
 ) -> Result<(), MdnsIoError<T::Error>>
 where
     T: UdpBind,
+    RB: BufferAccess,
+    SB: BufferAccess,
+    RB::BufferSurface: AsMut<[u8]>,
+    SB::BufferSurface: AsMut<[u8]>,
 {
     info!("About to run an mDNS responder for our PC. It will be addressable using {our_name}.local, so try to `ping {our_name}.local`.");
 
@@ -63,12 +68,12 @@ where
     // We don't use it in this example, because the data is hard-coded
     let signal = Signal::new();
 
-    let mdns = io::Mdns::<NoopRawMutex, _, _>::new(
+    let mdns = io::Mdns::<NoopRawMutex, _, _, _, _>::new(
         Some(Ipv4Addr::UNSPECIFIED),
         Some(0),
         recv,
-        recv_buf,
         send,
+        recv_buf,
         send_buf,
         |buf| thread_rng().fill_bytes(buf),
         &signal,
