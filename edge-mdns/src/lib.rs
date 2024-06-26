@@ -21,6 +21,7 @@ use domain::rdata::AllRecordData;
 
 use log::debug;
 
+#[cfg(feature = "io")]
 pub mod buf; // TODO: Maybe move to a generic `edge-buf` crate in future
 /// Re-export the domain lib if the user would like to directly
 /// assemble / parse mDNS messages.
