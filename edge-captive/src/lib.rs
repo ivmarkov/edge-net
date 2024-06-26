@@ -5,7 +5,7 @@ use core::fmt::{self, Display};
 use core::time::Duration;
 
 use domain::base::wire::Composer;
-use domain::dep::octseq::OctetsBuilder;
+use domain::dep::octseq::{OctetsBuilder, Truncate};
 use log::debug;
 
 use domain::{
@@ -20,7 +20,6 @@ use domain::{
     dep::octseq::ShortBuf,
     rdata::A,
 };
-use octseq::Truncate;
 
 #[cfg(feature = "io")]
 pub mod io;
@@ -80,15 +79,15 @@ pub fn reply(
 
     let mut responseb = domain::base::MessageBuilder::from_target(buf)?;
 
-    let buf = if matches!(message.header().opcode(), Opcode::Query) {
+    let buf = if matches!(message.header().opcode(), Opcode::QUERY) {
         debug!("Message is of type Query, processing all questions");
 
-        let mut answerb = responseb.start_answer(&message, Rcode::NoError)?;
+        let mut answerb = responseb.start_answer(&message, Rcode::NOERROR)?;
 
         for question in message.question() {
             let question = question?;
 
-            if matches!(question.qtype(), Rtype::A) && matches!(question.qclass(), Class::In) {
+            if matches!(question.qtype(), Rtype::A) && matches!(question.qclass(), Class::IN) {
                 log::info!(
                     "Question {:?} is of type A, answering with IP {:?}, TTL {:?}",
                     question,
@@ -98,7 +97,7 @@ pub fn reply(
 
                 let record = Record::new(
                     question.qname(),
-                    Class::In,
+                    Class::IN,
                     Ttl::from_duration_lossy(ttl),
                     A::from_octets(ip[0], ip[1], ip[2], ip[3]),
                 );
@@ -118,7 +117,7 @@ pub fn reply(
         headerb.set_id(message.header().id());
         headerb.set_opcode(message.header().opcode());
         headerb.set_rd(message.header().rd());
-        headerb.set_rcode(domain::base::iana::Rcode::NotImp);
+        headerb.set_rcode(domain::base::iana::Rcode::NOTIMP);
 
         responseb.finish()
     };
