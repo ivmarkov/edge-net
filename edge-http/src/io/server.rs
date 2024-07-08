@@ -510,11 +510,14 @@ where
 pub type DefaultServer =
     Server<{ DEFAULT_HANDLER_TASKS_COUNT }, { DEFAULT_BUF_SIZE }, { DEFAULT_MAX_HEADERS_COUNT }>;
 
+pub type ServerBuffers<const P: usize, const B: usize> = MaybeUninit<[[u8; B]; P]>;
+
+#[repr(transparent)]
 pub struct Server<
     const P: usize = DEFAULT_HANDLER_TASKS_COUNT,
     const B: usize = DEFAULT_BUF_SIZE,
     const N: usize = DEFAULT_MAX_HEADERS_COUNT,
->(MaybeUninit<[[u8; B]; P]>);
+>(ServerBuffers<P, B>);
 
 impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
     #[inline(always)]
