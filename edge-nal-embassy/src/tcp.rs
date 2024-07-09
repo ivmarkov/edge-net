@@ -23,6 +23,10 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize>
     Tcp<'d, D, N, TX_SZ, RX_SZ>
 {
     /// Create a new `Tcp` instance for the provided Embassy networking stack, using the provided TCP buffers
+    ///
+    /// Ensure that the number of buffers `N` fits within StackResources<N> of
+    /// [embassy_net::Stack], while taking into account the sockets used for DHCP, DNS, etc. else
+    /// [smoltcp::iface::SocketSet] will panic with `adding a socket to a full SocketSet`.
     pub fn new(stack: &'d Stack<D>, buffers: &'d TcpBuffers<N, TX_SZ, RX_SZ>) -> Self {
         Self { stack, buffers }
     }
