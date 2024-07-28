@@ -26,6 +26,7 @@ pub enum Error<E> {
     IncompleteBody,
     InvalidState,
     Timeout,
+    ConnectionClosed,
     WsUpgradeError(UpgradeError),
     Io(E),
 }
@@ -78,6 +79,7 @@ where
             Self::InvalidState => write!(f, "Connection is not in requested state"),
             Self::Timeout => write!(f, "Timeout"),
             Self::WsUpgradeError(e) => write!(f, "WebSocket upgrade error: {e}"),
+            Self::ConnectionClosed => write!(f, "Connection closed"),
             Self::Io(e) => write!(f, "{e}"),
         }
     }
@@ -970,6 +972,13 @@ where
 
         while buf.len() > size {
             let read = input.read(&mut buf[offset..]).await.map_err(Error::Io)?;
+            if read == 0 {
+                Err(if offset == 0 {
+                    Error::ConnectionClosed
+                } else {
+                    Error::IncompleteHeaders
+                })?;
+            }
 
             offset += read;
             size += read;
@@ -1006,7 +1015,11 @@ where
         let read = input.read(&mut byte).await.map_err(Error::Io)?;
 
         if read == 0 {
-            Err(Error::IncompleteHeaders)?;
+            Err(if offset == 0 {
+                Error::ConnectionClosed
+            } else {
+                Error::IncompleteHeaders
+            })?;
         }
 
         buf[offset] = byte[0];

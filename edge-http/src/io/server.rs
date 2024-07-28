@@ -419,6 +419,10 @@ pub async fn handle_task_connection<const N: usize, T, H>(
                 info!("Handler task {task_id}: Connection closed due to timeout");
                 break;
             }
+            Err(HandleRequestError::Connection(Error::ConnectionClosed)) => {
+                debug!("Handler task {task_id}: Connection closed");
+                break;
+            }
             Err(e) => {
                 warn!("Handler task {task_id}: Error when handling request: {e:?}");
                 break;
