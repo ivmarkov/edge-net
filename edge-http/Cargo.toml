@@ -9,10 +9,11 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 categories = [
     "embedded",
-    "no-std",
+    "no-std::no-alloc",
     "asynchronous",
-    "networking",
-    "http"
+    "network-programming",
+    "web-programming::http-client",
+    "web-programming::http-server",
 ]
 
 [features]

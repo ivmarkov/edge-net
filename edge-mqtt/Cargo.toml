@@ -9,10 +9,8 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 categories = [
     "embedded",
-    "no-std",
     "asynchronous",
-    "networking",
-    "mqtt"
+    "network-programming",
 ]
 
 [dependencies]
