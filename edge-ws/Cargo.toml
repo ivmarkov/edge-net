@@ -1,6 +1,6 @@
 [package]
 name = "edge-ws"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.77"
 description = "Async + `no_std` + no-alloc implementation of the Websockets protocol"

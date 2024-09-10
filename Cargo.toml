@@ -1,6 +1,6 @@
 [package]
 name = "edge-net"
-version = "0.7.1"
+version = "0.8.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
 categories = ["embedded", "hardware-support"]

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2024-09-10
+* Migrated the client and the server to the `edge-nal` traits
+* Fixed a nasty bug where when multiple HTTP requests were carried over a single TCP connection, in certain cases the server was "eating" into the data of the next HTTP request
+* #20 - Removed a misleading warning log "Connection(IncompleteHeaders)"
+
 ## [0.2.1] - 2024-02-01
 * Fixed a wrong header name which caused WS client socket upgrade to fail
 

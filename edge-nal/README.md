@@ -4,7 +4,7 @@
 ![crates.io](https://img.shields.io/crates/v/edge-net.svg)
 [![Documentation](https://docs.rs/edge-net/badge.svg)](https://docs.rs/edge-net)
 
-Hosts a bunch of traits which hopefully will be upstreamed into [embedded-nal-async](https://github.com/rust-embedded-community/embedded-nal/tree/master/embedded-nal-async) at some point in time - in one shape or another.
+Hosts a bunch of networking (UDP, TCP and raw ethernet) traits.
 
 ## Differences with [embedded-nal-async](https://github.com/rust-embedded-community/embedded-nal/tree/master/embedded-nal-async)
 
@@ -19,8 +19,9 @@ Hosts a bunch of traits which hopefully will be upstreamed into [embedded-nal-as
 * Binding to a UDP socket and connecting to a UDP socket modeled with separate traits - `UdpBind` and `UdpConnect`, as not all platforms currently have capabilities to connect to a UDP socket (i.e. the networking stack of Embassy)
 * Returning the local address of a UDP socket bind / connect operation is not supported, as not all platforms currently have this capability (i.e. the networking stack of Embassy)
 * "Unbound" UDP sockets are currently not supported, as not all platforms have these capabilities (i.e. the networking stack of Embassy). Also, I've yet to find a good use case for these.
-* Splittable sockets with `UdpSplit` (can be optionally implemented by `UdpConnect` and `UdpBind`)
+* Splittable sockets with `UdpSplit`
 * `Multicast` trait for joining / leaving IPv4 and IPv6 multicast groups (can be optionally implemented by `UdpConnect` and `UdpBind`)
+* `Readable` trait for waiting until a socket becomes readable
 
 ## Justification
 
@@ -59,6 +60,8 @@ Namely:
   * Udp socket factory similar in spirit to STD's `std::net::UdpSocket::connect` method
 * [Multicast](src/multicast.rs)
   * Extra trait for UDP sockets allowing subscription to multicast groups
+* [Readable](src/readable.rs)
+  * Extra trait for UDP, TCP and raw sockets allowing one to wait until the socket becomes readable
 
 ### Traits for sending/receiving raw ethernet payloads (a.k.a. raw sockets)
 
