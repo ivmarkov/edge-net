@@ -71,6 +71,10 @@ name = "mdns_responder"
 required-features = ["std"]
 
 [[example]]
+name = "mdns_service_responder"
+required-features = ["std"]
+
+[[example]]
 name = "ws_client"
 required-features = ["std"]
 
