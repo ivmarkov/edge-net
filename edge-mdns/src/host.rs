@@ -98,6 +98,8 @@ impl<'a> Service<'a> {
         F: FnMut(HostAnswer) -> Result<(), E>,
         E: From<MdnsError>,
     {
+        host.visit_answers(&mut f)?;
+
         let owner = &[self.name, self.service, self.protocol, "local"];
         let stype = &[self.service, self.protocol, "local"];
         let target = &[host.hostname, "local"];
