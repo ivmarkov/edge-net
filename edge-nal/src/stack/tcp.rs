@@ -23,8 +23,14 @@ impl<T> TcpSplit for &mut T
 where
     T: TcpSplit,
 {
-    type Read<'a> = T::Read<'a> where Self: 'a;
-    type Write<'a> = T::Write<'a> where Self: 'a;
+    type Read<'a>
+        = T::Read<'a>
+    where
+        Self: 'a;
+    type Write<'a>
+        = T::Write<'a>
+    where
+        Self: 'a;
 
     fn split(&mut self) -> (Self::Read<'_>, Self::Write<'_>) {
         (**self).split()
@@ -88,7 +94,10 @@ where
 {
     type Error = T::Error;
 
-    type Socket<'a> = T::Socket<'a> where Self: 'a;
+    type Socket<'a>
+        = T::Socket<'a>
+    where
+        Self: 'a;
 
     async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         (*self).connect(remote).await
@@ -101,7 +110,10 @@ where
 {
     type Error = T::Error;
 
-    type Socket<'a> = T::Socket<'a> where Self: 'a;
+    type Socket<'a>
+        = T::Socket<'a>
+    where
+        Self: 'a;
 
     async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         (**self).connect(remote).await
@@ -114,7 +126,10 @@ where
 {
     type Error = T::Error;
 
-    type Accept<'a> = T::Accept<'a> where Self: 'a;
+    type Accept<'a>
+        = T::Accept<'a>
+    where
+        Self: 'a;
 
     async fn bind(&self, local: SocketAddr) -> Result<Self::Accept<'_>, Self::Error> {
         (*self).bind(local).await
@@ -127,7 +142,10 @@ where
 {
     type Error = T::Error;
 
-    type Accept<'a> = T::Accept<'a> where Self: 'a;
+    type Accept<'a>
+        = T::Accept<'a>
+    where
+        Self: 'a;
 
     async fn bind(&self, local: SocketAddr) -> Result<Self::Accept<'_>, Self::Error> {
         (**self).bind(local).await
@@ -140,7 +158,10 @@ where
 {
     type Error = T::Error;
 
-    type Socket<'a> = T::Socket<'a> where Self: 'a;
+    type Socket<'a>
+        = T::Socket<'a>
+    where
+        Self: 'a;
 
     async fn accept(&self) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
         (*self).accept().await
@@ -153,7 +174,10 @@ where
 {
     type Error = T::Error;
 
-    type Socket<'a> = T::Socket<'a> where Self: 'a;
+    type Socket<'a>
+        = T::Socket<'a>
+    where
+        Self: 'a;
 
     async fn accept(&self) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
         (**self).accept().await

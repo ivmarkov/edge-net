@@ -573,7 +573,7 @@ pub enum DhcpOption<'a> {
     Unrecognized(u8, &'a [u8]),
 }
 
-impl<'a> DhcpOption<'a> {
+impl DhcpOption<'_> {
     pub const CODE_ROUTER: u8 = DhcpOption::Router(Ipv4Addrs::new(&[])).code();
     pub const CODE_DNS: u8 = DhcpOption::DomainNameServer(Ipv4Addrs::new(&[])).code();
     pub const CODE_SUBNET: u8 = DhcpOption::SubnetMask(Ipv4Addr::new(0, 0, 0, 0)).code();

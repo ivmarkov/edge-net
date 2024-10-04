@@ -127,9 +127,9 @@ pub fn reply(
 
 struct Buf<'a>(pub &'a mut [u8], pub usize);
 
-impl<'a> Composer for Buf<'a> {}
+impl Composer for Buf<'_> {}
 
-impl<'a> OctetsBuilder for Buf<'a> {
+impl OctetsBuilder for Buf<'_> {
     type AppendError = ShortBuf;
 
     fn append_slice(&mut self, slice: &[u8]) -> Result<(), Self::AppendError> {
@@ -145,19 +145,19 @@ impl<'a> OctetsBuilder for Buf<'a> {
     }
 }
 
-impl<'a> Truncate for Buf<'a> {
+impl Truncate for Buf<'_> {
     fn truncate(&mut self, len: usize) {
         self.1 = len;
     }
 }
 
-impl<'a> AsMut<[u8]> for Buf<'a> {
+impl AsMut<[u8]> for Buf<'_> {
     fn as_mut(&mut self) -> &mut [u8] {
         &mut self.0[..self.1]
     }
 }
 
-impl<'a> AsRef<[u8]> for Buf<'a> {
+impl AsRef<[u8]> for Buf<'_> {
     fn as_ref(&self) -> &[u8] {
         &self.0[..self.1]
     }

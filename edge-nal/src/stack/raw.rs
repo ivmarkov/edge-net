@@ -22,8 +22,14 @@ impl<T> RawSplit for &mut T
 where
     T: RawSplit,
 {
-    type Receive<'a> = T::Receive<'a> where Self: 'a;
-    type Send<'a> = T::Send<'a> where Self: 'a;
+    type Receive<'a>
+        = T::Receive<'a>
+    where
+        Self: 'a;
+    type Send<'a>
+        = T::Send<'a>
+    where
+        Self: 'a;
 
     fn split(&mut self) -> (Self::Receive<'_>, Self::Send<'_>) {
         (**self).split()
@@ -56,7 +62,10 @@ where
 {
     type Error = T::Error;
 
-    type Socket<'a> = T::Socket<'a> where Self: 'a;
+    type Socket<'a>
+        = T::Socket<'a>
+    where
+        Self: 'a;
 
     async fn bind(&self) -> Result<Self::Socket<'_>, Self::Error> {
         (*self).bind().await
@@ -69,7 +78,10 @@ where
 {
     type Error = T::Error;
 
-    type Socket<'a> = T::Socket<'a> where Self: 'a;
+    type Socket<'a>
+        = T::Socket<'a>
+    where
+        Self: 'a;
 
     async fn bind(&self) -> Result<Self::Socket<'_>, Self::Error> {
         (**self).bind().await

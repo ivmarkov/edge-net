@@ -28,7 +28,10 @@ where
     B: BufferAccess<T>,
     T: ?Sized,
 {
-    type Buffer<'a> = B::Buffer<'a> where Self: 'a;
+    type Buffer<'a>
+        = B::Buffer<'a>
+    where
+        Self: 'a;
 
     async fn get(&self) -> Option<Self::Buffer<'_>> {
         (*self).get().await
@@ -52,7 +55,7 @@ pub struct VecBuf<'a, M, const N: usize>(MutexGuard<'a, M, heapless::Vec<u8, N>>
 where
     M: RawMutex;
 
-impl<'a, M, const N: usize> Drop for VecBuf<'a, M, N>
+impl<M, const N: usize> Drop for VecBuf<'_, M, N>
 where
     M: RawMutex,
 {
@@ -61,7 +64,7 @@ where
     }
 }
 
-impl<'a, M, const N: usize> Deref for VecBuf<'a, M, N>
+impl<M, const N: usize> Deref for VecBuf<'_, M, N>
 where
     M: RawMutex,
 {
@@ -72,7 +75,7 @@ where
     }
 }
 
-impl<'a, M, const N: usize> DerefMut for VecBuf<'a, M, N>
+impl<M, const N: usize> DerefMut for VecBuf<'_, M, N>
 where
     M: RawMutex,
 {
@@ -85,7 +88,10 @@ impl<M, const N: usize> BufferAccess<[u8]> for VecBufAccess<M, N>
 where
     M: RawMutex,
 {
-    type Buffer<'a> = VecBuf<'a, M, N> where Self: 'a;
+    type Buffer<'a>
+        = VecBuf<'a, M, N>
+    where
+        Self: 'a;
 
     async fn get(&self) -> Option<Self::Buffer<'_>> {
         let mut guard = self.0.lock().await;

@@ -37,7 +37,10 @@ impl Stack {
 impl TcpConnect for Stack {
     type Error = io::Error;
 
-    type Socket<'a> = TcpSocket where Self: 'a;
+    type Socket<'a>
+        = TcpSocket
+    where
+        Self: 'a;
 
     async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let socket = Async::<TcpStream>::connect(remote).await?;
@@ -49,7 +52,10 @@ impl TcpConnect for Stack {
 impl TcpBind for Stack {
     type Error = io::Error;
 
-    type Accept<'a> = TcpAcceptor where Self: 'a;
+    type Accept<'a>
+        = TcpAcceptor
+    where
+        Self: 'a;
 
     async fn bind(&self, local: SocketAddr) -> Result<Self::Accept<'_>, Self::Error> {
         let acceptor = Async::<net::TcpListener>::bind(local).map(TcpAcceptor)?;
@@ -63,7 +69,10 @@ pub struct TcpAcceptor(Async<net::TcpListener>);
 impl TcpAccept for TcpAcceptor {
     type Error = io::Error;
 
-    type Socket<'a> = TcpSocket where Self: 'a;
+    type Socket<'a>
+        = TcpSocket
+    where
+        Self: 'a;
 
     #[cfg(not(target_os = "espidf"))]
     async fn accept(&self) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
@@ -173,9 +182,15 @@ impl Readable for &TcpSocket {
 }
 
 impl TcpSplit for TcpSocket {
-    type Read<'a> = &'a TcpSocket where Self: 'a;
+    type Read<'a>
+        = &'a TcpSocket
+    where
+        Self: 'a;
 
-    type Write<'a> = &'a TcpSocket where Self: 'a;
+    type Write<'a>
+        = &'a TcpSocket
+    where
+        Self: 'a;
 
     fn split(&mut self) -> (Self::Read<'_>, Self::Write<'_>) {
         let socket = &*self;
@@ -187,7 +202,10 @@ impl TcpSplit for TcpSocket {
 impl UdpConnect for Stack {
     type Error = io::Error;
 
-    type Socket<'a> = UdpSocket where Self: 'a;
+    type Socket<'a>
+        = UdpSocket
+    where
+        Self: 'a;
 
     async fn connect(
         &self,
@@ -205,7 +223,10 @@ impl UdpConnect for Stack {
 impl UdpBind for Stack {
     type Error = io::Error;
 
-    type Socket<'a> = UdpSocket where Self: 'a;
+    type Socket<'a>
+        = UdpSocket
+    where
+        Self: 'a;
 
     async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let socket = Async::<StdUdpSocket>::bind(local)?;
@@ -483,9 +504,15 @@ impl Readable for UdpSocket {
 }
 
 impl UdpSplit for UdpSocket {
-    type Receive<'a> = &'a Self where Self: 'a;
+    type Receive<'a>
+        = &'a Self
+    where
+        Self: 'a;
 
-    type Send<'a> = &'a Self where Self: 'a;
+    type Send<'a>
+        = &'a Self
+    where
+        Self: 'a;
 
     fn split(&mut self) -> (Self::Receive<'_>, Self::Send<'_>) {
         let socket = &*self;
@@ -562,7 +589,10 @@ mod raw {
     impl RawBind for Interface {
         type Error = io::Error;
 
-        type Socket<'a> = RawSocket where Self: 'a;
+        type Socket<'a>
+            = RawSocket
+        where
+            Self: 'a;
 
         async fn bind(&self) -> Result<Self::Socket<'_>, Self::Error> {
             let socket = syscall_los!(unsafe {
@@ -731,9 +761,15 @@ mod raw {
     }
 
     impl RawSplit for RawSocket {
-        type Receive<'a> = &'a Self where Self: 'a;
+        type Receive<'a>
+            = &'a Self
+        where
+            Self: 'a;
 
-        type Send<'a> = &'a Self where Self: 'a;
+        type Send<'a>
+            = &'a Self
+        where
+            Self: 'a;
 
         fn split(&mut self) -> (Self::Receive<'_>, Self::Send<'_>) {
             let socket = &*self;

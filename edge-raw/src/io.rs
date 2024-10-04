@@ -52,6 +52,7 @@ where
 impl<E> std::error::Error for Error<E> where E: std::error::Error {}
 
 /// A utility struct allowing to send and receive UDP packets over a raw socket.
+///
 /// The major difference between this struct and a regular `UdpSend` and `UdpReceive` pair of UDP socket halves
 /// is that `RawSocket2Udp` requires the MAC address of the remote host to send packets to.
 ///
@@ -142,8 +143,14 @@ impl<T, const N: usize> UdpSplit for RawSocket2Udp<T, N>
 where
     T: RawSplit,
 {
-    type Receive<'a> = RawSocket2Udp<T::Receive<'a>, N> where Self: 'a;
-    type Send<'a> = RawSocket2Udp<T::Send<'a>, N> where Self: 'a;
+    type Receive<'a>
+        = RawSocket2Udp<T::Receive<'a>, N>
+    where
+        Self: 'a;
+    type Send<'a>
+        = RawSocket2Udp<T::Send<'a>, N>
+    where
+        Self: 'a;
 
     fn split(&mut self) -> (Self::Receive<'_>, Self::Send<'_>) {
         let (receive, send) = self.socket.split();

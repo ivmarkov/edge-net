@@ -37,7 +37,10 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpC
 {
     type Error = TcpError;
 
-    type Socket<'a> = TcpSocket<'a, N, TX_SZ, RX_SZ> where Self: 'a;
+    type Socket<'a>
+        = TcpSocket<'a, N, TX_SZ, RX_SZ>
+    where
+        Self: 'a;
 
     async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = TcpSocket::new(self.stack, self.buffers)?;
@@ -53,7 +56,10 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpB
 {
     type Error = TcpError;
 
-    type Accept<'a> = TcpAccept<'a, D, N, TX_SZ, RX_SZ> where Self: 'a;
+    type Accept<'a>
+        = TcpAccept<'a, D, N, TX_SZ, RX_SZ>
+    where
+        Self: 'a;
 
     async fn bind(&self, local: SocketAddr) -> Result<Self::Accept<'_>, Self::Error> {
         Ok(TcpAccept { stack: self, local })
@@ -77,7 +83,10 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> edge
 {
     type Error = TcpError;
 
-    type Socket<'a> = TcpSocket<'a, N, TX_SZ, RX_SZ> where Self: 'a;
+    type Socket<'a>
+        = TcpSocket<'a, N, TX_SZ, RX_SZ>
+    where
+        Self: 'a;
 
     async fn accept(&self) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
         let mut socket = TcpSocket::new(self.stack.stack, self.stack.buffers)?;
@@ -207,9 +216,15 @@ impl<'a> Write for TcpSocketWrite<'a> {
 impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpSplit
     for TcpSocket<'d, N, TX_SZ, RX_SZ>
 {
-    type Read<'a> = TcpSocketRead<'a> where Self: 'a;
+    type Read<'a>
+        = TcpSocketRead<'a>
+    where
+        Self: 'a;
 
-    type Write<'a> = TcpSocketWrite<'a> where Self: 'a;
+    type Write<'a>
+        = TcpSocketWrite<'a>
+    where
+        Self: 'a;
 
     fn split(&mut self) -> (Self::Read<'_>, Self::Write<'_>) {
         let (read, write) = self.socket.split();

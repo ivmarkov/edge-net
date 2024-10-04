@@ -368,7 +368,7 @@ impl<'b, const N: usize> Headers<'b, N> {
     }
 }
 
-impl<'b, const N: usize> Default for Headers<'b, N> {
+impl<const N: usize> Default for Headers<'_, N> {
     fn default() -> Self {
         Self::new()
     }
@@ -421,7 +421,7 @@ pub struct RequestHeaders<'b, const N: usize> {
     pub headers: Headers<'b, N>,
 }
 
-impl<'b, const N: usize> RequestHeaders<'b, N> {
+impl<const N: usize> RequestHeaders<'_, N> {
     #[inline(always)]
     pub const fn new() -> Self {
         Self {
@@ -437,7 +437,7 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
     }
 }
 
-impl<'b, const N: usize> Display for RequestHeaders<'b, N> {
+impl<const N: usize> Display for RequestHeaders<'_, N> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if let Some(http11) = self.http11 {
             write!(f, "{} ", if http11 { "HTTP/1.1" } else { "HTTP/1.0" })?;
@@ -467,7 +467,7 @@ pub struct ResponseHeaders<'b, const N: usize> {
     pub headers: Headers<'b, N>,
 }
 
-impl<'b, const N: usize> ResponseHeaders<'b, N> {
+impl<const N: usize> ResponseHeaders<'_, N> {
     #[inline(always)]
     pub const fn new() -> Self {
         Self {
@@ -487,7 +487,7 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
     }
 }
 
-impl<'b, const N: usize> Display for ResponseHeaders<'b, N> {
+impl<const N: usize> Display for ResponseHeaders<'_, N> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if let Some(http11) = self.http11 {
             writeln!(f, "{} ", if http11 { "HTTP/1.1 " } else { "HTTP/1.0" })?;

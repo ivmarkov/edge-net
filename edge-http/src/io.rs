@@ -371,7 +371,7 @@ where
     }
 }
 
-impl<'b, R> ErrorType for Body<'b, R>
+impl<R> ErrorType for Body<'_, R>
 where
     R: ErrorType,
 {
@@ -419,7 +419,7 @@ impl<'b, R> PartiallyRead<'b, R> {
     }
 }
 
-impl<'b, R> ErrorType for PartiallyRead<'b, R>
+impl<R> ErrorType for PartiallyRead<'_, R>
 where
     R: ErrorType,
 {
@@ -698,7 +698,7 @@ where
     }
 }
 
-impl<'b, R> ErrorType for ChunkedRead<'b, R>
+impl<R> ErrorType for ChunkedRead<'_, R>
 where
     R: ErrorType,
 {

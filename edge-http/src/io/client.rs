@@ -343,7 +343,7 @@ where
     }
 }
 
-impl<'b, T, const N: usize> ErrorType for Connection<'b, T, N>
+impl<T, const N: usize> ErrorType for Connection<'_, T, N>
 where
     T: TcpConnect,
 {

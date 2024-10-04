@@ -99,7 +99,7 @@ impl<'a> NameSlice<'a> {
     }
 }
 
-impl<'a> fmt::Display for NameSlice<'a> {
+impl fmt::Display for NameSlice<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for label in self.0 {
             write!(f, "{}.", label)?;
@@ -109,7 +109,7 @@ impl<'a> fmt::Display for NameSlice<'a> {
     }
 }
 
-impl<'a> ToName for NameSlice<'a> {}
+impl ToName for NameSlice<'_> {}
 
 /// An iterator over the labels in a `NameSlice` instance.
 #[derive(Clone)]
@@ -138,7 +138,7 @@ impl<'a> Iterator for NameSliceIter<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for NameSliceIter<'a> {
+impl DoubleEndedIterator for NameSliceIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.index > 0 {
             self.index -= 1;
@@ -155,8 +155,11 @@ impl<'a> DoubleEndedIterator for NameSliceIter<'a> {
     }
 }
 
-impl<'a> ToLabelIter for NameSlice<'a> {
-    type LabelIter<'t> = NameSliceIter<'t> where Self: 't;
+impl ToLabelIter for NameSlice<'_> {
+    type LabelIter<'t>
+        = NameSliceIter<'t>
+    where
+        Self: 't;
 
     fn iter_labels(&self) -> Self::LabelIter<'_> {
         NameSliceIter {
@@ -177,7 +180,7 @@ impl<'a> Txt<'a> {
     }
 }
 
-impl<'a> fmt::Display for Txt<'a> {
+impl fmt::Display for Txt<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Txt [")?;
 
@@ -195,13 +198,13 @@ impl<'a> fmt::Display for Txt<'a> {
     }
 }
 
-impl<'a> RecordData for Txt<'a> {
+impl RecordData for Txt<'_> {
     fn rtype(&self) -> Rtype {
         Rtype::TXT
     }
 }
 
-impl<'a> ComposeRecordData for Txt<'a> {
+impl ComposeRecordData for Txt<'_> {
     fn rdlen(&self, _compress: bool) -> Option<u16> {
         None
     }
@@ -217,7 +220,7 @@ impl<'a> ComposeRecordData for Txt<'a> {
             for (k, v) in self.0 {
                 target.append_slice(&[(k.len() + v.len() + 1) as u8])?;
                 target.append_slice(k.as_bytes())?;
-                target.append_slice(&[b'='])?;
+                target.append_slice(b"=")?;
                 target.append_slice(v.as_bytes())?;
             }
         }
@@ -313,7 +316,7 @@ impl<'a> Buf<'a> {
     }
 }
 
-impl<'a> FreezeBuilder for Buf<'a> {
+impl FreezeBuilder for Buf<'_> {
     type Octets = Self;
 
     fn freeze(self) -> Self {
@@ -321,8 +324,11 @@ impl<'a> FreezeBuilder for Buf<'a> {
     }
 }
 
-impl<'a> Octets for Buf<'a> {
-    type Range<'r> = &'r [u8] where Self: 'r;
+impl Octets for Buf<'_> {
+    type Range<'r>
+        = &'r [u8]
+    where
+        Self: 'r;
 
     fn range(&self, range: impl RangeBounds<usize>) -> Self::Range<'_> {
         self.0[..self.1].range(range)
@@ -337,9 +343,9 @@ impl<'a> FromBuilder for Buf<'a> {
     }
 }
 
-impl<'a> Composer for Buf<'a> {}
+impl Composer for Buf<'_> {}
 
-impl<'a> OctetsBuilder for Buf<'a> {
+impl OctetsBuilder for Buf<'_> {
     type AppendError = ShortBuf;
 
     fn append_slice(&mut self, slice: &[u8]) -> Result<(), Self::AppendError> {
@@ -355,19 +361,19 @@ impl<'a> OctetsBuilder for Buf<'a> {
     }
 }
 
-impl<'a> Truncate for Buf<'a> {
+impl Truncate for Buf<'_> {
     fn truncate(&mut self, len: usize) {
         self.1 = len;
     }
 }
 
-impl<'a> AsMut<[u8]> for Buf<'a> {
+impl AsMut<[u8]> for Buf<'_> {
     fn as_mut(&mut self) -> &mut [u8] {
         &mut self.0[..self.1]
     }
 }
 
-impl<'a> AsRef<[u8]> for Buf<'a> {
+impl AsRef<[u8]> for Buf<'_> {
     fn as_ref(&self) -> &[u8] {
         &self.0[..self.1]
     }

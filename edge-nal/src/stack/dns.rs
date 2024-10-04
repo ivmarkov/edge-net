@@ -17,6 +17,7 @@ pub enum AddrType {
 }
 
 /// This trait provides DNS resolution facility for embedded applications.
+///
 /// It does not handle every DNS record type, but is meant as an
 /// embedded alternative to [`ToSocketAddrs`], and is as such meant to resolve
 /// an ip address from a hostname, or a hostname from an ip address. This means

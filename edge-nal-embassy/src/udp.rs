@@ -39,7 +39,10 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
 {
     type Error = UdpError;
 
-    type Socket<'a> = UdpSocket<'a, D, N, TX_SZ, RX_SZ, M> where Self: 'a;
+    type Socket<'a>
+        = UdpSocket<'a, D, N, TX_SZ, RX_SZ, M>
+    where
+        Self: 'a;
 
     async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = UdpSocket::new(self.stack, self.buffers)?;
@@ -170,9 +173,15 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
 impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSplit
     for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
 {
-    type Receive<'a> = &'a Self where Self: 'a;
+    type Receive<'a>
+        = &'a Self
+    where
+        Self: 'a;
 
-    type Send<'a> = &'a Self where Self: 'a;
+    type Send<'a>
+        = &'a Self
+    where
+        Self: 'a;
 
     fn split(&mut self) -> (Self::Receive<'_>, Self::Send<'_>) {
         (&*self, &*self)

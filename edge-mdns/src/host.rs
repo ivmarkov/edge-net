@@ -23,7 +23,7 @@ pub struct Host<'a> {
     pub ttl: Ttl,
 }
 
-impl<'a> Host<'a> {
+impl Host<'_> {
     fn visit_answers<F, E>(&self, mut f: F) -> Result<(), E>
     where
         F: FnMut(HostAnswer) -> Result<(), E>,
@@ -57,7 +57,7 @@ impl<'a> Host<'a> {
     }
 }
 
-impl<'a> HostAnswers for Host<'a> {
+impl HostAnswers for Host<'_> {
     fn visit<F, E>(&self, mut f: F) -> Result<(), E>
     where
         F: FnMut(HostAnswer) -> Result<(), E>,
@@ -92,7 +92,7 @@ pub struct Service<'a> {
     pub txt_kvs: &'a [(&'a str, &'a str)],
 }
 
-impl<'a> Service<'a> {
+impl Service<'_> {
     fn visit_answers<F, E>(&self, host: &Host, mut f: F) -> Result<(), E>
     where
         F: FnMut(HostAnswer) -> Result<(), E>,
@@ -181,7 +181,7 @@ impl<'a> ServiceAnswers<'a> {
     }
 }
 
-impl<'a> HostAnswers for ServiceAnswers<'a> {
+impl HostAnswers for ServiceAnswers<'_> {
     fn visit<F, E>(&self, mut f: F) -> Result<(), E>
     where
         F: FnMut(HostAnswer) -> Result<(), E>,

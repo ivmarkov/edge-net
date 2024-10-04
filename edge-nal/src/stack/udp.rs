@@ -24,8 +24,14 @@ impl<T> UdpSplit for &mut T
 where
     T: UdpSplit,
 {
-    type Receive<'a> = T::Receive<'a> where Self: 'a;
-    type Send<'a> = T::Send<'a> where Self: 'a;
+    type Receive<'a>
+        = T::Receive<'a>
+    where
+        Self: 'a;
+    type Send<'a>
+        = T::Send<'a>
+    where
+        Self: 'a;
 
     fn split(&mut self) -> (Self::Receive<'_>, Self::Send<'_>) {
         (**self).split()
@@ -79,7 +85,10 @@ where
     T: UdpConnect,
 {
     type Error = T::Error;
-    type Socket<'a> = T::Socket<'a> where Self: 'a;
+    type Socket<'a>
+        = T::Socket<'a>
+    where
+        Self: 'a;
 
     async fn connect(
         &self,
@@ -95,7 +104,10 @@ where
     T: UdpConnect,
 {
     type Error = T::Error;
-    type Socket<'a> = T::Socket<'a> where Self: 'a;
+    type Socket<'a>
+        = T::Socket<'a>
+    where
+        Self: 'a;
 
     async fn connect(
         &self,
@@ -111,7 +123,10 @@ where
     T: UdpBind,
 {
     type Error = T::Error;
-    type Socket<'a> = T::Socket<'a> where Self: 'a;
+    type Socket<'a>
+        = T::Socket<'a>
+    where
+        Self: 'a;
 
     async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         (*self).bind(local).await
@@ -123,7 +138,10 @@ where
     T: UdpBind,
 {
     type Error = T::Error;
-    type Socket<'a> = T::Socket<'a> where Self: 'a;
+    type Socket<'a>
+        = T::Socket<'a>
+    where
+        Self: 'a;
 
     async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         (**self).bind(local).await
