@@ -287,7 +287,8 @@ impl<'a> Packet<'a> {
 }
 
 #[derive(Clone, Debug)]
-pub struct Settings {
+#[non_exhaustive]
+pub struct Settings<'a> {
     pub ip: Ipv4Addr,
     pub server_ip: Option<Ipv4Addr>,
     pub lease_time_secs: Option<u32>,
@@ -295,10 +296,11 @@ pub struct Settings {
     pub subnet: Option<Ipv4Addr>,
     pub dns1: Option<Ipv4Addr>,
     pub dns2: Option<Ipv4Addr>,
+    pub captive_url: Option<&'a str>,
 }
 
-impl From<&Packet<'_>> for Settings {
-    fn from(packet: &Packet) -> Self {
+impl<'a> Settings<'a> {
+    pub fn new(packet: &Packet<'a>) -> Self {
         Self {
             ip: packet.yiaddr,
             server_ip: packet.options.iter().find_map(|option| {
@@ -339,6 +341,13 @@ impl From<&Packet<'_>> for Settings {
             dns2: packet.options.iter().find_map(|option| {
                 if let DhcpOption::DomainNameServer(ips) = option {
                     ips.iter().nth(1)
+                } else {
+                    None
+                }
+            }),
+            captive_url: packet.options.iter().find_map(|option| {
+                if let DhcpOption::CaptiveUrl(url) = option {
+                    Some(url)
                 } else {
                     None
                 }
@@ -408,6 +417,7 @@ impl<'a> Options<'a> {
         gateways: &'b [Ipv4Addr],
         subnet: Option<Ipv4Addr>,
         dns: &'b [Ipv4Addr],
+        captive_url: Option<&'b str>,
         buf: &'b mut [DhcpOption<'b>],
     ) -> Options<'b> {
         let requested = self.iter().find_map(|option| {
@@ -426,6 +436,7 @@ impl<'a> Options<'a> {
             gateways,
             subnet,
             dns,
+            captive_url,
             buf,
         )
     }
@@ -439,6 +450,7 @@ impl<'a> Options<'a> {
         gateways: &'a [Ipv4Addr],
         subnet: Option<Ipv4Addr>,
         dns: &'a [Ipv4Addr],
+        captive_url: Option<&'a str>,
         buf: &'a mut [DhcpOption<'a>],
     ) -> Self {
         buf[0] = DhcpOption::MessageType(mt);
@@ -457,6 +469,7 @@ impl<'a> Options<'a> {
                             DhcpOption::CODE_DNS => (!dns.is_empty())
                                 .then_some(DhcpOption::DomainNameServer(Ipv4Addrs::new(dns))),
                             DhcpOption::CODE_SUBNET => subnet.map(DhcpOption::SubnetMask),
+                            DhcpOption::CODE_CAPTIVE_URL => captive_url.map(DhcpOption::CaptiveUrl),
                             _ => None,
                         };
 
@@ -570,6 +583,9 @@ pub enum DhcpOption<'a> {
     MaximumMessageSize(u16),
     /// 61: Client-identifier
     ClientIdentifier(&'a [u8]),
+    /// 114: Captive-portal URL
+    CaptiveUrl(&'a str),
+    // Other (unrecognized)
     Unrecognized(u8, &'a [u8]),
 }
 
@@ -577,6 +593,7 @@ impl DhcpOption<'_> {
     pub const CODE_ROUTER: u8 = DhcpOption::Router(Ipv4Addrs::new(&[])).code();
     pub const CODE_DNS: u8 = DhcpOption::DomainNameServer(Ipv4Addrs::new(&[])).code();
     pub const CODE_SUBNET: u8 = DhcpOption::SubnetMask(Ipv4Addr::new(0, 0, 0, 0)).code();
+    pub const CODE_CAPTIVE_URL: u8 = DhcpOption::CaptiveUrl("").code();
 
     fn decode<'o>(bytes: &mut BytesIn<'o>) -> Result<Option<DhcpOption<'o>>, Error> {
         let code = bytes.byte()?;
@@ -624,6 +641,9 @@ impl DhcpOption<'_> {
 
                     DhcpOption::ClientIdentifier(bytes.remaining())
                 }
+                CAPTIVE_URL => DhcpOption::HostName(
+                    core::str::from_utf8(bytes.remaining()).map_err(Error::InvalidUtf8Str)?,
+                ),
                 _ => DhcpOption::Unrecognized(code, bytes.remaining()),
             };
 
@@ -656,6 +676,7 @@ impl DhcpOption<'_> {
             Self::MaximumMessageSize(_) => MAXIMUM_DHCP_MESSAGE_SIZE,
             Self::Message(_) => MESSAGE,
             Self::ClientIdentifier(_) => CLIENT_IDENTIFIER,
+            Self::CaptiveUrl(_) => CAPTIVE_URL,
             Self::Unrecognized(code, _) => *code,
         }
     }
@@ -679,6 +700,7 @@ impl DhcpOption<'_> {
             Self::Message(msg) => f(msg.as_bytes()),
             Self::MaximumMessageSize(size) => f(&size.to_be_bytes()),
             Self::ClientIdentifier(id) => f(id),
+            Self::CaptiveUrl(name) => f(name.as_bytes()),
             Self::Unrecognized(_, data) => f(data),
         }
     }
@@ -753,3 +775,4 @@ const PARAMETER_REQUEST_LIST: u8 = 55;
 const MESSAGE: u8 = 56;
 const MAXIMUM_DHCP_MESSAGE_SIZE: u8 = 57;
 const CLIENT_IDENTIFIER: u8 = 61;
+const CAPTIVE_URL: u8 = 114;

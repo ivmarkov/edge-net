@@ -21,11 +21,13 @@ pub enum Action<'a> {
 }
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct ServerOptions<'a> {
     pub ip: Ipv4Addr,
     pub gateways: &'a [Ipv4Addr],
     pub subnet: Option<Ipv4Addr>,
     pub dns: &'a [Ipv4Addr],
+    pub captive_url: Option<&'a str>,
     pub lease_duration_secs: u32,
 }
 
@@ -43,6 +45,7 @@ impl<'a> ServerOptions<'a> {
             gateways,
             subnet: Some(Ipv4Addr::new(255, 255, 255, 0)),
             dns: &[],
+            captive_url: None,
             lease_duration_secs: 7200,
         }
     }
@@ -150,6 +153,7 @@ impl<'a> ServerOptions<'a> {
                 self.gateways,
                 self.subnet,
                 self.dns,
+                self.captive_url,
                 buf,
             ),
         );
