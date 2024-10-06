@@ -2,7 +2,7 @@ use core::fmt::Debug;
 
 use embassy_time::{Duration, Instant};
 
-use log::{info, warn};
+use log::{debug, warn};
 
 use super::*;
 
@@ -80,7 +80,7 @@ impl<'a> ServerOptions<'a> {
             return None;
         }
 
-        info!("Received {message_type} request: {request:?}");
+        debug!("Received {message_type} request: {request:?}");
         match message_type {
             MessageType::Discover => Some(Action::Discover(
                 request.options.requested_ip(),
@@ -154,7 +154,7 @@ impl<'a> ServerOptions<'a> {
             ),
         );
 
-        info!("Sending {message_type} reply: {reply:?}");
+        debug!("Sending {message_type} reply: {reply:?}");
 
         reply
     }
