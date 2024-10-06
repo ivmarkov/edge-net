@@ -16,11 +16,13 @@ use crate::{Options, Packet};
 
 /// Represents the additional network-related information that might be returned by the DHCP server.
 #[derive(Debug, Clone)]
-pub struct NetworkInfo {
+#[non_exhaustive]
+pub struct NetworkInfo<'a> {
     pub gateway: Option<Ipv4Addr>,
     pub subnet: Option<Ipv4Addr>,
     pub dns1: Option<Ipv4Addr>,
     pub dns2: Option<Ipv4Addr>,
+    pub captive_url: Option<&'a str>,
 }
 
 /// Represents a DHCP IP lease.
@@ -28,6 +30,7 @@ pub struct NetworkInfo {
 /// This structure has a set of asynchronous methods that can utilize a supplied DHCP client instance and UDP socket to
 /// transparently implement all aspects of negotiating an IP with the DHCP server and then keeping the lease of that IP up to date.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Lease {
     pub ip: Ipv4Addr,
     pub server_ip: Ipv4Addr,
@@ -40,46 +43,57 @@ impl Lease {
     /// This is done by utilizing the supplied DHCP client instance and UDP socket.
     ///
     /// Note that the supplied UDP socket should be capable of sending and receiving broadcast UDP packets.
-    pub async fn new<T, S>(
+    pub async fn new<'a, T, S>(
         client: &mut dhcp::client::Client<T>,
         socket: &mut S,
-        buf: &mut [u8],
-    ) -> Result<(Self, NetworkInfo), Error<S::Error>>
+        buf: &'a mut [u8],
+    ) -> Result<(Self, NetworkInfo<'a>), Error<S::Error>>
     where
         T: RngCore,
         S: UdpReceive + UdpSend,
     {
         loop {
             let offer = Self::discover(client, socket, buf, Duration::from_secs(3)).await?;
+            let server_ip = offer.server_ip.unwrap();
+            let ip = offer.ip;
 
             let now = Instant::now();
 
-            if let Some(settings) = Self::request(
-                client,
-                socket,
-                buf,
-                offer.server_ip.unwrap(),
-                offer.ip,
-                true,
-                Duration::from_secs(3),
-                3,
-            )
-            .await?
             {
-                break Ok((
-                    Self {
-                        ip: settings.ip,
-                        server_ip: settings.server_ip.unwrap(),
-                        duration: Duration::from_secs(settings.lease_time_secs.unwrap_or(7200) as _),
-                        acquired: now,
-                    },
-                    NetworkInfo {
-                        gateway: settings.gateway,
-                        subnet: settings.subnet,
-                        dns1: settings.dns1,
-                        dns2: settings.dns2,
-                    },
-                ));
+                // Nasty but necessary to avoid Rust's borrow checker not dealing
+                // with the non-lexical lifetimes involved here
+                let buf = unsafe { Self::unsafe_reborrow(buf) };
+
+                if let Some(settings) = Self::request(
+                    client,
+                    socket,
+                    buf,
+                    server_ip,
+                    ip,
+                    true,
+                    Duration::from_secs(3),
+                    3,
+                )
+                .await?
+                {
+                    break Ok((
+                        Self {
+                            ip: settings.ip,
+                            server_ip: settings.server_ip.unwrap(),
+                            duration: Duration::from_secs(
+                                settings.lease_time_secs.unwrap_or(7200) as _
+                            ),
+                            acquired: now,
+                        },
+                        NetworkInfo {
+                            gateway: settings.gateway,
+                            subnet: settings.subnet,
+                            dns1: settings.dns1,
+                            dns2: settings.dns2,
+                            captive_url: settings.captive_url,
+                        },
+                    ));
+                }
             }
         }
     }
@@ -173,12 +187,12 @@ impl Lease {
         Ok(())
     }
 
-    async fn discover<T, S>(
+    async fn discover<'a, T, S>(
         client: &mut dhcp::client::Client<T>,
         socket: &mut S,
-        buf: &mut [u8],
+        buf: &'a mut [u8],
         timeout: Duration,
-    ) -> Result<Settings, Error<S::Error>>
+    ) -> Result<Settings<'a>, Error<S::Error>>
     where
         T: RngCore,
         S: UdpReceive + UdpSend,
@@ -203,11 +217,15 @@ impl Lease {
 
             if let Either::First(result) = select(socket.receive(buf), Timer::after(timeout)).await
             {
+                // Nasty but necessary to avoid Rust's borrow checker not dealing
+                // with the non-lexical lifetimes involved here
+                let buf = unsafe { Self::unsafe_reborrow(buf) };
+
                 let (len, _remote) = result.map_err(Error::Io)?;
                 let reply = Packet::decode(&buf[..len])?;
 
                 if client.is_offer(&reply, xid) {
-                    let settings: Settings = (&reply).into();
+                    let settings = Settings::new(&reply);
 
                     info!(
                         "IP {} offered by DHCP server {}",
@@ -224,16 +242,16 @@ impl Lease {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn request<T, S>(
+    async fn request<'a, T, S>(
         client: &mut dhcp::client::Client<T>,
         socket: &mut S,
-        buf: &mut [u8],
+        buf: &'a mut [u8],
         server_ip: Ipv4Addr,
         ip: Ipv4Addr,
         broadcast: bool,
         timeout: Duration,
         retries: usize,
-    ) -> Result<Option<Settings>, Error<S::Error>>
+    ) -> Result<Option<Settings<'a>>, Error<S::Error>>
     where
         T: RngCore,
         S: UdpReceive + UdpSend,
@@ -270,12 +288,17 @@ impl Lease {
             if let Either::First(result) = select(socket.receive(buf), Timer::after(timeout)).await
             {
                 let (len, _remote) = result.map_err(Error::Io)?;
+
+                // Nasty but necessary to avoid Rust's borrow checker not dealing
+                // with the non-lexical lifetimes involved here
+                let buf = unsafe { Self::unsafe_reborrow(buf) };
+
                 let packet = &buf[..len];
 
                 let reply = Packet::decode(packet)?;
 
                 if client.is_ack(&reply, xid) {
-                    let settings = (&reply).into();
+                    let settings = Settings::new(&reply);
 
                     info!("IP {} leased successfully", ip);
 
@@ -291,5 +314,12 @@ impl Lease {
         warn!("IP request was not replied");
 
         Ok(None)
+    }
+
+    // Useful when Rust's borrow-checker still cannot handle some NLLs
+    // https://rust-lang.github.io/rfcs/2094-nll.html
+    unsafe fn unsafe_reborrow<'a>(buf: &mut [u8]) -> &'a mut [u8] {
+        let len = buf.len();
+        unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr(), len) }
     }
 }
