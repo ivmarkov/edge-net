@@ -88,20 +88,13 @@ pub fn reply(
             let question = question?;
 
             if matches!(question.qtype(), Rtype::A) && matches!(question.qclass(), Class::IN) {
-                log::info!(
-                    "Question {:?} is of type A, answering with IP {:?}, TTL {:?}",
-                    question,
-                    ip,
-                    ttl
-                );
-
                 let record = Record::new(
                     question.qname(),
                     Class::IN,
                     Ttl::from_duration_lossy(ttl),
                     A::from_octets(ip[0], ip[1], ip[2], ip[3]),
                 );
-                debug!("Answering question {:?} with {:?}", question, record);
+                debug!("Answering {:?} with {:?}", question, record);
                 answerb.push(record)?;
             } else {
                 debug!("Question {:?} is not of type A, not answering", question);
