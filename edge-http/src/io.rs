@@ -9,7 +9,10 @@ use httparse::Status;
 use log::trace;
 
 use crate::ws::UpgradeError;
-use crate::{BodyType, Headers, Method, RequestHeaders, ResponseHeaders};
+use crate::{
+    BodyType, ConnectionType, Headers, HeadersMismatchError, Method, RequestHeaders,
+    ResponseHeaders,
+};
 
 pub mod client;
 pub mod server;
@@ -27,6 +30,7 @@ pub enum Error<E> {
     InvalidState,
     Timeout,
     ConnectionClosed,
+    HeadersMismatchError(HeadersMismatchError),
     WsUpgradeError(UpgradeError),
     Io(E),
 }
@@ -42,6 +46,12 @@ impl<E> From<httparse::Error> for Error<E> {
             httparse::Error::TooManyHeaders => Self::TooManyHeaders,
             httparse::Error::Version => Self::InvalidHeaders,
         }
+    }
+}
+
+impl<E> From<HeadersMismatchError> for Error<E> {
+    fn from(e: HeadersMismatchError) -> Self {
+        Self::HeadersMismatchError(e)
     }
 }
 
@@ -78,6 +88,7 @@ where
             Self::IncompleteBody => write!(f, "HTTP body is incomplete"),
             Self::InvalidState => write!(f, "Connection is not in requested state"),
             Self::Timeout => write!(f, "Timeout"),
+            Self::HeadersMismatchError(e) => write!(f, "Headers mismatch: {e}"),
             Self::WsUpgradeError(e) => write!(f, "WebSocket upgrade error: {e}"),
             Self::ConnectionClosed => write!(f, "Connection closed"),
             Self::Io(e) => write!(f, "{e}"),
@@ -89,6 +100,7 @@ where
 impl<E> std::error::Error for Error<E> where E: std::error::Error {}
 
 impl<'b, const N: usize> RequestHeaders<'b, N> {
+    /// Parse the headers from the input stream
     pub async fn receive<R>(
         &mut self,
         buf: &'b mut [u8],
@@ -99,7 +111,7 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
         R: Read,
     {
         let (read_len, headers_len) =
-            match read_reply_buf::<N, _>(&mut input, buf, true, exact).await {
+            match raw::read_reply_buf::<N, _>(&mut input, buf, true, exact).await {
                 Ok(read_len) => read_len,
                 Err(e) => return Err(e),
             };
@@ -139,25 +151,33 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
         }
     }
 
-    pub async fn send<W>(&self, mut output: W) -> Result<BodyType, Error<W::Error>>
+    /// Resolve the connection type and body type from the headers
+    pub fn resolve<E>(&self) -> Result<(ConnectionType, BodyType), Error<E>> {
+        self.headers
+            .resolve::<E>(None, true, self.http11.unwrap_or(false))
+    }
+
+    /// Send the headers to the output stream, returning the connection type and body type
+    pub async fn send<W>(
+        &self,
+        chunked_if_unspecified: bool,
+        mut output: W,
+    ) -> Result<(ConnectionType, BodyType), Error<W::Error>>
     where
         W: Write,
     {
-        send_request(
-            self.http11.unwrap_or(false),
-            self.method,
-            self.path,
-            &mut output,
-        )
-        .await?;
-        let body_type = self.headers.send(&mut output).await?;
-        send_headers_end(output).await?;
+        let http11 = self.http11.unwrap_or(false);
 
-        Ok(body_type)
+        send_request(http11, self.method, self.path, &mut output).await?;
+
+        self.headers
+            .send(None, true, http11, chunked_if_unspecified, output)
+            .await
     }
 }
 
 impl<'b, const N: usize> ResponseHeaders<'b, N> {
+    /// Parse the headers from the input stream
     pub async fn receive<R>(
         &mut self,
         buf: &'b mut [u8],
@@ -167,7 +187,8 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
     where
         R: Read,
     {
-        let (read_len, headers_len) = read_reply_buf::<N, _>(&mut input, buf, false, exact).await?;
+        let (read_len, headers_len) =
+            raw::read_reply_buf::<N, _>(&mut input, buf, false, exact).await?;
 
         let mut parser = httparse::Response::new(&mut self.headers.0);
 
@@ -201,21 +222,41 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
         }
     }
 
-    pub async fn send<W>(&self, mut output: W) -> Result<BodyType, Error<W::Error>>
+    /// Resolve the connection type and body type from the headers
+    pub fn resolve<E>(
+        &self,
+        request_connection_type: ConnectionType,
+    ) -> Result<(ConnectionType, BodyType), Error<E>> {
+        self.headers.resolve::<E>(
+            Some(request_connection_type),
+            false,
+            self.http11.unwrap_or(false),
+        )
+    }
+
+    /// Send the headers to the output stream, returning the connection type and body type
+    pub async fn send<W>(
+        &self,
+        request_connection_type: ConnectionType,
+        chunked_if_unspecified: bool,
+        mut output: W,
+    ) -> Result<(ConnectionType, BodyType), Error<W::Error>>
     where
         W: Write,
     {
-        send_status(
-            self.http11.unwrap_or(false),
-            self.code,
-            self.reason,
-            &mut output,
-        )
-        .await?;
-        let body_type = self.headers.send(&mut output).await?;
-        send_headers_end(output).await?;
+        let http11 = self.http11.unwrap_or(false);
 
-        Ok(body_type)
+        send_status(http11, self.code, self.reason, &mut output).await?;
+
+        self.headers
+            .send(
+                Some(request_connection_type),
+                false,
+                http11,
+                chunked_if_unspecified,
+                output,
+            )
+            .await
     }
 }
 
@@ -228,7 +269,7 @@ pub(crate) async fn send_request<W>(
 where
     W: Write,
 {
-    send_status_line(
+    raw::send_status_line(
         true,
         http11,
         method.map(|method| method.as_str()),
@@ -249,7 +290,7 @@ where
 {
     let status_str: Option<heapless::String<5>> = status.map(|status| status.try_into().unwrap());
 
-    send_status_line(
+    raw::send_status_line(
         false,
         http11,
         status_str.as_ref().map(|status| status.as_str()),
@@ -261,65 +302,135 @@ where
 
 pub(crate) async fn send_headers<'a, H, W>(
     headers: H,
-    output: W,
-) -> Result<BodyType, Error<W::Error>>
+    carry_over_connection_type: Option<ConnectionType>,
+    request: bool,
+    http11: bool,
+    chunked_if_unspecified: bool,
+    mut output: W,
+) -> Result<(ConnectionType, BodyType), Error<W::Error>>
 where
     W: Write,
     H: IntoIterator<Item = &'a (&'a str, &'a str)>,
 {
-    send_raw_headers(
+    let (headers_connection_type, headers_body_type) = raw::send_headers(
         headers
             .into_iter()
             .map(|(name, value)| (*name, value.as_bytes())),
+        &mut output,
+    )
+    .await?;
+
+    send_headers_end(
+        headers_connection_type,
+        headers_body_type,
+        carry_over_connection_type,
+        request,
+        http11,
+        chunked_if_unspecified,
         output,
     )
     .await
 }
 
-pub(crate) async fn send_raw_headers<'a, H, W>(
-    headers: H,
+async fn send_headers_end<W>(
+    headers_connection_type: Option<ConnectionType>,
+    headers_body_type: Option<BodyType>,
+    carry_over_connection_type: Option<ConnectionType>,
+    request: bool,
+    http11: bool,
+    chunked_if_unspecified: bool,
     mut output: W,
-) -> Result<BodyType, Error<W::Error>>
+) -> Result<(ConnectionType, BodyType), Error<W::Error>>
 where
     W: Write,
-    H: IntoIterator<Item = (&'a str, &'a [u8])>,
 {
-    let mut body = BodyType::Unknown;
+    let connection_type =
+        ConnectionType::resolve(headers_connection_type, carry_over_connection_type, http11)?;
 
-    for (name, value) in headers.into_iter() {
-        if body == BodyType::Unknown {
-            body = BodyType::from_header(name, unsafe { str::from_utf8_unchecked(value) });
-        }
+    let body_type = BodyType::resolve(
+        headers_body_type,
+        connection_type,
+        request,
+        http11,
+        chunked_if_unspecified,
+    )?;
 
-        output.write_all(name.as_bytes()).await.map_err(Error::Io)?;
-        output.write_all(b": ").await.map_err(Error::Io)?;
-        output.write_all(value).await.map_err(Error::Io)?;
-        output.write_all(b"\r\n").await.map_err(Error::Io)?;
+    if headers_connection_type.is_none() {
+        // Send an explicit Connection-Type just in case
+        let (name, value) = connection_type.raw_header();
+
+        raw::send_header(name, value, &mut output).await?;
     }
 
-    Ok(body)
-}
+    if headers_body_type.is_none() {
+        let mut buf = heapless::String::new();
 
-pub(crate) async fn send_headers_end<W>(mut output: W) -> Result<(), Error<W::Error>>
-where
-    W: Write,
-{
-    output.write_all(b"\r\n").await.map_err(Error::Io)
+        if let Some((name, value)) = body_type.raw_header(&mut buf) {
+            // Send explicit body type headers just in case or if the body type was upgraded
+            raw::send_header(name, value, &mut output).await?;
+        }
+    }
+
+    raw::send_headers_end(output).await?;
+
+    Ok((connection_type, body_type))
 }
 
 impl<'b, const N: usize> Headers<'b, N> {
-    pub(crate) async fn send<W>(&self, output: W) -> Result<BodyType, Error<W::Error>>
+    fn resolve<E>(
+        &self,
+        carry_over_connection_type: Option<ConnectionType>,
+        request: bool,
+        http11: bool,
+    ) -> Result<(ConnectionType, BodyType), Error<E>> {
+        let headers_connection_type = ConnectionType::from_headers(self.iter());
+        let headers_body_type = BodyType::from_headers(self.iter());
+
+        let connection_type =
+            ConnectionType::resolve(headers_connection_type, carry_over_connection_type, http11)?;
+        let body_type =
+            BodyType::resolve(headers_body_type, connection_type, request, http11, false)?;
+
+        Ok((connection_type, body_type))
+    }
+
+    async fn send<W>(
+        &self,
+        carry_over_connection_type: Option<ConnectionType>,
+        request: bool,
+        http11: bool,
+        chunked_if_unspecified: bool,
+        mut output: W,
+    ) -> Result<(ConnectionType, BodyType), Error<W::Error>>
     where
         W: Write,
     {
-        send_raw_headers(self.iter_raw(), output).await
+        let (headers_connection_type, headers_body_type) =
+            raw::send_headers(self.iter_raw(), &mut output).await?;
+
+        send_headers_end(
+            headers_connection_type,
+            headers_body_type,
+            carry_over_connection_type,
+            request,
+            http11,
+            chunked_if_unspecified,
+            output,
+        )
+        .await
     }
 }
 
+/// Represents an incoming HTTP request stream body
+///
+/// Implements the `Read` trait to read the body from the stream
 #[allow(private_interfaces)]
 pub enum Body<'b, R> {
-    Close(PartiallyRead<'b, R>),
+    /// The body is raw and should be read as is (only possible for HTTP responses with connection = Close)
+    Raw(PartiallyRead<'b, R>),
+    /// The body is of a known length (Content-Length)
     ContentLen(ContentLenRead<PartiallyRead<'b, R>>),
+    /// The body is chunked
     Chunked(ChunkedRead<'b, PartiallyRead<'b, R>>),
 }
 
@@ -327,6 +438,13 @@ impl<'b, R> Body<'b, R>
 where
     R: Read,
 {
+    /// Create a new body
+    ///
+    /// Parameters:
+    /// - `body_type`: The type of the body, as resolved using `BodyType::resolve`
+    /// - `buf`: The buffer to use for reading the body
+    /// - `read_len`: The length of the buffer that has already been read when processing the icoming headers
+    /// - `input`: The raw input stream
     pub fn new(body_type: BodyType, buf: &'b mut [u8], read_len: usize, input: R) -> Self {
         match body_type {
             BodyType::Chunked => Body::Chunked(ChunkedRead::new(
@@ -338,33 +456,37 @@ where
                 content_len,
                 PartiallyRead::new(&buf[..read_len], input),
             )),
-            BodyType::Close => Body::Close(PartiallyRead::new(&buf[..read_len], input)),
-            BodyType::Unknown => Body::ContentLen(ContentLenRead::new(
-                0,
-                PartiallyRead::new(&buf[..read_len], input),
-            )),
+            BodyType::Raw => Body::Raw(PartiallyRead::new(&buf[..read_len], input)),
         }
     }
 
+    /// Check if the body needs to be closed (i.e. the underlying input stream cannot be re-used for Keep-Alive connections)
+    pub fn needs_close(&self) -> bool {
+        !self.is_complete() || matches!(self, Self::Raw(_))
+    }
+
+    /// Check if the body has been completely read
     pub fn is_complete(&self) -> bool {
         match self {
-            Self::Close(_) => true,
+            Self::Raw(_) => true,
             Self::ContentLen(r) => r.is_complete(),
             Self::Chunked(r) => r.is_complete(),
         }
     }
 
+    /// Return a mutable reference to the underlying raw reader
     pub fn as_raw_reader(&mut self) -> &mut R {
         match self {
-            Self::Close(r) => &mut r.input,
+            Self::Raw(r) => &mut r.input,
             Self::ContentLen(r) => &mut r.input.input,
             Self::Chunked(r) => &mut r.input.input,
         }
     }
 
+    /// Release the body, returning the underlying raw reader
     pub fn release(self) -> R {
         match self {
-            Self::Close(r) => r.release(),
+            Self::Raw(r) => r.release(),
             Self::ContentLen(r) => r.release().release(),
             Self::Chunked(r) => r.release().release(),
         }
@@ -384,7 +506,7 @@ where
 {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         match self {
-            Self::Close(read) => Ok(read.read(buf).await.map_err(Error::Io)?),
+            Self::Raw(read) => Ok(read.read(buf).await.map_err(Error::Io)?),
             Self::ContentLen(read) => Ok(read.read(buf).await?),
             Self::Chunked(read) => Ok(read.read(buf).await?),
         }
@@ -722,10 +844,16 @@ where
     }
 }
 
+/// Represents an outgoing HTTP request stream body
+///
+/// Implements the `Write` trait to write the body to the stream
 #[allow(private_interfaces)]
 pub enum SendBody<W> {
-    Close(W),
+    /// The body is raw and should be written as is (only possible for HTTP responses with connection = Close)
+    Raw(W),
+    /// The body is of a known length (Content-Length)
     ContentLen(ContentLenWrite<W>),
+    /// The body is chunked (Transfer-Encoding: chunked)
     Chunked(ChunkedWrite<W>),
 }
 
@@ -733,17 +861,22 @@ impl<W> SendBody<W>
 where
     W: Write,
 {
+    /// Create a new body
+    ///
+    /// Parameters:
+    /// - `body_type`: The type of the body, as resolved using `BodyType::resolve`
+    /// - `output`: The raw output stream
     pub fn new(body_type: BodyType, output: W) -> SendBody<W> {
         match body_type {
             BodyType::Chunked => SendBody::Chunked(ChunkedWrite::new(output)),
             BodyType::ContentLen(content_len) => {
                 SendBody::ContentLen(ContentLenWrite::new(content_len, output))
             }
-            BodyType::Close => SendBody::Close(output),
-            BodyType::Unknown => SendBody::ContentLen(ContentLenWrite::new(0, output)),
+            BodyType::Raw => SendBody::Raw(output),
         }
     }
 
+    /// Check if the body has been completely written to
     pub fn is_complete(&self) -> bool {
         match self {
             Self::ContentLen(w) => w.is_complete(),
@@ -751,16 +884,18 @@ where
         }
     }
 
+    /// Check if the body needs to be closed (i.e. the underlying output stream cannot be re-used for Keep-Alive connections)
     pub fn needs_close(&self) -> bool {
-        !self.is_complete() || matches!(self, Self::Close(_))
+        !self.is_complete() || matches!(self, Self::Raw(_))
     }
 
+    /// Finish writing the body (necessary for chunked encoding)
     pub async fn finish(&mut self) -> Result<(), Error<W::Error>>
     where
         W: Write,
     {
         match self {
-            Self::Close(_) => (),
+            Self::Raw(_) => (),
             Self::ContentLen(w) => {
                 if !w.is_complete() {
                     return Err(Error::IncompleteBody);
@@ -774,17 +909,19 @@ where
         Ok(())
     }
 
+    /// Return a mutable reference to the underlying raw writer
     pub fn as_raw_writer(&mut self) -> &mut W {
         match self {
-            Self::Close(w) => w,
+            Self::Raw(w) => w,
             Self::ContentLen(w) => &mut w.output,
             Self::Chunked(w) => &mut w.output,
         }
     }
 
+    /// Release the body, returning the underlying raw writer
     pub fn release(self) -> W {
         match self {
-            Self::Close(w) => w,
+            Self::Raw(w) => w,
             Self::ContentLen(w) => w.release(),
             Self::Chunked(w) => w.release(),
         }
@@ -804,7 +941,7 @@ where
 {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         match self {
-            Self::Close(w) => Ok(w.write(buf).await.map_err(Error::Io)?),
+            Self::Raw(w) => Ok(w.write(buf).await.map_err(Error::Io)?),
             Self::ContentLen(w) => Ok(w.write(buf).await?),
             Self::Chunked(w) => Ok(w.write(buf).await?),
         }
@@ -812,7 +949,7 @@ where
 
     async fn flush(&mut self) -> Result<(), Self::Error> {
         match self {
-            Self::Close(w) => Ok(w.flush().await.map_err(Error::Io)?),
+            Self::Raw(w) => Ok(w.flush().await.map_err(Error::Io)?),
             Self::ContentLen(w) => Ok(w.flush().await?),
             Self::Chunked(w) => Ok(w.flush().await?),
         }
@@ -941,37 +1078,93 @@ where
     }
 }
 
-async fn read_reply_buf<const N: usize, R>(
-    mut input: R,
-    buf: &mut [u8],
-    request: bool,
-    exact: bool,
-) -> Result<(usize, usize), Error<R::Error>>
-where
-    R: Read,
-{
-    if exact {
-        let raw_headers_len = read_headers(&mut input, buf).await?;
+mod raw {
+    use core::str;
 
-        let mut headers = [httparse::EMPTY_HEADER; N];
+    use embedded_io_async::{Read, Write};
 
-        let status = if request {
-            httparse::Request::new(&mut headers).parse(&buf[..raw_headers_len])?
+    use log::warn;
+
+    use crate::{BodyType, ConnectionType};
+
+    use super::Error;
+
+    pub(crate) async fn read_reply_buf<const N: usize, R>(
+        mut input: R,
+        buf: &mut [u8],
+        request: bool,
+        exact: bool,
+    ) -> Result<(usize, usize), Error<R::Error>>
+    where
+        R: Read,
+    {
+        if exact {
+            let raw_headers_len = read_headers(&mut input, buf).await?;
+
+            let mut headers = [httparse::EMPTY_HEADER; N];
+
+            let status = if request {
+                httparse::Request::new(&mut headers).parse(&buf[..raw_headers_len])?
+            } else {
+                httparse::Response::new(&mut headers).parse(&buf[..raw_headers_len])?
+            };
+
+            if let httparse::Status::Complete(headers_len) = status {
+                return Ok((raw_headers_len, headers_len));
+            }
+
+            Err(Error::TooManyHeaders)
         } else {
-            httparse::Response::new(&mut headers).parse(&buf[..raw_headers_len])?
-        };
+            let mut offset = 0;
+            let mut size = 0;
 
-        if let httparse::Status::Complete(headers_len) = status {
-            return Ok((raw_headers_len, headers_len));
+            while buf.len() > size {
+                let read = input.read(&mut buf[offset..]).await.map_err(Error::Io)?;
+                if read == 0 {
+                    Err(if offset == 0 {
+                        Error::ConnectionClosed
+                    } else {
+                        Error::IncompleteHeaders
+                    })?;
+                }
+
+                offset += read;
+                size += read;
+
+                let mut headers = [httparse::EMPTY_HEADER; N];
+
+                let status = if request {
+                    httparse::Request::new(&mut headers).parse(&buf[..size])?
+                } else {
+                    httparse::Response::new(&mut headers).parse(&buf[..size])?
+                };
+
+                if let httparse::Status::Complete(headers_len) = status {
+                    return Ok((size, headers_len));
+                }
+            }
+
+            Err(Error::TooManyHeaders)
         }
+    }
 
-        Err(Error::TooManyHeaders)
-    } else {
+    pub(crate) async fn read_headers<R>(
+        mut input: R,
+        buf: &mut [u8],
+    ) -> Result<usize, Error<R::Error>>
+    where
+        R: Read,
+    {
         let mut offset = 0;
-        let mut size = 0;
+        let mut byte = [0];
 
-        while buf.len() > size {
-            let read = input.read(&mut buf[offset..]).await.map_err(Error::Io)?;
+        loop {
+            if offset == buf.len() {
+                Err(Error::TooLongHeaders)?;
+            }
+
+            let read = input.read(&mut byte).await.map_err(Error::Io)?;
+
             if read == 0 {
                 Err(if offset == 0 {
                     Error::ConnectionClosed
@@ -980,122 +1173,146 @@ where
                 })?;
             }
 
-            offset += read;
-            size += read;
+            buf[offset] = byte[0];
 
-            let mut headers = [httparse::EMPTY_HEADER; N];
+            offset += 1;
 
-            let status = if request {
-                httparse::Request::new(&mut headers).parse(&buf[..size])?
-            } else {
-                httparse::Response::new(&mut headers).parse(&buf[..size])?
-            };
-
-            if let httparse::Status::Complete(headers_len) = status {
-                return Ok((size, headers_len));
+            if offset >= b"\r\n\r\n".len() && buf[offset - 4..offset] == *b"\r\n\r\n" {
+                break Ok(offset);
             }
         }
-
-        Err(Error::TooManyHeaders)
-    }
-}
-
-async fn read_headers<R>(mut input: R, buf: &mut [u8]) -> Result<usize, Error<R::Error>>
-where
-    R: Read,
-{
-    let mut offset = 0;
-    let mut byte = [0];
-
-    loop {
-        if offset == buf.len() {
-            Err(Error::TooLongHeaders)?;
-        }
-
-        let read = input.read(&mut byte).await.map_err(Error::Io)?;
-
-        if read == 0 {
-            Err(if offset == 0 {
-                Error::ConnectionClosed
-            } else {
-                Error::IncompleteHeaders
-            })?;
-        }
-
-        buf[offset] = byte[0];
-
-        offset += 1;
-
-        if offset >= b"\r\n\r\n".len() && buf[offset - 4..offset] == *b"\r\n\r\n" {
-            break Ok(offset);
-        }
-    }
-}
-
-async fn send_status_line<W>(
-    request: bool,
-    http11: bool,
-    token: Option<&str>,
-    extra: Option<&str>,
-    mut output: W,
-) -> Result<(), Error<W::Error>>
-where
-    W: Write,
-{
-    let mut written = false;
-
-    if !request {
-        send_version(&mut output, http11).await?;
-        written = true;
     }
 
-    if let Some(token) = token {
-        if written {
-            output.write_all(b" ").await.map_err(Error::Io)?;
+    pub(crate) async fn send_status_line<W>(
+        request: bool,
+        http11: bool,
+        token: Option<&str>,
+        extra: Option<&str>,
+        mut output: W,
+    ) -> Result<(), Error<W::Error>>
+    where
+        W: Write,
+    {
+        let mut written = false;
+
+        if !request {
+            send_version(&mut output, http11).await?;
+            written = true;
         }
 
+        if let Some(token) = token {
+            if written {
+                output.write_all(b" ").await.map_err(Error::Io)?;
+            }
+
+            output
+                .write_all(token.as_bytes())
+                .await
+                .map_err(Error::Io)?;
+
+            written = true;
+        }
+
+        if let Some(extra) = extra {
+            if written {
+                output.write_all(b" ").await.map_err(Error::Io)?;
+            }
+
+            output
+                .write_all(extra.as_bytes())
+                .await
+                .map_err(Error::Io)?;
+
+            written = true;
+        }
+
+        if request {
+            if written {
+                output.write_all(b" ").await.map_err(Error::Io)?;
+            }
+
+            send_version(&mut output, http11).await?;
+        }
+
+        output.write_all(b"\r\n").await.map_err(Error::Io)?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn send_version<W>(mut output: W, http11: bool) -> Result<(), Error<W::Error>>
+    where
+        W: Write,
+    {
         output
-            .write_all(token.as_bytes())
+            .write_all(if http11 { b"HTTP/1.1" } else { b"HTTP/1.0" })
             .await
-            .map_err(Error::Io)?;
-
-        written = true;
+            .map_err(Error::Io)
     }
 
-    if let Some(extra) = extra {
-        if written {
-            output.write_all(b" ").await.map_err(Error::Io)?;
+    pub(crate) async fn send_headers<'a, H, W>(
+        headers: H,
+        mut output: W,
+    ) -> Result<(Option<ConnectionType>, Option<BodyType>), Error<W::Error>>
+    where
+        W: Write,
+        H: IntoIterator<Item = (&'a str, &'a [u8])>,
+    {
+        let mut connection = None;
+        let mut body = None;
+
+        for (name, value) in headers.into_iter() {
+            let header_connection =
+                ConnectionType::from_header(name, unsafe { str::from_utf8_unchecked(value) });
+
+            if let Some(header_connection) = header_connection {
+                if let Some(connection) = connection {
+                    warn!("Multiple Connection headers found. Current {connection} and new {header_connection}");
+                }
+
+                // The last connection header wins
+                connection = Some(header_connection);
+            }
+
+            let header_body =
+                BodyType::from_header(name, unsafe { str::from_utf8_unchecked(value) });
+
+            if let Some(header_body) = header_body {
+                if let Some(body) = body {
+                    warn!("Multiple body type headers found. Current {body} and new {header_body}");
+                }
+
+                // The last body header wins
+                body = Some(header_body);
+            }
+
+            send_header(name, value, &mut output).await?;
         }
 
-        output
-            .write_all(extra.as_bytes())
-            .await
-            .map_err(Error::Io)?;
-
-        written = true;
+        Ok((connection, body))
     }
 
-    if request {
-        if written {
-            output.write_all(b" ").await.map_err(Error::Io)?;
-        }
+    pub(crate) async fn send_header<W>(
+        name: &str,
+        value: &[u8],
+        mut output: W,
+    ) -> Result<(), Error<W::Error>>
+    where
+        W: Write,
+    {
+        output.write_all(name.as_bytes()).await.map_err(Error::Io)?;
+        output.write_all(b": ").await.map_err(Error::Io)?;
+        output.write_all(value).await.map_err(Error::Io)?;
+        output.write_all(b"\r\n").await.map_err(Error::Io)?;
 
-        send_version(&mut output, http11).await?;
+        Ok(())
     }
 
-    output.write_all(b"\r\n").await.map_err(Error::Io)?;
-
-    Ok(())
-}
-
-async fn send_version<W>(mut output: W, http11: bool) -> Result<(), Error<W::Error>>
-where
-    W: Write,
-{
-    output
-        .write_all(if http11 { b"HTTP/1.1" } else { b"HTTP/1.0" })
-        .await
-        .map_err(Error::Io)
+    pub(crate) async fn send_headers_end<W>(mut output: W) -> Result<(), Error<W::Error>>
+    where
+        W: Write,
+    {
+        output.write_all(b"\r\n").await.map_err(Error::Io)
+    }
 }
 
 #[cfg(test)]

@@ -11,12 +11,10 @@ use embedded_io_async::{ErrorType, Read, Write};
 
 use log::{debug, info, warn};
 
-use super::{
-    send_headers, send_headers_end, send_status, Body, BodyType, Error, RequestHeaders, SendBody,
-};
+use super::{send_headers, send_status, Body, Error, RequestHeaders, SendBody};
 
 use crate::ws::{upgrade_response_headers, MAX_BASE64_KEY_RESPONSE_LEN};
-use crate::DEFAULT_MAX_HEADERS_COUNT;
+use crate::{ConnectionType, DEFAULT_MAX_HEADERS_COUNT};
 
 #[allow(unused_imports)]
 #[cfg(feature = "embedded-svc")]
@@ -28,6 +26,7 @@ pub const DEFAULT_TIMEOUT_MS: u32 = 5000;
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
+/// A connection state machine for handling HTTP server requests-response cycles.
 #[allow(private_interfaces)]
 pub enum Connection<'b, T, const N: usize = DEFAULT_MAX_HEADERS_COUNT> {
     Transition(TransitionState),
@@ -40,6 +39,12 @@ impl<'b, T, const N: usize> Connection<'b, T, N>
 where
     T: Read + Write,
 {
+    /// Create a new connection state machine for an incoming request
+    ///
+    /// Parameters:
+    /// - `buf`: A buffer to store the request headers
+    /// - `io`: A socket stream
+    /// - `timeout_ms`: An optional timeout in milliseconds to wait for a new incoming request
     pub async fn new(
         buf: &'b mut [u8],
         mut io: T,
@@ -61,34 +66,47 @@ where
             }?
         };
 
-        let io = Body::new(
-            BodyType::from_headers(request.headers.iter()),
-            buf,
-            read_len,
-            io,
-        );
+        let (connection_type, body_type) = request.resolve::<T::Error>()?;
 
-        Ok(Self::Request(RequestState { request, io }))
+        let io = Body::new(body_type, buf, read_len, io);
+
+        Ok(Self::Request(RequestState {
+            request,
+            io,
+            connection_type,
+        }))
     }
 
+    /// Return `true` of the connection is in request state (i.e. the initial state upon calling `new`)
     pub fn is_request_initiated(&self) -> bool {
         matches!(self, Self::Request(_))
     }
 
+    /// Split the connection into request headers and body
     pub fn split(&mut self) -> (&RequestHeaders<'b, N>, &mut Body<'b, T>) {
         let req = self.request_mut().expect("Not in request mode");
 
         (&req.request, &mut req.io)
     }
 
+    /// Return a reference to the request headers
     pub fn headers(&self) -> Result<&RequestHeaders<'b, N>, Error<T::Error>> {
         Ok(&self.request_ref()?.request)
     }
 
+    /// Return `true` if the request is a WebSocket upgrade request
     pub fn is_ws_upgrade_request(&self) -> Result<bool, Error<T::Error>> {
         Ok(self.headers()?.is_ws_upgrade_request())
     }
 
+    /// Switch the connection into a response state
+    ///
+    /// Parameters:
+    /// - `status`: The HTTP status code
+    /// - `message`: An optional HTTP status message
+    /// - `headers`: An array of HTTP response headers.
+    ///   Note that if no `Content-Length` or `Transfer-Encoding` headers are provided,
+    ///   the body will be send with chunked encoding (for HTTP1.1 only and if the connection is not Close)
     pub async fn initiate_response(
         &mut self,
         status: u16,
@@ -98,6 +116,7 @@ where
         self.complete_request(Some(status), message, headers).await
     }
 
+    /// A convenience method to initiate a WebSocket upgrade response
     pub async fn initiate_ws_upgrade_response(
         &mut self,
         buf: &mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
@@ -107,10 +126,13 @@ where
         self.initiate_response(101, None, &headers).await
     }
 
+    /// Return `true` if the connection is in response state
     pub fn is_response_initiated(&self) -> bool {
         matches!(self, Self::Response(_))
     }
 
+    /// Completes the response and switches the connection back to the unbound state
+    /// If the connection is still in a request state, and empty 200 OK response is sent
     pub async fn complete(&mut self) -> Result<(), Error<T::Error>> {
         if self.is_request_initiated() {
             self.complete_request(Some(200), Some("OK"), &[]).await?;
@@ -123,6 +145,9 @@ where
         Ok(())
     }
 
+    /// Completes the response with an error message and switches the connection back to the unbound state
+    ///
+    /// If the connection is still in a request state, an empty 500 Internal Error response is sent
     pub async fn complete_err(&mut self, err: &str) -> Result<(), Error<T::Error>> {
         let result = self.request_mut();
 
@@ -135,8 +160,8 @@ where
 
                 let response = self.response_mut()?;
 
-                response.write_all(err.as_bytes()).await?;
-                response.finish().await?;
+                response.io.write_all(err.as_bytes()).await?;
+                response.io.finish().await?;
 
                 Ok(())
             }
@@ -144,6 +169,9 @@ where
         }
     }
 
+    /// Return `true` if the connection needs to be closed
+    ///
+    /// This is determined by the connection type (i.e. `Connection: Close` header)
     pub fn needs_close(&self) -> bool {
         match self {
             Self::Response(response) => response.needs_close(),
@@ -151,6 +179,9 @@ where
         }
     }
 
+    /// Switch the connection to unbound state, returning a mutable reference to the underlying socket stream
+    ///
+    /// NOTE: Use with care, and only if the connection is completed in the meantime
     pub fn unbind(&mut self) -> Result<&mut T, Error<T::Error>> {
         let io = self.unbind_mut();
         *self = Self::Unbound(io);
@@ -170,42 +201,33 @@ where
         while request.io.read(&mut buf).await? > 0 {}
 
         let http11 = request.request.http11.unwrap_or(false);
+        let request_connection_type = request.connection_type;
 
         let mut io = self.unbind_mut();
 
         let result = async {
             send_status(http11, status, reason, &mut io).await?;
-            let mut body_type = send_headers(
-                headers.iter().filter(|(k, v)| {
-                    http11
-                        || !k.eq_ignore_ascii_case("Transfer-Encoding")
-                        || !v.eq_ignore_ascii_case("Chunked")
-                }),
+
+            let (connection_type, body_type) = send_headers(
+                headers.iter(),
+                Some(request_connection_type),
+                false,
+                http11,
+                true,
                 &mut io,
             )
             .await?;
 
-            if matches!(body_type, BodyType::Unknown) {
-                if http11 {
-                    send_headers(&[("Transfer-Encoding", "Chunked")], &mut io).await?;
-                    body_type = BodyType::Chunked;
-                } else {
-                    body_type = BodyType::Close;
-                }
-            };
-
-            send_headers_end(&mut io).await?;
-
-            Ok(body_type)
+            Ok((connection_type, body_type))
         }
         .await;
 
         match result {
-            Ok(body_type) => {
-                *self = Self::Response(SendBody::new(
-                    if http11 { body_type } else { BodyType::Close },
-                    io,
-                ));
+            Ok((connection_type, body_type)) => {
+                *self = Self::Response(ResponseState {
+                    io: SendBody::new(body_type, io),
+                    connection_type,
+                });
 
                 Ok(())
             }
@@ -218,7 +240,7 @@ where
     }
 
     async fn complete_response(&mut self) -> Result<(), Error<T::Error>> {
-        self.response_mut()?.finish().await?;
+        self.response_mut()?.io.finish().await?;
 
         Ok(())
     }
@@ -228,7 +250,7 @@ where
 
         match state {
             Self::Request(request) => request.io.release(),
-            Self::Response(response) => response.release(),
+            Self::Response(response) => response.io.release(),
             Self::Unbound(io) => io,
             _ => unreachable!(),
         }
@@ -250,7 +272,7 @@ where
         }
     }
 
-    fn response_mut(&mut self) -> Result<&mut SendBody<T>, Error<T::Error>> {
+    fn response_mut(&mut self) -> Result<&mut ResponseState<T>, Error<T::Error>> {
         if let Self::Response(response) = self {
             Ok(response)
         } else {
@@ -261,7 +283,7 @@ where
     fn io_mut(&mut self) -> &mut T {
         match self {
             Self::Request(request) => request.io.as_raw_reader(),
-            Self::Response(response) => response.as_raw_writer(),
+            Self::Response(response) => response.io.as_raw_writer(),
             Self::Unbound(io) => io,
             _ => unreachable!(),
         }
@@ -289,11 +311,11 @@ where
     T: Read + Write,
 {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.response_mut()?.write(buf).await
+        self.response_mut()?.io.write(buf).await
     }
 
     async fn flush(&mut self) -> Result<(), Self::Error> {
-        self.response_mut()?.flush().await
+        self.response_mut()?.io.flush().await
     }
 }
 
@@ -302,10 +324,24 @@ struct TransitionState(());
 struct RequestState<'b, T, const N: usize> {
     request: RequestHeaders<'b, N>,
     io: Body<'b, T>,
+    connection_type: ConnectionType,
 }
 
-type ResponseState<T> = SendBody<T>;
+struct ResponseState<T> {
+    io: SendBody<T>,
+    connection_type: ConnectionType,
+}
 
+impl<T> ResponseState<T>
+where
+    T: Write,
+{
+    fn needs_close(&self) -> bool {
+        matches!(self.connection_type, ConnectionType::Close) || self.io.needs_close()
+    }
+}
+
+/// A trait (async callback) for handling incoming HTTP requests
 pub trait Handler<'b, T, const N: usize>
 where
     T: Read + Write,
@@ -327,6 +363,10 @@ where
     }
 }
 
+/// A trait (async callback) for handling a single HTTP request
+///
+/// The only difference between this and `Handler` is that this trait has an additional `task_id` parameter,
+/// which is used for logging purposes
 pub trait TaskHandler<'b, T, const N: usize>
 where
     T: Read + Write,
@@ -356,9 +396,11 @@ where
     }
 }
 
+/// A type that adapts a `Handler` into a `TaskHandler`
 pub struct TaskHandlerAdaptor<H>(H);
 
 impl<H> TaskHandlerAdaptor<H> {
+    /// Create a new `TaskHandlerAdaptor` from a `Handler`
     pub const fn new(handler: H) -> Self {
         Self(handler)
     }
@@ -386,6 +428,11 @@ where
     }
 }
 
+/// A convenience function to handle multiple HTTP requests over a single socket stream,
+/// using the specified handler.
+///
+/// The socket stream will be closed only in case of error, or until the client explicitly requests that
+/// either with a hard socket close, or with a `Connection: Close` header.
 pub async fn handle_connection<const N: usize, T, H>(
     io: T,
     buf: &mut [u8],
@@ -398,6 +445,11 @@ pub async fn handle_connection<const N: usize, T, H>(
     handle_task_connection(io, buf, timeout_ms, 0, TaskHandlerAdaptor::new(handler)).await
 }
 
+/// A convenience function to handle multiple HTTP requests over a single socket stream,
+/// using the specified task handler.
+///
+/// The socket stream will be closed only in case of error, or until the client explicitly requests that
+/// either with a hard socket close, or with a `Connection: Close` header.
 pub async fn handle_task_connection<const N: usize, T, H>(
     mut io: T,
     buf: &mut [u8],
@@ -439,9 +491,12 @@ pub async fn handle_task_connection<const N: usize, T, H>(
     }
 }
 
+/// The error type for handling HTTP requests
 #[derive(Debug)]
 pub enum HandleRequestError<C, E> {
+    /// A connection error (HTTP protocol error or a socket IO error)
     Connection(Error<C>),
+    /// A handler error
     Handler(E),
 }
 
@@ -472,6 +527,8 @@ where
 {
 }
 
+/// A convenience function to handle a single HTTP request over a socket stream,
+/// using the specified handler.
 pub async fn handle_request<'b, const N: usize, H, T>(
     buf: &'b mut [u8],
     io: T,
@@ -485,6 +542,8 @@ where
     handle_task_request(buf, io, 0, timeout_ms, TaskHandlerAdaptor::new(handler)).await
 }
 
+/// A convenience function to handle a single HTTP request over a socket stream,
+/// using the specified task handler.
 pub async fn handle_task_request<'b, const N: usize, H, T>(
     buf: &'b mut [u8],
     io: T,
@@ -511,11 +570,16 @@ where
     Ok(connection.needs_close())
 }
 
+/// A type alias for an HTTP server with default buffer sizes.
 pub type DefaultServer =
     Server<{ DEFAULT_HANDLER_TASKS_COUNT }, { DEFAULT_BUF_SIZE }, { DEFAULT_MAX_HEADERS_COUNT }>;
 
+/// A type alias for the HTTP server buffers (essentially, arrays of `MaybeUninit`)
 pub type ServerBuffers<const P: usize, const B: usize> = MaybeUninit<[[u8; B]; P]>;
 
+/// An HTTP server that can handle multiple requests concurrently.
+///
+/// The server needs an implementation of `edge_nal::TcpAccept` to accept incoming connections.
 #[repr(transparent)]
 pub struct Server<
     const P: usize = DEFAULT_HANDLER_TASKS_COUNT,
@@ -524,11 +588,13 @@ pub struct Server<
 >(ServerBuffers<P, B>);
 
 impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
+    /// Create a new HTTP server
     #[inline(always)]
     pub const fn new() -> Self {
         Self(MaybeUninit::uninit())
     }
 
+    /// Run the server with the specified acceptor and handler
     #[inline(never)]
     #[cold]
     pub async fn run<A, H>(
@@ -594,6 +660,7 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
         result
     }
 
+    /// Run the server with the specified acceptor and task handler
     #[inline(never)]
     #[cold]
     pub async fn run_with_task_id<A, H>(
