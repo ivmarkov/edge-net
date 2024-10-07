@@ -366,7 +366,7 @@ where
         let mut buf = heapless::String::new();
 
         if let Some((name, value)) = body_type.raw_header(&mut buf) {
-            // Send explicit body type headers just in case or if the body type was upgraded
+            // Send explicit body type header just in case or if the body type was upgraded
             raw::send_header(name, value, &mut output).await?;
         }
     }
@@ -430,7 +430,7 @@ pub enum Body<'b, R> {
     Raw(PartiallyRead<'b, R>),
     /// The body is of a known length (Content-Length)
     ContentLen(ContentLenRead<PartiallyRead<'b, R>>),
-    /// The body is chunked
+    /// The body is chunked (Transfer-Encoding: chunked)
     Chunked(ChunkedRead<'b, PartiallyRead<'b, R>>),
 }
 

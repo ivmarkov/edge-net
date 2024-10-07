@@ -18,8 +18,8 @@ pub mod io;
 /// and body type (Content-Length, Transfer-Encoding) in the headers
 #[derive(Debug)]
 pub enum HeadersMismatchError {
-    /// Connection type mismatch: use is attempting to use a connection type in the response
-    /// which is different from the connection type of the request
+    /// Connection type mismatch: Keep-Alive connection type in the response,
+    /// while the request contained a Close connection type
     ResponseConnectionTypeMismatchError,
     /// Body type mismatch: the body type in the headers cannot be used with the specified connection type and HTTP protocol.
     /// This is often a user-error, but might also come from the other peer not following the protocol.
@@ -440,7 +440,7 @@ impl<const N: usize> Default for Headers<'_, N> {
 }
 
 /// Connection type
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum ConnectionType {
     KeepAlive,
     Close,
@@ -467,8 +467,10 @@ impl ConnectionType {
         match headers_connection_type {
             Some(connection_type) => {
                 if let Some(carry_over_connection_type) = carry_over_connection_type {
-                    if connection_type != carry_over_connection_type {
-                        warn!("Carry-over connection type is {carry_over_connection_type} while the new connection type is {connection_type}");
+                    if matches!(connection_type, ConnectionType::KeepAlive)
+                        && matches!(carry_over_connection_type, ConnectionType::Close)
+                    {
+                        warn!("Cannot set a Keep-Alive connection when the peer requested Close");
                         Err(HeadersMismatchError::ResponseConnectionTypeMismatchError)?;
                     }
                 }
@@ -505,7 +507,7 @@ impl ConnectionType {
     /// Create a connection type from headers
     ///
     /// If multiple `Connection` headers are found, this method logs a warning and returns the last one
-    /// IF no `Connection` headers are found, this method returns `None`
+    /// If no `Connection` headers are found, this method returns `None`
     pub fn from_headers<'a, H>(headers: H) -> Option<Self>
     where
         H: IntoIterator<Item = (&'a str, &'a str)>,
@@ -549,7 +551,7 @@ impl Display for ConnectionType {
 }
 
 /// Body type
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum BodyType {
     /// Chunked body (Transfer-Encoding: Chunked)
     Chunked,
@@ -646,7 +648,7 @@ impl BodyType {
     /// Create a body type from headers
     ///
     /// If multiple body type headers are found, this method logs a warning and returns the last one
-    /// IF no body type headers are found, this method returns `None`
+    /// If no body type headers are found, this method returns `None`
     pub fn from_headers<'a, H>(headers: H) -> Option<Self>
     where
         H: IntoIterator<Item = (&'a str, &'a str)>,
@@ -1124,24 +1126,30 @@ mod test {
             .unwrap(),
             ConnectionType::KeepAlive
         );
+        assert_eq!(
+            ConnectionType::resolve(
+                Some(ConnectionType::Close),
+                Some(ConnectionType::KeepAlive),
+                false
+            )
+            .unwrap(),
+            ConnectionType::Close
+        );
         assert!(ConnectionType::resolve(
-            Some(ConnectionType::Close),
             Some(ConnectionType::KeepAlive),
+            Some(ConnectionType::Close),
             false
         )
         .is_err());
-        assert!(ConnectionType::resolve(
-            Some(ConnectionType::KeepAlive),
-            Some(ConnectionType::Close),
-            false
-        )
-        .is_err());
-        assert!(ConnectionType::resolve(
-            Some(ConnectionType::Close),
-            Some(ConnectionType::KeepAlive),
-            true
-        )
-        .is_err());
+        assert_eq!(
+            ConnectionType::resolve(
+                Some(ConnectionType::Close),
+                Some(ConnectionType::KeepAlive),
+                true
+            )
+            .unwrap(),
+            ConnectionType::Close
+        );
         assert!(ConnectionType::resolve(
             Some(ConnectionType::KeepAlive),
             Some(ConnectionType::Close),
