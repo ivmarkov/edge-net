@@ -8,12 +8,10 @@ use edge_nal::TcpConnect;
 
 use crate::{
     ws::{upgrade_request_headers, MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN},
-    DEFAULT_MAX_HEADERS_COUNT,
+    ConnectionType, DEFAULT_MAX_HEADERS_COUNT,
 };
 
-use super::{
-    send_headers, send_headers_end, send_request, Body, BodyType, Error, ResponseHeaders, SendBody,
-};
+use super::{send_headers, send_request, Body, Error, ResponseHeaders, SendBody};
 
 #[allow(unused_imports)]
 #[cfg(feature = "embedded-svc")]
@@ -23,6 +21,7 @@ use super::Method;
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
+/// A client connection that can be used to send HTTP requests and receive responses.
 #[allow(private_interfaces)]
 pub enum Connection<'b, T, const N: usize = DEFAULT_MAX_HEADERS_COUNT>
 where
@@ -38,6 +37,12 @@ impl<'b, T, const N: usize> Connection<'b, T, N>
 where
     T: TcpConnect,
 {
+    /// Create a new client connection.
+    ///
+    /// Parameters:
+    /// - `buf`: A buffer to use for reading and writing data.
+    /// - `socket`: The TCP stack to use for the connection.
+    /// - `addr`: The address of the server to connect to.
     pub fn new(buf: &'b mut [u8], socket: &'b T, addr: SocketAddr) -> Self {
         Self::Unbound(UnboundState {
             buf,
@@ -47,6 +52,7 @@ where
         })
     }
 
+    /// Reinitialize the connection with a new address.
     pub async fn reinitialize(&mut self, addr: SocketAddr) -> Result<(), Error<T::Error>> {
         let _ = self.complete().await;
         self.unbound_mut().unwrap().addr = addr;
@@ -54,6 +60,7 @@ where
         Ok(())
     }
 
+    /// Initiate an HTTP request.
     pub async fn initiate_request(
         &mut self,
         http11: bool,
@@ -64,18 +71,7 @@ where
         self.start_request(http11, method, uri, headers).await
     }
 
-    pub fn is_request_initiated(&self) -> bool {
-        matches!(self, Self::Request(_))
-    }
-
-    pub async fn initiate_response(&mut self) -> Result<(), Error<T::Error>> {
-        self.complete_request().await
-    }
-
-    pub fn is_response_initiated(&self) -> bool {
-        matches!(self, Self::Response(_))
-    }
-
+    /// A utility method to initiate a WebSocket upgrade request.
     pub async fn initiate_ws_upgrade_request(
         &mut self,
         host: Option<&str>,
@@ -91,6 +87,24 @@ where
             .await
     }
 
+    /// Return `true` if a request has been initiated.
+    pub fn is_request_initiated(&self) -> bool {
+        matches!(self, Self::Request(_))
+    }
+
+    /// Initiate an HTTP response.
+    ///
+    /// This should be called after a request has been initiated and the request body had been sent.
+    pub async fn initiate_response(&mut self) -> Result<(), Error<T::Error>> {
+        self.complete_request().await
+    }
+
+    /// Return `true` if a response has been initiated.
+    pub fn is_response_initiated(&self) -> bool {
+        matches!(self, Self::Response(_))
+    }
+
+    /// Return `true` if the server accepted the WebSocket upgrade request.
     pub fn is_ws_upgrade_accepted(
         &self,
         nonce: &[u8; NONCE_LEN],
@@ -99,6 +113,9 @@ where
         Ok(self.headers()?.is_ws_upgrade_accepted(nonce, buf))
     }
 
+    /// Split the connection into its headers and body parts.
+    ///
+    /// The connection must be in response mode.
     #[allow(clippy::type_complexity)]
     pub fn split(&mut self) -> (&ResponseHeaders<'b, N>, &mut Body<'b, T::Socket<'b>>) {
         let response = self.response_mut().expect("Not in response mode");
@@ -106,16 +123,23 @@ where
         (&response.response, &mut response.io)
     }
 
+    /// Get the headers of the response.
+    ///
+    /// The connection must be in response mode.
     pub fn headers(&self) -> Result<&ResponseHeaders<'b, N>, Error<T::Error>> {
         let response = self.response_ref()?;
 
         Ok(&response.response)
     }
 
+    /// Get a mutable reference to the raw connection.
+    ///
+    /// This can be used to send raw data over the connection.
     pub fn raw_connection(&mut self) -> Result<&mut T::Socket<'b>, Error<T::Error>> {
         Ok(self.io_mut())
     }
 
+    /// Release the connection, returning the raw connection and the buffer.
     pub fn release(mut self) -> (T::Socket<'b>, &'b mut [u8]) {
         let mut state = self.unbind();
 
@@ -162,19 +186,17 @@ where
 
             let io = state.io.as_mut().unwrap();
 
-            let body_type = send_headers(headers, &mut *io).await?;
-            send_headers_end(io).await?;
-
-            Ok(body_type)
+            send_headers(headers, None, true, http11, true, &mut *io).await
         }
         .await;
 
         match result {
-            Ok(body_type) => {
+            Ok((connection_type, body_type)) => {
                 *self = Self::Request(RequestState {
                     buf: state.buf,
                     socket: state.socket,
                     addr: state.addr,
+                    connection_type,
                     io: SendBody::new(body_type, state.io.unwrap()),
                 });
 
@@ -189,33 +211,44 @@ where
         }
     }
 
+    /// Complete the request-response cycle
+    ///
+    /// If the request has not been initiated, this method will do nothing.
+    /// If the response has not been initiated, it will be initiated and will be consumed.
     pub async fn complete(&mut self) -> Result<(), Error<T::Error>> {
         let result = async {
             if self.request_mut().is_ok() {
                 self.complete_request().await?;
             }
 
-            if self.response_mut().is_ok() {
-                self.complete_response().await?;
-            }
+            let needs_close = if self.response_mut().is_ok() {
+                self.complete_response().await?
+            } else {
+                true
+            };
 
-            Result::<(), Error<T::Error>>::Ok(())
+            Result::<_, Error<T::Error>>::Ok(needs_close)
         }
         .await;
 
         let mut state = self.unbind();
 
-        if result.is_err() {
-            state.io = None;
-        }
+        match result {
+            Ok(true) | Err(_) => state.io = None,
+            _ => (),
+        };
 
         *self = Self::Unbound(state);
 
-        result
+        result?;
+
+        Ok(())
     }
 
     async fn complete_request(&mut self) -> Result<(), Error<T::Error>> {
         self.request_mut()?.io.finish().await?;
+
+        let request_connection_type = self.request_mut()?.connection_type;
 
         let mut state = self.unbind();
         let buf_ptr: *mut [u8] = state.buf;
@@ -227,18 +260,17 @@ where
             .await
         {
             Ok((buf, read_len)) => {
-                let io = Body::new(
-                    BodyType::from_headers(response.headers.iter()),
-                    buf,
-                    read_len,
-                    state.io.unwrap(),
-                );
+                let (connection_type, body_type) =
+                    response.resolve::<T::Error>(request_connection_type)?;
+
+                let io = Body::new(body_type, buf, read_len, state.io.unwrap());
 
                 *self = Self::Response(ResponseState {
                     buf: buf_ptr,
                     response,
                     socket: state.socket,
                     addr: state.addr,
+                    connection_type,
                     io,
                 });
 
@@ -255,7 +287,7 @@ where
         }
     }
 
-    async fn complete_response(&mut self) -> Result<(), Error<T::Error>> {
+    async fn complete_response(&mut self) -> Result<bool, Error<T::Error>> {
         if self.request_mut().is_ok() {
             self.complete_request().await?;
         }
@@ -265,9 +297,19 @@ where
         let mut buf = [0; COMPLETION_BUF_SIZE];
         while response.io.read(&mut buf).await? > 0 {}
 
+        let needs_close = response.needs_close();
+
         *self = Self::Unbound(self.unbind());
 
-        Ok(())
+        Ok(needs_close)
+    }
+
+    /// Return `true` if the connection needs to be closed (i.e. the server has requested it or the connection is in an invalid state)
+    pub fn needs_close(&self) -> bool {
+        match self {
+            Self::Response(response) => response.needs_close(),
+            _ => true,
+        }
     }
 
     fn unbind(&mut self) -> UnboundState<'b, T, N> {
@@ -391,6 +433,7 @@ where
     buf: &'b mut [u8],
     socket: &'b T,
     addr: SocketAddr,
+    connection_type: ConnectionType,
     io: SendBody<T::Socket<'b>>,
 }
 
@@ -402,7 +445,17 @@ where
     response: ResponseHeaders<'b, N>,
     socket: &'b T,
     addr: SocketAddr,
+    connection_type: ConnectionType,
     io: Body<'b, T::Socket<'b>>,
+}
+
+impl<T, const N: usize> ResponseState<'_, T, N>
+where
+    T: TcpConnect,
+{
+    fn needs_close(&self) -> bool {
+        matches!(self.connection_type, ConnectionType::Close) || self.io.needs_close()
+    }
 }
 
 #[cfg(feature = "embedded-svc")]
