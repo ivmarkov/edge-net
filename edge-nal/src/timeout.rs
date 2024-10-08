@@ -9,9 +9,8 @@
 
 use core::{future::Future, net::SocketAddr};
 
+use embassy_time::Duration;
 use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
-
-pub use embassy_time::Duration;
 
 use crate::{Readable, TcpConnect, TcpShutdown};
 
@@ -51,14 +50,14 @@ where
 /// Otherwise, on timeout, a timeout error is returned.
 ///
 /// Parameters:
-/// - `timeout`: The timeout duration
+/// - `timeout_ms`: The timeout duration in milliseconds
 /// - `fut`: The future to run
-pub async fn with_timeout<F, T, E>(timeout: Duration, fut: F) -> Result<T, WithTimeoutError<E>>
+pub async fn with_timeout<F, T, E>(timeout_ms: u32, fut: F) -> Result<T, WithTimeoutError<E>>
 where
     F: Future<Output = Result<T, E>>,
     E: embedded_io_async::Error,
 {
-    map_result(embassy_time::with_timeout(timeout, fut).await)
+    map_result(embassy_time::with_timeout(Duration::from_millis(timeout_ms as _), fut).await)
 }
 
 /// A type that wraps an IO stream type and adds a timeout to all operations.
@@ -69,16 +68,16 @@ where
 /// - `Readable`
 /// - `TcpConnect`
 /// - `TcpShutdown`
-pub struct WithTimeout<T>(T, Duration);
+pub struct WithTimeout<T>(T, u32);
 
 impl<T> WithTimeout<T> {
     /// Create a new `WithTimeout` instance.
     ///
     /// Parameters:
-    /// - `timeout`: The timeout duration
+    /// - `timeout_ms`: The timeout duration in milliseconds
     /// - `io`: The IO type to add a timeout to
-    pub const fn new(timeout: Duration, io: T) -> Self {
-        Self(io, timeout)
+    pub const fn new(timeout_ms: u32, io: T) -> Self {
+        Self(io, timeout_ms)
     }
 }
 
