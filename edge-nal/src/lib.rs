@@ -4,8 +4,8 @@
 pub use multicast::*;
 pub use raw::*;
 pub use readable::*;
-pub use timeout::*;
 pub use tcp::*;
+pub use timeout::*;
 pub use udp::*;
 
 pub use stack::*;
