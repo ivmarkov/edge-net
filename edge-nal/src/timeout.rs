@@ -7,7 +7,11 @@
 //!
 //! Therefore, the module might be moved to another location in future.
 
-use core::{future::Future, net::SocketAddr};
+use core::{
+    fmt::{self, Display},
+    future::Future,
+    net::SocketAddr,
+};
 
 use embassy_time::Duration;
 use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
@@ -26,6 +30,18 @@ pub enum WithTimeoutError<E> {
 impl<E> From<E> for WithTimeoutError<E> {
     fn from(e: E) -> Self {
         Self::IO(e)
+    }
+}
+
+impl<E> fmt::Display for WithTimeoutError<E>
+where
+    E: Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::IO(e) => write!(f, "IO error: {}", e),
+            Self::Timeout => write!(f, "Operation timed out"),
+        }
     }
 }
 
