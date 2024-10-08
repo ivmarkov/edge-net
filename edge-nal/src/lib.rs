@@ -4,6 +4,7 @@
 pub use multicast::*;
 pub use raw::*;
 pub use readable::*;
+pub use timeout::*;
 pub use tcp::*;
 pub use udp::*;
 
@@ -14,4 +15,5 @@ mod raw;
 mod readable;
 mod stack;
 mod tcp;
+mod timeout;
 mod udp;

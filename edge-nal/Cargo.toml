@@ -16,3 +16,4 @@ categories = [
 
 [dependencies]
 embedded-io-async = { workspace = true }
+embassy-time = { workspace = true }
