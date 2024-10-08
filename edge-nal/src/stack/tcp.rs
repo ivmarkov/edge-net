@@ -4,7 +4,7 @@ use core::net::SocketAddr;
 
 use embedded_io_async::{Error, ErrorType, Read, Write};
 
-use crate::Readable;
+use crate::{Readable, TcpShutdown};
 
 /// This trait is implemented by TCP sockets that can be split into separate `send` and `receive` halves that can operate
 /// independently from each other (i.e., a full-duplex connection).
@@ -46,6 +46,7 @@ pub trait TcpConnect {
     type Socket<'a>: Read<Error = Self::Error>
         + Write<Error = Self::Error>
         + Readable<Error = Self::Error>
+        + TcpShutdown<Error = Self::Error>
     where
         Self: 'a;
 
@@ -80,6 +81,7 @@ pub trait TcpAccept {
     type Socket<'a>: Read<Error = Self::Error>
         + Write<Error = Self::Error>
         + Readable<Error = Self::Error>
+        + TcpShutdown<Error = Self::Error>
     where
         Self: 'a;
 
