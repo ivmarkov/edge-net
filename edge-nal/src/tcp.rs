@@ -27,7 +27,7 @@ pub trait TcpShutdown: ErrorType {
     /// application protocol-specific. Usually, closing the write half means the peer will
     /// notice and will send a FIN packet to the read half, thus "closing" it too.
     ///
-    /// Note that on certain platforms that don't have timeouts this method might never
+    /// Note that - on certain platforms that don't have built-in timeouts - this method might never
     /// complete if the peer is unreachable / misbehaving, so it has to be used with a
     /// proper timeout in-place.
     ///

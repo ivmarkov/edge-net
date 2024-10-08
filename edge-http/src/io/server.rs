@@ -428,7 +428,7 @@ where
 /// - `io`: A socket stream
 /// - `buf`: A work-area buffer used by the implementation
 /// - `request_timeout_ms`: An optional timeout for a complete request-response processing, in milliseconds.
-///  If not provided, a default timeout of 30 minutes is used.
+///   If not provided, a default timeout of 30 minutes is used.
 /// - `handler`: An implementation of `Handler` to handle incoming requests
 pub async fn handle_connection<const N: usize, T, H>(
     io: T,
