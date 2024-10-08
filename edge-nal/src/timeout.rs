@@ -7,13 +7,13 @@
 //!
 //! Therefore, the module might be moved to another location in future.
 
-use core::future::Future;
+use core::{future::Future, net::SocketAddr};
 
 use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
 
 pub use embassy_time::Duration;
 
-use crate::TcpShutdown;
+use crate::{Readable, TcpConnect, TcpShutdown};
 
 /// IO Error type for the `with_timeout` function and `WithTimeout` struct.
 #[derive(Debug)]
@@ -66,6 +66,8 @@ where
 /// The operations decorated with a timeout are the ones offered via the following traits:
 /// - `embedded_io_async::Read`
 /// - `embedded_io_async::Write`
+/// - `Readable`
+/// - `TcpConnect`
 /// - `TcpShutdown`
 pub struct WithTimeout<T>(T, Duration);
 
@@ -106,6 +108,33 @@ where
 
     async fn flush(&mut self) -> Result<(), Self::Error> {
         with_timeout(self.1, self.0.flush()).await
+    }
+}
+
+impl<T> TcpConnect for WithTimeout<T>
+where
+    T: TcpConnect,
+{
+    type Error = WithTimeoutError<T::Error>;
+
+    type Socket<'a>
+        = WithTimeout<T::Socket<'a>>
+    where
+        Self: 'a;
+
+    async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
+        with_timeout(self.1, self.0.connect(remote))
+            .await
+            .map(|s| WithTimeout::new(self.1, s))
+    }
+}
+
+impl<T> Readable for WithTimeout<T>
+where
+    T: Readable,
+{
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        with_timeout(self.1, self.0.readable()).await
     }
 }
 
