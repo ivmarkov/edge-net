@@ -423,6 +423,13 @@ where
 ///
 /// The socket stream will be closed only in case of error, or until the client explicitly requests that
 /// either with a hard socket close, or with a `Connection: Close` header.
+///
+/// Parameters:
+/// - `io`: A socket stream
+/// - `buf`: A work-area buffer used by the implementation
+/// - `request_timeout_ms`: An optional timeout for a complete request-response processing, in milliseconds.
+///  If not provided, a default timeout of 30 minutes is used.
+/// - `handler`: An implementation of `Handler` to handle incoming requests
 pub async fn handle_connection<const N: usize, T, H>(
     io: T,
     buf: &mut [u8],
@@ -447,6 +454,14 @@ pub async fn handle_connection<const N: usize, T, H>(
 ///
 /// The socket stream will be closed only in case of error, or until the client explicitly requests that
 /// either with a hard socket close, or with a `Connection: Close` header.
+///
+/// Parameters:
+/// - `io`: A socket stream
+/// - `buf`: A work-area buffer used by the implementation
+/// - `request_timeout_ms`: An optional timeout for a complete request-response processing, in milliseconds.
+///   If not provided, a default timeout of 30 minutes is used.
+/// - `task_id`: An identifier for the task, used for logging purposes
+/// - `handler`: An implementation of `TaskHandler` to handle incoming requests
 pub async fn handle_task_connection<const N: usize, T, H>(
     mut io: T,
     buf: &mut [u8],
@@ -550,6 +565,16 @@ where
 
 /// A convenience function to handle a single HTTP request over a socket stream,
 /// using the specified handler.
+///
+/// Note that this function does not set any timeouts on the request-response processing
+/// or on the IO operations. It is up that the caller to use the `with_timeout` function
+/// and the `WithTimeout` struct from the `edge-nal` crate to wrap the future returned
+/// by this function, or the socket stream, or both.
+///
+/// Parameters:
+/// - `buf`: A work-area buffer used by the implementation
+/// - `io`: A socket stream
+/// - `handler`: An implementation of `Handler` to handle incoming requests
 pub async fn handle_request<'b, const N: usize, H, T>(
     buf: &'b mut [u8],
     io: T,
@@ -564,6 +589,17 @@ where
 
 /// A convenience function to handle a single HTTP request over a socket stream,
 /// using the specified task handler.
+///
+/// Note that this function does not set any timeouts on the request-response processing
+/// or on the IO operations. It is up that the caller to use the `with_timeout` function
+/// and the `WithTimeout` struct from the `edge-nal` crate to wrap the future returned
+/// by this function, or the socket stream, or both.
+///
+/// Parameters:
+/// - `buf`: A work-area buffer used by the implementation
+/// - `io`: A socket stream
+/// - `task_id`: An identifier for the task, used for logging purposes
+/// - `handler`: An implementation of `TaskHandler` to handle incoming requests
 pub async fn handle_task_request<'b, const N: usize, H, T>(
     buf: &'b mut [u8],
     io: T,
@@ -614,6 +650,14 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
     }
 
     /// Run the server with the specified acceptor and handler
+    ///
+    /// Parameters:
+    /// - `acceptor`: An implementation of `edge_nal::TcpAccept` to accept incoming connections
+    /// - `handler`: An implementation of `Handler` to handle incoming requests
+    /// - `request_timeout_ms`: An optional timeout for a complete request-response processing, in milliseconds.
+    ///   If not provided, a default timeout of 30 minutes is used.
+    /// - `io_timeout_ms`: An optional timeout for each IO operation, in milliseconds.
+    ///   If not provided, a default timeout of 50 seconds is used.
     #[inline(never)]
     #[cold]
     pub async fn run<A, H>(
@@ -684,6 +728,14 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
     }
 
     /// Run the server with the specified acceptor and task handler
+    ///
+    /// Parameters:
+    /// - `acceptor`: An implementation of `edge_nal::TcpAccept` to accept incoming connections
+    /// - `handler`: An implementation of `TaskHandler` to handle incoming requests
+    /// - `request_timeout_ms`: An optional timeout for a complete request-response processing, in milliseconds.
+    ///   If not provided, a default timeout of 30 minutes is used.
+    /// - `io_timeout_ms`: An optional timeout for each IO operation, in milliseconds.
+    ///   If not provided, a default timeout of 50 seconds is used.
     #[inline(never)]
     #[cold]
     pub async fn run_with_task_id<A, H>(
