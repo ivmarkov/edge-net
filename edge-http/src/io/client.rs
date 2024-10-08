@@ -4,7 +4,7 @@ use core::str;
 
 use embedded_io_async::{ErrorType, Read, Write};
 
-use edge_nal::TcpConnect;
+use edge_nal::{Close, TcpConnect, TcpShutdown};
 
 use crate::{
     ws::{upgrade_request_headers, MAX_BASE64_KEY_LEN, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN},
@@ -38,6 +38,11 @@ where
     T: TcpConnect,
 {
     /// Create a new client connection.
+    ///
+    /// Note that the connection does not have any built-in read/write timeouts:
+    /// - To add a timeout on each IO operation, wrap the `socket` type with the `edge_nal::WithTimeout` wrapper.
+    /// - To add a global request-response timeout, wrap your complete request-response processing
+    ///   logic with the `edge_nal::with_timeout` function.
     ///
     /// Parameters:
     /// - `buf`: A buffer to use for reading and writing data.
@@ -234,11 +239,17 @@ where
         let mut state = self.unbind();
 
         match result {
-            Ok(true) | Err(_) => state.io = None,
-            _ => (),
-        };
+            Ok(true) | Err(_) => {
+                let mut io = state.io.take().unwrap();
+                *self = Self::Unbound(state);
 
-        *self = Self::Unbound(state);
+                io.close(Close::Both).await.map_err(Error::Io)?;
+                let _ = io.abort().await;
+            }
+            _ => {
+                *self = Self::Unbound(state);
+            }
+        };
 
         result?;
 

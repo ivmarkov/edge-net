@@ -95,6 +95,21 @@ impl<T> WithTimeout<T> {
     pub const fn new(timeout_ms: u32, io: T) -> Self {
         Self(io, timeout_ms)
     }
+
+    /// Get a reference to the inner IO type.
+    pub fn io(&self) -> &T {
+        &self.0
+    }
+
+    /// Get a mutable reference to the inner IO type.
+    pub fn io_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+
+    /// Get the IO type by destructuring the `WithTimeout` instance.
+    pub fn into_io(self) -> T {
+        self.0
+    }
 }
 
 impl<T> ErrorType for WithTimeout<T>

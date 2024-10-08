@@ -1,4 +1,5 @@
 use edge_http::io::server::{Connection, DefaultServer, Handler};
+use edge_http::io::Error;
 use edge_http::Method;
 use edge_nal::TcpBind;
 
@@ -25,7 +26,7 @@ pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
         .bind(addr.parse().unwrap())
         .await?;
 
-    server.run(acceptor, HttpHandler, None).await?;
+    server.run(acceptor, HttpHandler, None, None).await?;
 
     Ok(())
 }
@@ -35,9 +36,8 @@ struct HttpHandler;
 impl<'b, T, const N: usize> Handler<'b, T, N> for HttpHandler
 where
     T: Read + Write,
-    T::Error: Send + Sync + std::error::Error + 'static,
 {
-    type Error = anyhow::Error;
+    type Error = Error<T::Error>;
 
     async fn handle(&self, conn: &mut Connection<'b, T, N>) -> Result<(), Self::Error> {
         let headers = conn.headers()?;
