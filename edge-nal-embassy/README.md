@@ -10,11 +10,13 @@ A bare-metal implementation of `edge-nal` based on the [embassy-net](https://cra
 
 ### TCP
 
-All traits.
+All traits except `Readable` which - while implemented - panics if called.
 
 ### UDP
 
-* All traits except `UdpConnect` and `Multicast`.
+* All traits except `UdpConnect`. 
+* `MulticastV6` - while implemented - panics if `join_v6` / `leave_v6` are called.
+* `Readable` - while implemented - panics if called.
 
 ### Raw sockets
 
