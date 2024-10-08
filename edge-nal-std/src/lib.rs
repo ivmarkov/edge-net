@@ -6,7 +6,7 @@ use core::ops::Deref;
 use core::pin::pin;
 
 use std::io;
-use std::net::{self, TcpStream, ToSocketAddrs, UdpSocket as StdUdpSocket};
+use std::net::{self, Shutdown, TcpStream, ToSocketAddrs, UdpSocket as StdUdpSocket};
 
 #[cfg(not(feature = "async-io-mini"))]
 use async_io::Async;
@@ -18,8 +18,8 @@ use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 use embedded_io_async::{ErrorType, Read, Write};
 
 use edge_nal::{
-    AddrType, Dns, MulticastV4, MulticastV6, Readable, TcpAccept, TcpBind, TcpConnect, TcpSplit,
-    UdpBind, UdpConnect, UdpReceive, UdpSend, UdpSplit,
+    AddrType, Dns, MulticastV4, MulticastV6, Readable, TcpAccept, TcpBind, TcpConnect, TcpShutdown,
+    TcpSplit, UdpBind, UdpConnect, UdpReceive, UdpSend, UdpSplit,
 };
 
 #[cfg(all(unix, not(target_os = "espidf")))]
@@ -101,7 +101,7 @@ impl TcpAccept for TcpAcceptor {
             match self.0.as_ref().accept() {
                 Ok((socket, _)) => break Ok((socket.peer_addr()?, TcpSocket(Async::new(socket)?))),
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                    async_io::Timer::after(core::time::Duration::from_millis(5)).await;
+                    async_io::Timer::after(core::time::Duration::from_millis(20)).await;
                 }
                 Err(err) => break Err(err),
             }
@@ -196,6 +196,24 @@ impl TcpSplit for TcpSocket {
         let socket = &*self;
 
         (socket, socket)
+    }
+}
+
+impl TcpShutdown for TcpSocket {
+    async fn close(&mut self, what: edge_nal::Close) -> Result<(), Self::Error> {
+        match what {
+            edge_nal::Close::Read => self.0.as_ref().shutdown(Shutdown::Read)?,
+            edge_nal::Close::Write => self.0.as_ref().shutdown(Shutdown::Write)?,
+            edge_nal::Close::Both => self.0.as_ref().shutdown(Shutdown::Both)?,
+        }
+
+        Ok(())
+    }
+
+    async fn abort(&mut self) -> Result<(), Self::Error> {
+        // No-op, STD will abort the socket on drop anyway
+
+        Ok(())
     }
 }
 

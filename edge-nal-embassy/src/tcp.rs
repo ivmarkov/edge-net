@@ -1,7 +1,10 @@
 use core::net::SocketAddr;
+use core::pin::pin;
 use core::ptr::NonNull;
 
-use edge_nal::{Readable, TcpBind, TcpConnect, TcpSplit};
+use edge_nal::{Close, Readable, TcpBind, TcpConnect, TcpShutdown, TcpSplit};
+
+use embassy_futures::join::join;
 
 use embassy_net::driver::Driver;
 use embassy_net::tcp::{AcceptError, ConnectError, Error, TcpReader, TcpWriter};
@@ -126,6 +129,46 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpSocket<'d, N
             socket_buffers,
         })
     }
+
+    async fn close(&mut self, what: Close) -> Result<(), TcpError> {
+        async fn discard_all_data(rx: &mut TcpReader<'_>) -> Result<(), TcpError> {
+            let mut buf = [0; 32];
+
+            while rx.read(&mut buf).await? > 0 {}
+
+            Ok(())
+        }
+
+        if matches!(what, Close::Both | Close::Write) {
+            self.socket.close();
+        }
+
+        let (mut rx, mut tx) = self.socket.split();
+
+        match what {
+            Close::Read => discard_all_data(&mut rx).await?,
+            Close::Write => tx.flush().await?,
+            Close::Both => {
+                let mut flush = pin!(tx.flush());
+                let mut read = pin!(discard_all_data(&mut rx));
+
+                match join(&mut flush, &mut read).await {
+                    (Err(e), _) => Err(e)?,
+                    (_, Err(e)) => Err(e)?,
+                    _ => (),
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn abort(&mut self) -> Result<(), TcpError> {
+        self.socket.abort();
+        self.socket.flush().await?;
+
+        Ok(())
+    }
 }
 
 impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Drop
@@ -172,6 +215,18 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Readable
 {
     async fn readable(&mut self) -> Result<(), Self::Error> {
         panic!("Not implemented yet")
+    }
+}
+
+impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpShutdown
+    for TcpSocket<'d, N, TX_SZ, RX_SZ>
+{
+    async fn close(&mut self, what: Close) -> Result<(), Self::Error> {
+        TcpSocket::close(self, what).await
+    }
+
+    async fn abort(&mut self) -> Result<(), Self::Error> {
+        TcpSocket::abort(self).await
     }
 }
 

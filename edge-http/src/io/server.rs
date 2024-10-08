@@ -1,11 +1,9 @@
 use core::fmt::{self, Debug};
 use core::mem::{self, MaybeUninit};
-use core::pin::pin;
 
-use embassy_futures::select::Either;
+use edge_nal::{with_timeout, Close, TcpShutdown, WithTimeout, WithTimeoutError};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
-use embassy_time::{Duration, Timer};
 
 use embedded_io_async::{ErrorType, Read, Write};
 
@@ -22,7 +20,8 @@ pub use embedded_svc_compat::*;
 
 pub const DEFAULT_HANDLER_TASKS_COUNT: usize = 4;
 pub const DEFAULT_BUF_SIZE: usize = 2048;
-pub const DEFAULT_TIMEOUT_MS: u32 = 5000;
+pub const DEFAULT_REQUEST_TIMEOUT_MS: u32 = 30 * 60 * 1000; // 30 minutes
+pub const DEFAULT_IO_TIMEOUT_MS: u32 = 50 * 1000; // 50 seconds
 
 const COMPLETION_BUF_SIZE: usize = 64;
 
@@ -41,30 +40,21 @@ where
 {
     /// Create a new connection state machine for an incoming request
     ///
+    /// Note that the connection does not have any built-in read/write timeouts:
+    /// - To add a timeout on each IO operation, wrap the `io` type with the `edge_nal::WithTimeout` wrapper.
+    /// - To add a global request-response timeout, wrap your complete request-response processing
+    ///   logic with the `edge_nal::with_timeout` function.
+    ///
     /// Parameters:
     /// - `buf`: A buffer to store the request headers
     /// - `io`: A socket stream
-    /// - `timeout_ms`: An optional timeout in milliseconds to wait for a new incoming request
     pub async fn new(
         buf: &'b mut [u8],
         mut io: T,
-        timeout_ms: Option<u32>,
     ) -> Result<Connection<'b, T, N>, Error<T::Error>> {
         let mut request = RequestHeaders::new();
 
-        let (buf, read_len) = {
-            let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
-
-            let receive = pin!(request.receive(buf, &mut io, true));
-            let timer = Timer::after(Duration::from_millis(timeout_ms as _));
-
-            let result = embassy_futures::select::select(receive, timer).await;
-
-            match result {
-                Either::First(result) => result,
-                Either::Second(_) => Err(Error::Timeout),
-            }?
-        };
+        let (buf, read_len) = request.receive(buf, &mut io, true).await?;
 
         let (connection_type, body_type) = request.resolve::<T::Error>()?;
 
@@ -433,16 +423,30 @@ where
 ///
 /// The socket stream will be closed only in case of error, or until the client explicitly requests that
 /// either with a hard socket close, or with a `Connection: Close` header.
+///
+/// Parameters:
+/// - `io`: A socket stream
+/// - `buf`: A work-area buffer used by the implementation
+/// - `request_timeout_ms`: An optional timeout for a complete request-response processing, in milliseconds.
+///   If not provided, a default timeout of 30 minutes is used.
+/// - `handler`: An implementation of `Handler` to handle incoming requests
 pub async fn handle_connection<const N: usize, T, H>(
     io: T,
     buf: &mut [u8],
-    timeout_ms: Option<u32>,
+    request_timeout_ms: Option<u32>,
     handler: H,
 ) where
     H: for<'b> Handler<'b, &'b mut T, N>,
-    T: Read + Write,
+    T: Read + Write + TcpShutdown,
 {
-    handle_task_connection(io, buf, timeout_ms, 0, TaskHandlerAdaptor::new(handler)).await
+    handle_task_connection(
+        io,
+        buf,
+        request_timeout_ms,
+        0,
+        TaskHandlerAdaptor::new(handler),
+    )
+    .await
 }
 
 /// A convenience function to handle multiple HTTP requests over a single socket stream,
@@ -450,44 +454,63 @@ pub async fn handle_connection<const N: usize, T, H>(
 ///
 /// The socket stream will be closed only in case of error, or until the client explicitly requests that
 /// either with a hard socket close, or with a `Connection: Close` header.
+///
+/// Parameters:
+/// - `io`: A socket stream
+/// - `buf`: A work-area buffer used by the implementation
+/// - `request_timeout_ms`: An optional timeout for a complete request-response processing, in milliseconds.
+///   If not provided, a default timeout of 30 minutes is used.
+/// - `task_id`: An identifier for the task, used for logging purposes
+/// - `handler`: An implementation of `TaskHandler` to handle incoming requests
 pub async fn handle_task_connection<const N: usize, T, H>(
     mut io: T,
     buf: &mut [u8],
-    timeout_ms: Option<u32>,
+    request_timeout_ms: Option<u32>,
     task_id: usize,
     handler: H,
 ) where
     H: for<'b> TaskHandler<'b, &'b mut T, N>,
-    T: Read + Write,
+    T: Read + Write + TcpShutdown,
 {
-    loop {
+    let close = loop {
         debug!("Handler task {task_id}: Waiting for new request");
 
-        let result =
-            handle_task_request::<N, _, _>(buf, &mut io, task_id, timeout_ms, &handler).await;
+        let result = with_timeout(
+            request_timeout_ms.unwrap_or(DEFAULT_REQUEST_TIMEOUT_MS),
+            handle_task_request::<N, _, _>(buf, &mut io, task_id, &handler),
+        )
+        .await;
 
         match result {
-            Err(HandleRequestError::Connection(Error::Timeout)) => {
-                info!("Handler task {task_id}: Connection closed due to timeout");
-                break;
+            Err(WithTimeoutError::Timeout) => {
+                info!("Handler task {task_id}: Connection closed due to request timeout");
+                break false;
             }
-            Err(HandleRequestError::Connection(Error::ConnectionClosed)) => {
+            Err(WithTimeoutError::IO(HandleRequestError::Connection(Error::ConnectionClosed))) => {
                 debug!("Handler task {task_id}: Connection closed");
-                break;
+                break false;
             }
             Err(e) => {
                 warn!("Handler task {task_id}: Error when handling request: {e:?}");
-                break;
+                break true;
             }
             Ok(needs_close) => {
                 if needs_close {
                     debug!("Handler task {task_id}: Request complete; closing connection");
-                    break;
+                    break true;
                 } else {
                     debug!("Handler task {task_id}: Request complete");
                 }
             }
         }
+    };
+
+    if close {
+        if let Err(e) = io.close(Close::Both).await {
+            warn!("Handler task {task_id}: Error when closing the socket: {e:?}");
+        }
+    } else {
+        let _ = io.abort().await;
     }
 }
 
@@ -519,6 +542,19 @@ where
     }
 }
 
+impl<C, E> embedded_io_async::Error for HandleRequestError<C, E>
+where
+    C: Debug + embedded_io_async::Error,
+    E: Debug,
+{
+    fn kind(&self) -> embedded_io_async::ErrorKind {
+        match self {
+            Self::Connection(Error::Io(e)) => e.kind(),
+            _ => embedded_io_async::ErrorKind::Other,
+        }
+    }
+}
+
 #[cfg(feature = "std")]
 impl<C, E> std::error::Error for HandleRequestError<C, E>
 where
@@ -529,33 +565,52 @@ where
 
 /// A convenience function to handle a single HTTP request over a socket stream,
 /// using the specified handler.
+///
+/// Note that this function does not set any timeouts on the request-response processing
+/// or on the IO operations. It is up that the caller to use the `with_timeout` function
+/// and the `WithTimeout` struct from the `edge-nal` crate to wrap the future returned
+/// by this function, or the socket stream, or both.
+///
+/// Parameters:
+/// - `buf`: A work-area buffer used by the implementation
+/// - `io`: A socket stream
+/// - `handler`: An implementation of `Handler` to handle incoming requests
 pub async fn handle_request<'b, const N: usize, H, T>(
     buf: &'b mut [u8],
     io: T,
-    timeout_ms: Option<u32>,
     handler: H,
 ) -> Result<bool, HandleRequestError<T::Error, H::Error>>
 where
     H: Handler<'b, T, N>,
     T: Read + Write,
 {
-    handle_task_request(buf, io, 0, timeout_ms, TaskHandlerAdaptor::new(handler)).await
+    handle_task_request(buf, io, 0, TaskHandlerAdaptor::new(handler)).await
 }
 
 /// A convenience function to handle a single HTTP request over a socket stream,
 /// using the specified task handler.
+///
+/// Note that this function does not set any timeouts on the request-response processing
+/// or on the IO operations. It is up that the caller to use the `with_timeout` function
+/// and the `WithTimeout` struct from the `edge-nal` crate to wrap the future returned
+/// by this function, or the socket stream, or both.
+///
+/// Parameters:
+/// - `buf`: A work-area buffer used by the implementation
+/// - `io`: A socket stream
+/// - `task_id`: An identifier for the task, used for logging purposes
+/// - `handler`: An implementation of `TaskHandler` to handle incoming requests
 pub async fn handle_task_request<'b, const N: usize, H, T>(
     buf: &'b mut [u8],
     io: T,
     task_id: usize,
-    timeout_ms: Option<u32>,
     handler: H,
 ) -> Result<bool, HandleRequestError<T::Error, H::Error>>
 where
     H: TaskHandler<'b, T, N>,
     T: Read + Write,
 {
-    let mut connection = Connection::<_, N>::new(buf, io, timeout_ms).await?;
+    let mut connection = Connection::<_, N>::new(buf, io).await?;
 
     let result = handler.handle(task_id, &mut connection).await;
 
@@ -595,17 +650,26 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
     }
 
     /// Run the server with the specified acceptor and handler
+    ///
+    /// Parameters:
+    /// - `acceptor`: An implementation of `edge_nal::TcpAccept` to accept incoming connections
+    /// - `handler`: An implementation of `Handler` to handle incoming requests
+    /// - `request_timeout_ms`: An optional timeout for a complete request-response processing, in milliseconds.
+    ///   If not provided, a default timeout of 30 minutes is used.
+    /// - `io_timeout_ms`: An optional timeout for each IO operation, in milliseconds.
+    ///   If not provided, a default timeout of 50 seconds is used.
     #[inline(never)]
     #[cold]
     pub async fn run<A, H>(
         &mut self,
         acceptor: A,
         handler: H,
-        timeout_ms: Option<u32>,
+        request_timeout_ms: Option<u32>,
+        io_timeout_ms: Option<u32>,
     ) -> Result<(), Error<A::Error>>
     where
         A: edge_nal::TcpAccept,
-        H: for<'b, 't> Handler<'b, &'b mut A::Socket<'t>, N>,
+        H: for<'b, 't> Handler<'b, &'b mut WithTimeout<A::Socket<'t>>, N>,
     {
         let handler = TaskHandlerAdaptor::new(handler);
 
@@ -637,12 +701,15 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
                             acceptor.accept().await.map_err(Error::Io)?.1
                         };
 
+                        let io =
+                            WithTimeout::new(io_timeout_ms.unwrap_or(DEFAULT_IO_TIMEOUT_MS), io);
+
                         debug!("Handler task {task_id}: Got connection request");
 
                         handle_task_connection::<N, _, _>(
                             io,
                             unsafe { buf.as_mut() }.unwrap(),
-                            timeout_ms,
+                            request_timeout_ms,
                             task_id,
                             handler,
                         )
@@ -661,17 +728,26 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
     }
 
     /// Run the server with the specified acceptor and task handler
+    ///
+    /// Parameters:
+    /// - `acceptor`: An implementation of `edge_nal::TcpAccept` to accept incoming connections
+    /// - `handler`: An implementation of `TaskHandler` to handle incoming requests
+    /// - `request_timeout_ms`: An optional timeout for a complete request-response processing, in milliseconds.
+    ///   If not provided, a default timeout of 30 minutes is used.
+    /// - `io_timeout_ms`: An optional timeout for each IO operation, in milliseconds.
+    ///   If not provided, a default timeout of 50 seconds is used.
     #[inline(never)]
     #[cold]
     pub async fn run_with_task_id<A, H>(
         &mut self,
         acceptor: A,
         handler: H,
-        timeout_ms: Option<u32>,
+        request_timeout_ms: Option<u32>,
+        io_timeout_ms: Option<u32>,
     ) -> Result<(), Error<A::Error>>
     where
         A: edge_nal::TcpAccept,
-        H: for<'b, 't> TaskHandler<'b, &'b mut A::Socket<'t>, N>,
+        H: for<'b, 't> TaskHandler<'b, &'b mut WithTimeout<A::Socket<'t>>, N>,
     {
         let mutex = Mutex::<NoopRawMutex, _>::new(());
         let mut tasks = heapless::Vec::<_, P>::new();
@@ -699,12 +775,15 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
                             acceptor.accept().await.map_err(Error::Io)?.1
                         };
 
+                        let io =
+                            WithTimeout::new(io_timeout_ms.unwrap_or(DEFAULT_IO_TIMEOUT_MS), io);
+
                         debug!("Handler task {task_id}: Got connection request");
 
                         handle_task_connection::<N, _, _>(
                             io,
                             unsafe { buf.as_mut() }.unwrap(),
-                            timeout_ms,
+                            request_timeout_ms,
                             task_id,
                             handler,
                         )

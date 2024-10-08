@@ -12,6 +12,7 @@ Hosts a bunch of networking (UDP, TCP and raw ethernet) traits.
 
 * Factory traits for the creation of TCP server sockets - `TcpBind` and `TcpAccept`. `embedded-nal-async` only has `TcpConnect`
 * Splittable sockets with `TcpSplit` (can be optionally implemented by `TcpConnect` and `TcpAccept`)
+* Socket shutdown with `TcpShutdown`
 
 ### UDP
 
@@ -20,7 +21,7 @@ Hosts a bunch of networking (UDP, TCP and raw ethernet) traits.
 * Returning the local address of a UDP socket bind / connect operation is not supported, as not all platforms currently have this capability (i.e. the networking stack of Embassy)
 * "Unbound" UDP sockets are currently not supported, as not all platforms have these capabilities (i.e. the networking stack of Embassy). Also, I've yet to find a good use case for these.
 * Splittable sockets with `UdpSplit`
-* `Multicast` trait for joining / leaving IPv4 and IPv6 multicast groups (can be optionally implemented by `UdpConnect` and `UdpBind`)
+* `MulticastV4` and `MulticastV6` traits for joining / leaving IPv4 and IPv6 multicast groups (can be optionally implemented by `UdpConnect` and `UdpBind`)
 * `Readable` trait for waiting until a socket becomes readable
 
 ## Justification
@@ -58,8 +59,8 @@ Namely:
   * Udp socket factory similar in spirit to STD's `std::net::UdpSocket::bind` method
 * [UdpConnect](src/stack/udp.rs)
   * Udp socket factory similar in spirit to STD's `std::net::UdpSocket::connect` method
-* [Multicast](src/multicast.rs)
-  * Extra trait for UDP sockets allowing subscription to multicast groups
+* [Multicastv4 and MulticastV6](src/multicast.rs)
+  * Extra traits for UDP sockets allowing subscription to multicast groups
 * [Readable](src/readable.rs)
   * Extra trait for UDP, TCP and raw sockets allowing one to wait until the socket becomes readable
 

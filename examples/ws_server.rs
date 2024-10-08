@@ -1,4 +1,5 @@
 use edge_http::io::server::{Connection, DefaultServer, Handler};
+use edge_http::io::Error;
 use edge_http::ws::MAX_BASE64_KEY_RESPONSE_LEN;
 use edge_http::Method;
 use edge_nal::TcpBind;
@@ -27,9 +28,23 @@ pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
         .bind(addr.parse().unwrap())
         .await?;
 
-    server.run(acceptor, WsHandler, None).await?;
+    server
+        .run(acceptor, WsHandler, None, Some(30 * 60 * 1000))
+        .await?;
 
     Ok(())
+}
+
+#[derive(Debug)]
+enum WsHandlerError<C, W> {
+    ConnectionError(C),
+    WsError(W),
+}
+
+impl<C, W> From<C> for WsHandlerError<C, W> {
+    fn from(e: C) -> Self {
+        Self::ConnectionError(e)
+    }
 }
 
 struct WsHandler;
@@ -37,9 +52,8 @@ struct WsHandler;
 impl<'b, T, const N: usize> Handler<'b, T, N> for WsHandler
 where
     T: Read + Write,
-    T::Error: Send + Sync + std::error::Error + 'static,
 {
-    type Error = anyhow::Error;
+    type Error = WsHandlerError<Error<T::Error>, edge_ws::Error<T::Error>>;
 
     async fn handle(&self, conn: &mut Connection<'b, T, N>) -> Result<(), Self::Error> {
         let headers = conn.headers()?;
@@ -71,8 +85,13 @@ where
             let mut buf = [0_u8; 8192];
 
             loop {
-                let mut header = FrameHeader::recv(&mut socket).await?;
-                let payload = header.recv_payload(&mut socket, &mut buf).await?;
+                let mut header = FrameHeader::recv(&mut socket)
+                    .await
+                    .map_err(WsHandlerError::WsError)?;
+                let payload = header
+                    .recv_payload(&mut socket, &mut buf)
+                    .await
+                    .map_err(WsHandlerError::WsError)?;
 
                 match header.frame_type {
                     FrameType::Text(_) => {
@@ -103,8 +122,14 @@ where
 
                 info!("Echoing back as {header}");
 
-                header.send(&mut socket).await?;
-                header.send_payload(&mut socket, payload).await?;
+                header
+                    .send(&mut socket)
+                    .await
+                    .map_err(WsHandlerError::WsError)?;
+                header
+                    .send_payload(&mut socket, payload)
+                    .await
+                    .map_err(WsHandlerError::WsError)?;
             }
         }
 
