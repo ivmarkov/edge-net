@@ -198,8 +198,7 @@ where
         let len = q(send_buf.as_mut())?;
 
         if len > 0 {
-            self.broadcast_once(send, &send_buf.as_mut()[..len], true, true)
-                .await?;
+            self.broadcast_once(send, &send_buf.as_mut()[..len]).await?;
         }
 
         Ok(())
@@ -235,7 +234,7 @@ where
                         self.delay().await;
                     }
 
-                    self.broadcast_once(send, data, true, true).await?;
+                    self.broadcast_once(send, data).await?;
                 }
             }
 
@@ -304,28 +303,16 @@ where
 
                     info!("Replying to mDNS query from {remote}");
 
-                    self.broadcast_once(
-                        send,
-                        data,
-                        matches!(remote, SocketAddr::V4(_)),
-                        matches!(remote, SocketAddr::V6(_)),
-                    )
-                    .await?;
+                    self.broadcast_once(send, data).await?;
                 }
             }
         }
     }
 
-    async fn broadcast_once(
-        &self,
-        send: &mut S,
-        data: &[u8],
-        ipv4: bool,
-        ipv6: bool,
-    ) -> Result<(), MdnsIoError<S::Error>> {
+    async fn broadcast_once(&self, send: &mut S, data: &[u8]) -> Result<(), MdnsIoError<S::Error>> {
         for remote_addr in
             core::iter::once(SocketAddr::V4(SocketAddrV4::new(IP_BROADCAST_ADDR, PORT)))
-                .filter(|_| ipv4 && self.ipv4_interface.is_some())
+                .filter(|_| self.ipv4_interface.is_some())
                 .chain(
                     self.ipv6_interface
                         .map(|interface| {
@@ -336,8 +323,7 @@ where
                                 interface,
                             ))
                         })
-                        .into_iter()
-                        .filter(|_| ipv6),
+                        .into_iter(),
                 )
         {
             if !data.is_empty() {
