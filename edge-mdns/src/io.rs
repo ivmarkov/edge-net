@@ -297,13 +297,26 @@ where
                 };
 
                 if let MdnsResponse::Reply { data, delay } = response {
-                    if delay {
-                        self.delay().await;
+                    if remote.port() != PORT {
+                        // Support one-shot legacy queries by replying privately
+                        // to the remote address, if the query was not sent from the mDNS port (as per the spec)
+
+                        info!("Replying privately to a one-shot mDNS query from {remote}");
+
+                        if let Err(err) = send.send(remote, data).await {
+                            warn!("Failed to reply privately to {remote}: {err:?}");
+                        }
+                    } else {
+                        // Otherwise, re-broadcast the response
+
+                        if delay {
+                            self.delay().await;
+                        }
+
+                        info!("Re-broadcasting due to mDNS query from {remote}");
+
+                        self.broadcast_once(send, data).await?;
                     }
-
-                    info!("Replying to mDNS query from {remote}");
-
-                    self.broadcast_once(send, data).await?;
                 }
             }
         }
