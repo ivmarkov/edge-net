@@ -1211,11 +1211,10 @@ mod raw {
             written = true;
         }
 
+        if written {
+            output.write_all(b" ").await.map_err(Error::Io)?;
+        }
         if let Some(extra) = extra {
-            if written {
-                output.write_all(b" ").await.map_err(Error::Io)?;
-            }
-
             output
                 .write_all(extra.as_bytes())
                 .await
