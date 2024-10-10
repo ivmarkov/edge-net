@@ -724,6 +724,7 @@ impl<const N: usize> RequestHeaders<'_, N> {
 }
 
 impl<'b, const N: usize> Default for RequestHeaders<'b, N> {
+    #[inline(always)]
     fn default() -> Self {
         Self {
             http11: true,
@@ -778,6 +779,7 @@ impl<const N: usize> ResponseHeaders<'_, N> {
 }
 
 impl<'b, const N: usize> Default for ResponseHeaders<'b, N> {
+    #[inline(always)]
     fn default() -> Self {
         Self {
             http11: true,
