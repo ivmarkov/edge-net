@@ -42,10 +42,10 @@ where
     async fn handle(&self, conn: &mut Connection<'b, T, N>) -> Result<(), Self::Error> {
         let headers = conn.headers()?;
 
-        if !matches!(headers.method, Some(Method::Get)) {
+        if headers.method != Method::Get {
             conn.initiate_response(405, Some("Method Not Allowed"), &[])
                 .await?;
-        } else if !matches!(headers.path, Some("/")) {
+        } else if headers.path != "/" {
             conn.initiate_response(404, Some("Not Found"), &[]).await?;
         } else {
             conn.initiate_response(200, Some("OK"), &[("Content-Type", "text/plain")])

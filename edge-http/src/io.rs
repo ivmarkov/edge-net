@@ -128,18 +128,15 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
                 unreachable!("Should not happen. HTTP header parsing is indeterminate.")
             }
 
-            self.http11 = if let Some(version) = parser.version {
-                if version > 1 {
-                    Err(Error::InvalidHeaders)?;
-                }
-
-                Some(version == 1)
-            } else {
-                None
+            self.http11 = match parser.version {
+                Some(0) => false,
+                Some(1) => true,
+                _ => Err(Error::InvalidHeaders)?,
             };
 
-            self.method = parser.method.and_then(Method::new);
-            self.path = parser.path;
+            let method_str = parser.method.ok_or(Error::InvalidHeaders)?;
+            self.method = Method::new(method_str).ok_or(Error::InvalidHeaders)?;
+            self.path = parser.path.ok_or(Error::InvalidHeaders)?;
 
             trace!("Received:\n{}", self);
 
@@ -151,8 +148,7 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
 
     /// Resolve the connection type and body type from the headers
     pub fn resolve<E>(&self) -> Result<(ConnectionType, BodyType), Error<E>> {
-        self.headers
-            .resolve::<E>(None, true, self.http11.unwrap_or(false))
+        self.headers.resolve::<E>(None, true, self.http11)
     }
 
     /// Send the headers to the output stream, returning the connection type and body type
@@ -164,12 +160,10 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
     where
         W: Write,
     {
-        let http11 = self.http11.unwrap_or(false);
-
-        send_request(http11, self.method, self.path, &mut output).await?;
+        send_request(self.http11, self.method, self.path, &mut output).await?;
 
         self.headers
-            .send(None, true, http11, chunked_if_unspecified, output)
+            .send(None, true, self.http11, chunked_if_unspecified, output)
             .await
     }
 }
@@ -199,17 +193,13 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
                 unreachable!("Should not happen. HTTP header parsing is indeterminate.")
             }
 
-            self.http11 = if let Some(version) = parser.version {
-                if version > 1 {
-                    Err(Error::InvalidHeaders)?;
-                }
-
-                Some(version == 1)
-            } else {
-                None
+            self.http11 = match parser.version {
+                Some(0) => false,
+                Some(1) => true,
+                _ => Err(Error::InvalidHeaders)?,
             };
 
-            self.code = parser.code;
+            self.code = parser.code.ok_or(Error::InvalidHeaders)?;
             self.reason = parser.reason;
 
             trace!("Received:\n{}", self);
@@ -225,11 +215,8 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
         &self,
         request_connection_type: ConnectionType,
     ) -> Result<(ConnectionType, BodyType), Error<E>> {
-        self.headers.resolve::<E>(
-            Some(request_connection_type),
-            false,
-            self.http11.unwrap_or(false),
-        )
+        self.headers
+            .resolve::<E>(Some(request_connection_type), false, self.http11)
     }
 
     /// Send the headers to the output stream, returning the connection type and body type
@@ -242,15 +229,13 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
     where
         W: Write,
     {
-        let http11 = self.http11.unwrap_or(false);
-
-        send_status(http11, self.code, self.reason, &mut output).await?;
+        send_status(self.http11, self.code, self.reason, &mut output).await?;
 
         self.headers
             .send(
                 Some(request_connection_type),
                 false,
-                http11,
+                self.http11,
                 chunked_if_unspecified,
                 output,
             )
@@ -260,42 +245,56 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
 
 pub(crate) async fn send_request<W>(
     http11: bool,
-    method: Option<Method>,
-    path: Option<&str>,
-    output: W,
+    method: Method,
+    path: &str,
+    mut output: W,
 ) -> Result<(), Error<W::Error>>
 where
     W: Write,
 {
-    raw::send_status_line(
-        true,
-        http11,
-        method.map(|method| method.as_str()),
-        path,
-        output,
-    )
-    .await
+    // RFC 9112:   request-line   = method SP request-target SP HTTP-version
+
+    output
+        .write_all(method.as_str().as_bytes())
+        .await
+        .map_err(Error::Io)?;
+    output.write_all(b" ").await.map_err(Error::Io)?;
+    output.write_all(path.as_bytes()).await.map_err(Error::Io)?;
+    output.write_all(b" ").await.map_err(Error::Io)?;
+    raw::send_version(&mut output, http11).await?;
+    output.write_all(b"\r\n").await.map_err(Error::Io)?;
+
+    Ok(())
 }
 
 pub(crate) async fn send_status<W>(
     http11: bool,
-    status: Option<u16>,
+    status: u16,
     reason: Option<&str>,
-    output: W,
+    mut output: W,
 ) -> Result<(), Error<W::Error>>
 where
     W: Write,
 {
-    let status_str: Option<heapless::String<5>> = status.map(|status| status.try_into().unwrap());
+    // RFC 9112:   status-line = HTTP-version SP status-code SP [ reason-phrase ]
 
-    raw::send_status_line(
-        false,
-        http11,
-        status_str.as_ref().map(|status| status.as_str()),
-        reason,
-        output,
-    )
-    .await
+    raw::send_version(&mut output, http11).await?;
+    output.write_all(b" ").await.map_err(Error::Io)?;
+    let status_str: heapless::String<5> = status.try_into().unwrap();
+    output
+        .write_all(status_str.as_bytes())
+        .await
+        .map_err(Error::Io)?;
+    output.write_all(b" ").await.map_err(Error::Io)?;
+    if let Some(reason) = reason {
+        output
+            .write_all(reason.as_bytes())
+            .await
+            .map_err(Error::Io)?;
+    }
+    output.write_all(b"\r\n").await.map_err(Error::Io)?;
+
+    Ok(())
 }
 
 pub(crate) async fn send_headers<'a, H, W>(
@@ -1179,61 +1178,6 @@ mod raw {
                 break Ok(offset);
             }
         }
-    }
-
-    pub(crate) async fn send_status_line<W>(
-        request: bool,
-        http11: bool,
-        token: Option<&str>,
-        extra: Option<&str>,
-        mut output: W,
-    ) -> Result<(), Error<W::Error>>
-    where
-        W: Write,
-    {
-        let mut written = false;
-
-        if !request {
-            send_version(&mut output, http11).await?;
-            written = true;
-        }
-
-        if let Some(token) = token {
-            if written {
-                output.write_all(b" ").await.map_err(Error::Io)?;
-            }
-
-            output
-                .write_all(token.as_bytes())
-                .await
-                .map_err(Error::Io)?;
-
-            written = true;
-        }
-
-        if written {
-            output.write_all(b" ").await.map_err(Error::Io)?;
-        }
-        if let Some(extra) = extra {
-            output
-                .write_all(extra.as_bytes())
-                .await
-                .map_err(Error::Io)?;
-
-            written = true;
-        }
-
-        if request {
-            if written {
-                output.write_all(b" ").await.map_err(Error::Io)?;
-            }
-
-            send_version(&mut output, http11).await?;
-        }
-
-        output.write_all(b"\r\n").await.map_err(Error::Io)?;
-
-        Ok(())
     }
 
     pub(crate) async fn send_version<W>(mut output: W, http11: bool) -> Result<(), Error<W::Error>>
