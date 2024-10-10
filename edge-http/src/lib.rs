@@ -704,30 +704,19 @@ impl Display for BodyType {
 }
 
 /// Request headers including the request line (method, path)
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct RequestHeaders<'b, const N: usize> {
-    /// Whether the request is HTTP/1.1, if present. If not present, HTTP/1.0 should be assumed
-    pub http11: Option<bool>,
-    /// The HTTP method, if present
-    pub method: Option<Method>,
-    /// The request path, if present
-    pub path: Option<&'b str>,
+    /// Whether the request is HTTP/1.1
+    pub http11: bool,
+    /// The HTTP method
+    pub method: Method,
+    /// The request path
+    pub path: &'b str,
     /// The headers
     pub headers: Headers<'b, N>,
 }
 
 impl<const N: usize> RequestHeaders<'_, N> {
-    /// Create a new RequestHeaders instance for HTTP/1.1
-    #[inline(always)]
-    pub const fn new() -> Self {
-        Self {
-            http11: Some(true),
-            method: None,
-            path: None,
-            headers: Headers::<N>::new(),
-        }
-    }
-
     /// A utility method to check if the request is a Websocket upgrade request
     pub fn is_ws_upgrade_request(&self) -> bool {
         is_upgrade_request(self.method, self.headers.iter())
@@ -736,13 +725,9 @@ impl<const N: usize> RequestHeaders<'_, N> {
 
 impl<const N: usize> Display for RequestHeaders<'_, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(http11) = self.http11 {
-            write!(f, "{} ", if http11 { "HTTP/1.1" } else { "HTTP/1.0" })?;
-        }
+        write!(f, "{} ", if self.http11 { "HTTP/1.1" } else { "HTTP/1.0" })?;
 
-        if let Some(method) = self.method {
-            writeln!(f, "{method} {}", self.path.unwrap_or(""))?;
-        }
+        writeln!(f, "{} {}", self.method, self.path)?;
 
         for (name, value) in self.headers.iter() {
             if name.is_empty() {
@@ -757,12 +742,12 @@ impl<const N: usize> Display for RequestHeaders<'_, N> {
 }
 
 /// Response headers including the response line (HTTP version, status code, reason phrase)
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct ResponseHeaders<'b, const N: usize> {
-    /// Whether the response is HTTP/1.1, if present. If not present, HTTP/1.0 should be assumed
-    pub http11: Option<bool>,
-    /// The status code, if present
-    pub code: Option<u16>,
+    /// Whether the response is HTTP/1.1
+    pub http11: bool,
+    /// The status code
+    pub code: u16,
     /// The reason phrase, if present
     pub reason: Option<&'b str>,
     /// The headers
@@ -770,17 +755,6 @@ pub struct ResponseHeaders<'b, const N: usize> {
 }
 
 impl<const N: usize> ResponseHeaders<'_, N> {
-    /// Create a new ResponseHeaders instance for HTTP/1.1
-    #[inline(always)]
-    pub const fn new() -> Self {
-        Self {
-            http11: Some(true),
-            code: None,
-            reason: None,
-            headers: Headers::<N>::new(),
-        }
-    }
-
     /// A utility method to check if the response is a Websocket upgrade response
     /// and if the upgrade was accepted
     pub fn is_ws_upgrade_accepted(
@@ -794,13 +768,9 @@ impl<const N: usize> ResponseHeaders<'_, N> {
 
 impl<const N: usize> Display for ResponseHeaders<'_, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(http11) = self.http11 {
-            writeln!(f, "{} ", if http11 { "HTTP/1.1 " } else { "HTTP/1.0" })?;
-        }
+        write!(f, "{} ", if self.http11 { "HTTP/1.1 " } else { "HTTP/1.0" })?;
 
-        if let Some(code) = self.code {
-            writeln!(f, "{code} {}", self.reason.unwrap_or(""))?;
-        }
+        writeln!(f, "{} {}", self.code, self.reason.unwrap_or(""))?;
 
         for (name, value) in self.headers.iter() {
             if name.is_empty() {
@@ -859,11 +829,11 @@ pub mod ws {
     }
 
     /// Check if the request is a Websocket upgrade request
-    pub fn is_upgrade_request<'a, H>(method: Option<Method>, request_headers: H) -> bool
+    pub fn is_upgrade_request<'a, H>(method: Method, request_headers: H) -> bool
     where
         H: IntoIterator<Item = (&'a str, &'a str)>,
     {
-        if !matches!(method, Some(Method::Get)) {
+        if method == Method::Get {
             return false;
         }
 
@@ -960,7 +930,7 @@ pub mod ws {
     /// - `nonce`: The nonce used for the `Sec-WebSocket-Key` header in the WS upgrade request
     /// - `buf`: A buffer to use when performing the check
     pub fn is_upgrade_accepted<'a, H>(
-        code: Option<u16>,
+        code: u16,
         response_headers: H,
         nonce: &[u8; NONCE_LEN],
         buf: &'a mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
@@ -968,7 +938,7 @@ pub mod ws {
     where
         H: IntoIterator<Item = (&'a str, &'a str)>,
     {
-        if !matches!(code, Some(101)) {
+        if code != 101 {
             return false;
         }
 
@@ -1407,11 +1377,11 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize> embedded_svc::http::Query for super::RequestHeaders<'b, N> {
         fn uri(&self) -> &'_ str {
-            self.path.unwrap_or("")
+            self.path
         }
 
         fn method(&self) -> Method {
-            self.method.unwrap_or(super::Method::Get).into()
+            self.method.into()
         }
     }
 
@@ -1423,7 +1393,7 @@ mod embedded_svc_compat {
 
     impl<'b, const N: usize> embedded_svc::http::Status for super::ResponseHeaders<'b, N> {
         fn status(&self) -> u16 {
-            self.code.unwrap_or(200)
+            self.code
         }
 
         fn status_message(&self) -> Option<&'_ str> {
