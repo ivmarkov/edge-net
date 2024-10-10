@@ -833,7 +833,7 @@ pub mod ws {
     where
         H: IntoIterator<Item = (&'a str, &'a str)>,
     {
-        if method == Method::Get {
+        if method != Method::Get {
             return false;
         }
 
