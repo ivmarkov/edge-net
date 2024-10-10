@@ -262,9 +262,13 @@ where
 
         let mut state = self.unbind();
         let buf_ptr: *mut [u8] = state.buf;
+        let mut response = ResponseHeaders::default();
 
-        match ResponseHeaders::receive(state.buf, &mut state.io.as_mut().unwrap(), true).await {
-            Ok((response, buf, read_len)) => {
+        match response
+            .receive(state.buf, &mut state.io.as_mut().unwrap(), true)
+            .await
+        {
+            Ok((buf, read_len)) => {
                 let (connection_type, body_type) =
                     response.resolve::<T::Error>(request_connection_type)?;
 

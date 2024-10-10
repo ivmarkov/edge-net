@@ -100,10 +100,11 @@ impl<E> std::error::Error for Error<E> where E: std::error::Error {}
 impl<'b, const N: usize> RequestHeaders<'b, N> {
     /// Parse the headers from the input stream
     pub async fn receive<R>(
+        &mut self,
         buf: &'b mut [u8],
         mut input: R,
         exact: bool,
-    ) -> Result<(Self, &'b mut [u8], usize), Error<R::Error>>
+    ) -> Result<(&'b mut [u8], usize), Error<R::Error>>
     where
         R: Read,
     {
@@ -113,8 +114,7 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
                 Err(e) => return Err(e),
             };
 
-        let mut headers = Headers::<'b, N>::new();
-        let mut parser = httparse::Request::new(&mut headers.0);
+        let mut parser = httparse::Request::new(&mut self.headers.0);
 
         let (headers_buf, body_buf) = buf.split_at_mut(headers_len);
 
@@ -128,26 +128,19 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
                 unreachable!("Should not happen. HTTP header parsing is indeterminate.")
             }
 
-            let http11 = match parser.version {
+            self.http11 = match parser.version {
                 Some(0) => false,
                 Some(1) => true,
                 _ => Err(Error::InvalidHeaders)?,
             };
 
             let method_str = parser.method.ok_or(Error::InvalidHeaders)?;
-            let method = Method::new(method_str).ok_or(Error::InvalidHeaders)?;
-            let path = parser.path.ok_or(Error::InvalidHeaders)?;
+            self.method = Method::new(method_str).ok_or(Error::InvalidHeaders)?;
+            self.path = parser.path.ok_or(Error::InvalidHeaders)?;
 
-            let result = Self {
-                http11,
-                method,
-                path,
-                headers,
-            };
+            trace!("Received:\n{}", self);
 
-            trace!("Received:\n{}", result);
-
-            Ok((result, body_buf, read_len - headers_len))
+            Ok((body_buf, read_len - headers_len))
         } else {
             unreachable!("Secondary parse of already loaded buffer failed.")
         }
@@ -178,18 +171,18 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
 impl<'b, const N: usize> ResponseHeaders<'b, N> {
     /// Parse the headers from the input stream
     pub async fn receive<R>(
+        &mut self,
         buf: &'b mut [u8],
         mut input: R,
         exact: bool,
-    ) -> Result<(Self, &'b mut [u8], usize), Error<R::Error>>
+    ) -> Result<(&'b mut [u8], usize), Error<R::Error>>
     where
         R: Read,
     {
         let (read_len, headers_len) =
             raw::read_reply_buf::<N, _>(&mut input, buf, false, exact).await?;
 
-        let mut headers = Headers::<'b, N>::new();
-        let mut parser = httparse::Response::new(&mut headers.0);
+        let mut parser = httparse::Response::new(&mut self.headers.0);
 
         let (headers_buf, body_buf) = buf.split_at_mut(headers_len);
 
@@ -200,25 +193,18 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
                 unreachable!("Should not happen. HTTP header parsing is indeterminate.")
             }
 
-            let http11 = match parser.version {
+            self.http11 = match parser.version {
                 Some(0) => false,
                 Some(1) => true,
                 _ => Err(Error::InvalidHeaders)?,
             };
 
-            let code = parser.code.ok_or(Error::InvalidHeaders)?;
-            let reason = parser.reason;
+            self.code = parser.code.ok_or(Error::InvalidHeaders)?;
+            self.reason = parser.reason;
 
-            let result = Self {
-                http11,
-                code,
-                reason,
-                headers,
-            };
+            trace!("Received:\n{}", self);
 
-            trace!("Received:\n{}", result);
-
-            Ok((result, body_buf, read_len - headers_len))
+            Ok((body_buf, read_len - headers_len))
         } else {
             unreachable!("Secondary parse of already loaded buffer failed.")
         }

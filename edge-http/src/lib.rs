@@ -723,6 +723,17 @@ impl<const N: usize> RequestHeaders<'_, N> {
     }
 }
 
+impl<'b, const N: usize> Default for RequestHeaders<'b, N> {
+    fn default() -> Self {
+        Self {
+            http11: true,
+            method: Method::Get,
+            path: "/",
+            headers: Headers::new(),
+        }
+    }
+}
+
 impl<const N: usize> Display for RequestHeaders<'_, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} ", if self.http11 { "HTTP/1.1" } else { "HTTP/1.0" })?;
@@ -763,6 +774,17 @@ impl<const N: usize> ResponseHeaders<'_, N> {
         buf: &mut [u8; MAX_BASE64_KEY_RESPONSE_LEN],
     ) -> bool {
         is_upgrade_accepted(self.code, self.headers.iter(), nonce, buf)
+    }
+}
+
+impl<'b, const N: usize> Default for ResponseHeaders<'b, N> {
+    fn default() -> Self {
+        Self {
+            http11: true,
+            code: 200,
+            reason: None,
+            headers: Headers::new(),
+        }
     }
 }
 

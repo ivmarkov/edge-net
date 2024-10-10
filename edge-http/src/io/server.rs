@@ -52,7 +52,9 @@ where
         buf: &'b mut [u8],
         mut io: T,
     ) -> Result<Connection<'b, T, N>, Error<T::Error>> {
-        let (request, buf, read_len) = RequestHeaders::receive(buf, &mut io, true).await?;
+        let mut request = RequestHeaders::default();
+
+        let (buf, read_len) = request.receive(buf, &mut io, true).await?;
 
         let (connection_type, body_type) = request.resolve::<T::Error>()?;
 
