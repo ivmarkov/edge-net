@@ -16,20 +16,20 @@ use core::{
 use embassy_time::Duration;
 use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
 
-use crate::{Readable, TcpConnect, TcpShutdown};
+use crate::{Readable, TcpAccept, TcpConnect, TcpShutdown};
 
-/// IO Error type for the `with_timeout` function and `WithTimeout` struct.
+/// Error type for the `with_timeout` function and `WithTimeout` struct.
 #[derive(Debug)]
 pub enum WithTimeoutError<E> {
-    /// An IO error occurred
-    IO(E),
+    /// An error occurred during the execution of the operation
+    Error(E),
     /// The operation timed out
     Timeout,
 }
 
 impl<E> From<E> for WithTimeoutError<E> {
     fn from(e: E) -> Self {
-        Self::IO(e)
+        Self::Error(e)
     }
 }
 
@@ -39,7 +39,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::IO(e) => write!(f, "IO error: {}", e),
+            Self::Error(e) => write!(f, "{}", e),
             Self::Timeout => write!(f, "Operation timed out"),
         }
     }
@@ -51,16 +51,15 @@ where
 {
     fn kind(&self) -> ErrorKind {
         match self {
-            Self::IO(e) => e.kind(),
+            Self::Error(e) => e.kind(),
             Self::Timeout => ErrorKind::TimedOut,
         }
     }
 }
 
-/// Run an IO future with a timeout.
+/// Run a fallible future with a timeout.
 ///
-/// A future is an IO future if it resolves to a `Result<T, E>`, where `E`
-/// implements `embedded_io_async::Error`.
+/// A future is a fallible future if it resolves to a `Result<T, E>`.
 ///
 /// If the future completes before the timeout, its output is returned.
 /// Otherwise, on timeout, a timeout error is returned.
@@ -71,7 +70,6 @@ where
 pub async fn with_timeout<F, T, E>(timeout_ms: u32, fut: F) -> Result<T, WithTimeoutError<E>>
 where
     F: Future<Output = Result<T, E>>,
-    E: embedded_io_async::Error,
 {
     map_result(embassy_time::with_timeout(Duration::from_millis(timeout_ms as _), fut).await)
 }
@@ -84,6 +82,10 @@ where
 /// - `Readable`
 /// - `TcpConnect`
 /// - `TcpShutdown`
+///
+/// Additionally, wrapping with `WithTimeout` an IO type that implements `TcpAccept` will result
+/// in a `TcpAccept` implementation that - while waiting potentially indefinitely for an incoming
+/// connection - will return a connected socket readily wrapped with a timeout.
 pub struct WithTimeout<T>(T, u32);
 
 impl<T> WithTimeout<T> {
@@ -104,6 +106,11 @@ impl<T> WithTimeout<T> {
     /// Get a mutable reference to the inner IO type.
     pub fn io_mut(&mut self) -> &mut T {
         &mut self.0
+    }
+
+    /// Get the timeout duration in milliseconds.
+    pub fn timeout_ms(&self) -> u32 {
+        self.1
     }
 
     /// Get the IO type by destructuring the `WithTimeout` instance.
@@ -181,15 +188,29 @@ where
     }
 }
 
+impl<T> TcpAccept for WithTimeout<T>
+where
+    T: TcpAccept,
+{
+    type Error = WithTimeoutError<T::Error>;
+
+    type Socket<'a> = WithTimeout<T::Socket<'a>>
+    where
+        Self: 'a;
+
+    async fn accept(&self) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
+        let (addr, socket) = self.0.accept().await?;
+
+        Ok((addr, WithTimeout::new(self.1, socket)))
+    }
+}
+
 fn map_result<T, E>(
     result: Result<Result<T, E>, embassy_time::TimeoutError>,
-) -> Result<T, WithTimeoutError<E>>
-where
-    E: embedded_io_async::Error,
-{
+) -> Result<T, WithTimeoutError<E>> {
     match result {
         Ok(Ok(t)) => Ok(t),
-        Ok(Err(e)) => Err(WithTimeoutError::IO(e)),
+        Ok(Err(e)) => Err(WithTimeoutError::Error(e)),
         Err(_) => Err(WithTimeoutError::Timeout),
     }
 }
