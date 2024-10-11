@@ -174,7 +174,7 @@ where
         let mut state = self.unbind();
 
         let result = async {
-            match send_request(http11, Some(method), Some(uri), state.io.as_mut().unwrap()).await {
+            match send_request(http11, method, uri, state.io.as_mut().unwrap()).await {
                 Ok(_) => (),
                 Err(Error::Io(_)) => {
                     if !fresh_connection {
@@ -182,8 +182,7 @@ where
                         state.io = None;
                         state.io = Some(state.socket.connect(state.addr).await.map_err(Error::Io)?);
 
-                        send_request(http11, Some(method), Some(uri), state.io.as_mut().unwrap())
-                            .await?;
+                        send_request(http11, method, uri, state.io.as_mut().unwrap()).await?;
                     }
                 }
                 Err(other) => Err(other)?,
@@ -263,7 +262,6 @@ where
 
         let mut state = self.unbind();
         let buf_ptr: *mut [u8] = state.buf;
-
         let mut response = ResponseHeaders::new();
 
         match response

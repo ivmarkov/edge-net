@@ -103,7 +103,7 @@ where
         message: Option<&str>,
         headers: &[(&str, &str)],
     ) -> Result<(), Error<T::Error>> {
-        self.complete_request(Some(status), message, headers).await
+        self.complete_request(status, message, headers).await
     }
 
     /// A convenience method to initiate a WebSocket upgrade response
@@ -125,7 +125,7 @@ where
     /// If the connection is still in a request state, and empty 200 OK response is sent
     pub async fn complete(&mut self) -> Result<(), Error<T::Error>> {
         if self.is_request_initiated() {
-            self.complete_request(Some(200), Some("OK"), &[]).await?;
+            self.complete_request(200, Some("OK"), &[]).await?;
         }
 
         if self.is_response_initiated() {
@@ -145,7 +145,7 @@ where
             Ok(_) => {
                 let headers = [("Connection", "Close"), ("Content-Type", "text/plain")];
 
-                self.complete_request(Some(500), Some("Internal Error"), &headers)
+                self.complete_request(500, Some("Internal Error"), &headers)
                     .await?;
 
                 let response = self.response_mut()?;
@@ -181,7 +181,7 @@ where
 
     async fn complete_request(
         &mut self,
-        status: Option<u16>,
+        status: u16,
         reason: Option<&str>,
         headers: &[(&str, &str)],
     ) -> Result<(), Error<T::Error>> {
@@ -190,7 +190,7 @@ where
         let mut buf = [0; COMPLETION_BUF_SIZE];
         while request.io.read(&mut buf).await? > 0 {}
 
-        let http11 = request.request.http11.unwrap_or(false);
+        let http11 = request.request.http11;
         let request_connection_type = request.connection_type;
 
         let mut io = self.unbind_mut();
@@ -918,12 +918,7 @@ mod embedded_svc_compat {
             let headers = connection.headers().ok();
 
             if let Some(headers) = headers {
-                if headers.path.map(|path| self.path == path).unwrap_or(false)
-                    && headers
-                        .method
-                        .map(|method| self.method == method.into())
-                        .unwrap_or(false)
-                {
+                if headers.path == self.path && headers.method == self.method.into() {
                     return self.handler.handle(connection).await;
                 }
             }
