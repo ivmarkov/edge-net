@@ -1,3 +1,5 @@
+use core::fmt::Display;
+
 use edge_http::io::server::{Connection, DefaultServer, Handler};
 use edge_http::io::Error;
 use edge_http::Method;
@@ -26,7 +28,7 @@ pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
         .bind(addr.parse().unwrap())
         .await?;
 
-    server.run(acceptor, HttpHandler, None, None).await?;
+    server.run(acceptor, HttpHandler).await?;
 
     Ok(())
 }
@@ -39,7 +41,11 @@ where
 {
     type Error = Error<T::Error>;
 
-    async fn handle(&self, conn: &mut Connection<'b, T, N>) -> Result<(), Self::Error> {
+    async fn handle(
+        &self,
+        _task_id: impl Display + Copy,
+        conn: &mut Connection<'b, T, N>,
+    ) -> Result<(), Self::Error> {
         let headers = conn.headers()?;
 
         if headers.method != Method::Get {

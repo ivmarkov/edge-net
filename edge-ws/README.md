@@ -148,6 +148,8 @@ where
 ### Websocket echo server
 
 ```rust
+use core::fmt::Display;
+
 use edge_http::io::server::{Connection, DefaultServer, Handler};
 use edge_http::io::Error;
 use edge_http::ws::MAX_BASE64_KEY_RESPONSE_LEN;
@@ -178,9 +180,7 @@ pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
         .bind(addr.parse().unwrap())
         .await?;
 
-    server
-        .run(acceptor, WsHandler, None, Some(30 * 60 * 1000))
-        .await?;
+    server.run(acceptor, WsHandler).await?;
 
     Ok(())
 }
@@ -205,7 +205,11 @@ where
 {
     type Error = WsHandlerError<Error<T::Error>, edge_ws::Error<T::Error>>;
 
-    async fn handle(&self, conn: &mut Connection<'b, T, N>) -> Result<(), Self::Error> {
+    async fn handle(
+        &self,
+        _task_id: impl Display + Clone,
+        conn: &mut Connection<'b, T, N>,
+    ) -> Result<(), Self::Error> {
         let headers = conn.headers()?;
 
         if headers.method != Method::Get {
