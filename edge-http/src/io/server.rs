@@ -747,7 +747,7 @@ mod embedded_svc_compat {
 
         async fn handle(
             &self,
-            _task_id: impl core::fmt::Display + Copy,
+            task_id: impl core::fmt::Display + Copy,
             connection: &mut super::Connection<'b, T, N>,
         ) -> Result<(), Self::Error> {
             let headers = connection.headers().ok();
@@ -758,7 +758,10 @@ mod embedded_svc_compat {
                 }
             }
 
-            self.next.handle(connection).await.map_err(Into::into)
+            self.next
+                .handle(task_id, connection)
+                .await
+                .map_err(Into::into)
         }
     }
 }
