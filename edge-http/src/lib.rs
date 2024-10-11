@@ -717,6 +717,17 @@ pub struct RequestHeaders<'b, const N: usize> {
 }
 
 impl<const N: usize> RequestHeaders<'_, N> {
+    // Create a new RequestHeaders instance, defaults to GET / HTTP/1.1
+    #[inline(always)]
+    pub const fn new() -> Self {
+        Self {
+            http11: true,
+            method: Method::Get,
+            path: "/",
+            headers: Headers::new(),
+        }
+    }
+
     /// A utility method to check if the request is a Websocket upgrade request
     pub fn is_ws_upgrade_request(&self) -> bool {
         is_upgrade_request(self.method, self.headers.iter())
@@ -726,12 +737,7 @@ impl<const N: usize> RequestHeaders<'_, N> {
 impl<'b, const N: usize> Default for RequestHeaders<'b, N> {
     #[inline(always)]
     fn default() -> Self {
-        Self {
-            http11: true,
-            method: Method::Get,
-            path: "/",
-            headers: Headers::new(),
-        }
+        Self::new()
     }
 }
 
@@ -767,6 +773,17 @@ pub struct ResponseHeaders<'b, const N: usize> {
 }
 
 impl<const N: usize> ResponseHeaders<'_, N> {
+    /// Create a new ResponseHeaders instance, defaults to HTTP/1.1 200 OK
+    #[inline(always)]
+    pub const fn new() -> Self {
+        Self {
+            http11: true,
+            code: 200,
+            reason: None,
+            headers: Headers::new(),
+        }
+    }
+
     /// A utility method to check if the response is a Websocket upgrade response
     /// and if the upgrade was accepted
     pub fn is_ws_upgrade_accepted(
@@ -781,12 +798,7 @@ impl<const N: usize> ResponseHeaders<'_, N> {
 impl<'b, const N: usize> Default for ResponseHeaders<'b, N> {
     #[inline(always)]
     fn default() -> Self {
-        Self {
-            http11: true,
-            code: 200,
-            reason: None,
-            headers: Headers::new(),
-        }
+        Self::new()
     }
 }
 

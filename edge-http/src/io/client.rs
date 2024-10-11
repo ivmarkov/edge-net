@@ -262,7 +262,7 @@ where
 
         let mut state = self.unbind();
         let buf_ptr: *mut [u8] = state.buf;
-        let mut response = ResponseHeaders::default();
+        let mut response = ResponseHeaders::new();
 
         match response
             .receive(state.buf, &mut state.io.as_mut().unwrap(), true)
