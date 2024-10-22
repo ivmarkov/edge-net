@@ -16,27 +16,24 @@ use crate::{to_emb_bind_socket, to_emb_socket, to_net_socket, Pool};
 
 /// A struct that implements the `TcpConnect` and `TcpBind` factory traits from `edge-nal`
 /// Capable of managing up to N concurrent connections with TX and RX buffers according to TX_SZ and RX_SZ.
-pub struct Tcp<'d, D: Driver, const N: usize, const TX_SZ: usize = 1024, const RX_SZ: usize = 1024>
-{
-    stack: &'d Stack<D>,
+pub struct Tcp<'d, const N: usize, const TX_SZ: usize = 1024, const RX_SZ: usize = 1024> {
+    stack: Stack<'d>,
     buffers: &'d TcpBuffers<N, TX_SZ, RX_SZ>,
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize>
-    Tcp<'d, D, N, TX_SZ, RX_SZ>
-{
+impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Tcp<'d, N, TX_SZ, RX_SZ> {
     /// Create a new `Tcp` instance for the provided Embassy networking stack, using the provided TCP buffers
     ///
     /// Ensure that the number of buffers `N` fits within StackResources<N> of
     /// [embassy_net::Stack], while taking into account the sockets used for DHCP, DNS, etc. else
     /// [smoltcp::iface::SocketSet] will panic with `adding a socket to a full SocketSet`.
-    pub fn new(stack: &'d Stack<D>, buffers: &'d TcpBuffers<N, TX_SZ, RX_SZ>) -> Self {
+    pub fn new(stack: Stack<'d>, buffers: &'d TcpBuffers<N, TX_SZ, RX_SZ>) -> Self {
         Self { stack, buffers }
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpConnect
-    for Tcp<'d, D, N, TX_SZ, RX_SZ>
+impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpConnect
+    for Tcp<'d, N, TX_SZ, RX_SZ>
 {
     type Error = TcpError;
 
@@ -54,13 +51,13 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpC
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpBind
-    for Tcp<'d, D, N, TX_SZ, RX_SZ>
+impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpBind
+    for Tcp<'d, N, TX_SZ, RX_SZ>
 {
     type Error = TcpError;
 
     type Accept<'a>
-        = TcpAccept<'a, D, N, TX_SZ, RX_SZ>
+        = TcpAccept<'a, N, TX_SZ, RX_SZ>
     where
         Self: 'a;
 
@@ -70,19 +67,13 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpB
 }
 
 /// Represents an acceptor for incoming TCP client connections. Implements the `TcpAccept` factory trait from `edge-nal`
-pub struct TcpAccept<
-    'd,
-    D: Driver,
-    const N: usize,
-    const TX_SZ: usize = 1024,
-    const RX_SZ: usize = 1024,
-> {
-    stack: &'d Tcp<'d, D, N, TX_SZ, RX_SZ>,
+pub struct TcpAccept<'d, const N: usize, const TX_SZ: usize = 1024, const RX_SZ: usize = 1024> {
+    stack: &'d Tcp<'d, N, TX_SZ, RX_SZ>,
     local: SocketAddr,
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize> edge_nal::TcpAccept
-    for TcpAccept<'d, D, N, TX_SZ, RX_SZ>
+impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> edge_nal::TcpAccept
+    for TcpAccept<'d, N, TX_SZ, RX_SZ>
 {
     type Error = TcpError;
 
@@ -111,8 +102,8 @@ pub struct TcpSocket<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize>
 }
 
 impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpSocket<'d, N, TX_SZ, RX_SZ> {
-    fn new<D: Driver>(
-        stack: &'d Stack<D>,
+    fn new(
+        stack: Stack<'d>,
         stack_buffers: &'d TcpBuffers<N, TX_SZ, RX_SZ>,
     ) -> Result<Self, TcpError> {
         let mut socket_buffers = stack_buffers.pool.alloc().ok_or(TcpError::NoBuffers)?;

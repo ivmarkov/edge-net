@@ -12,29 +12,20 @@ use embedded_io_async::ErrorKind;
 use crate::to_net_addr;
 
 /// A struct that implements the `Dns` trait from `edge-nal`
-pub struct Dns<'a, D>
-where
-    D: Driver + 'static,
-{
-    stack: &'a Stack<D>,
+pub struct Dns<'a> {
+    stack: Stack<'a>,
 }
 
-impl<'a, D> Dns<'a, D>
-where
-    D: Driver + 'static,
-{
+impl<'a> Dns<'a> {
     /// Create a new `Dns` instance for the provided Embassy networking stack
     ///
     /// NOTE: If using DHCP, make sure it has reconfigured the stack to ensure the DNS servers are updated
-    pub fn new(stack: &'a Stack<D>) -> Self {
+    pub fn new(stack: Stack<'a>) -> Self {
         Self { stack }
     }
 }
 
-impl<'a, D> edge_nal::Dns for Dns<'a, D>
-where
-    D: Driver + 'static,
-{
+impl<'a> edge_nal::Dns for Dns<'a> {
     type Error = DnsError;
 
     async fn get_host_by_name(
