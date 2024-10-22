@@ -11,13 +11,21 @@ categories = [
     "embedded",
     "no-std::no-alloc",
     "asynchronous",
-    "network-programming"
+    "network-programming",
 ]
 
 [dependencies]
 embedded-io-async = { workspace = true }
 edge-nal = { workspace = true }
 heapless = { workspace = true }
-# TODO: Do not require these features and conditionalize the code instead
-embassy-net = { version = "0.4", features = ["tcp", "udp", "dns", "proto-ipv6", "medium-ethernet", "proto-ipv4", "igmp"] }
+# Do not require these features and conditionalize the code instead
+embassy-net = { version = "0.4", features = [
+    "tcp",
+    "udp",
+    "dns",
+    "proto-ipv6",
+    "medium-ethernet",
+    "proto-ipv4",
+    "multicast",
+] }
 embassy-futures = { workspace = true }

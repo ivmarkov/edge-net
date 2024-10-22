@@ -89,11 +89,11 @@ pub(crate) fn to_emb_bind_socket(socket: SocketAddr) -> IpListenEndpoint {
 pub(crate) fn to_net_addr(addr: IpAddress) -> IpAddr {
     match addr {
         //#[cfg(feature = "proto-ipv4")]
-        IpAddress::Ipv4(addr) => addr.0.into(),
+        IpAddress::Ipv4(addr) => addr.into(),
         // #[cfg(not(feature = "proto-ipv4"))]
         // IpAddr::V4(_) => panic!("ipv4 support not enabled"),
         //#[cfg(feature = "proto-ipv6")]
-        IpAddress::Ipv6(addr) => addr.0.into(),
+        IpAddress::Ipv6(addr) => addr.into(),
         // #[cfg(not(feature = "proto-ipv6"))]
         // IpAddr::V6(_) => panic!("ipv6 support not enabled"),
     }
@@ -102,11 +102,11 @@ pub(crate) fn to_net_addr(addr: IpAddress) -> IpAddr {
 pub(crate) fn to_emb_addr(addr: IpAddr) -> IpAddress {
     match addr {
         //#[cfg(feature = "proto-ipv4")]
-        IpAddr::V4(addr) => IpAddress::Ipv4(embassy_net::Ipv4Address::from_bytes(&addr.octets())),
+        IpAddr::V4(addr) => IpAddress::Ipv4(addr),
         // #[cfg(not(feature = "proto-ipv4"))]
         // IpAddr::V4(_) => panic!("ipv4 support not enabled"),
         //#[cfg(feature = "proto-ipv6")]
-        IpAddr::V6(addr) => IpAddress::Ipv6(embassy_net::Ipv6Address::from_bytes(&addr.octets())),
+        IpAddr::V6(addr) => IpAddress::Ipv6(addr),
         // #[cfg(not(feature = "proto-ipv6"))]
         // IpAddr::V6(_) => panic!("ipv6 support not enabled"),
     }
