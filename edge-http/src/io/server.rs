@@ -23,8 +23,6 @@ pub use embedded_svc_compat::*;
 pub const DEFAULT_HANDLER_TASKS_COUNT: usize = 4;
 pub const DEFAULT_BUF_SIZE: usize = 2048;
 
-pub mod registration;
-
 const COMPLETION_BUF_SIZE: usize = 64;
 
 /// A connection state machine for handling HTTP server requests-response cycles.
@@ -680,14 +678,11 @@ mod embedded_svc_compat {
     use embedded_io_async::{Read, Write};
 
     use embedded_svc::http::server::asynch::{Connection, Headers, Query};
-    use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
     use crate::io::Body;
     use crate::RequestHeaders;
 
-    use super::*;
-
-    impl<'b, T, const N: usize> Headers for super::Connection<'b, T, N>
+    impl<T, const N: usize> Headers for super::Connection<'_, T, N>
     where
         T: Read + Write,
     {
@@ -699,7 +694,7 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, T, const N: usize> Query for super::Connection<'b, T, N>
+    impl<T, const N: usize> Query for super::Connection<'_, T, N>
     where
         T: Read + Write,
     {
@@ -755,47 +750,33 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, T, const N: usize> Handler<'b, T, N> for ChainRoot
-    where
-        T: Read + Write,
-    {
-        type Error = Error<T::Error>;
+    // NOTE: Currently, the `edge-http` and the `embedded-svc` Handler traits are
+    // incompatible, in that the `edge-http` async `Handler`'s `handle` method is generic,
+    // while the `embedded-svc` `Handler`'s `handle` method is not.
+    //
+    // Code below is commented out until `embedded-svc`'s `Handler` signature is changed
+    // to match the `edge-http` `Handler` signature.
 
-        async fn handle(
-            &self,
-            _task_id: impl core::fmt::Display + Copy,
-            connection: &mut super::Connection<'b, T, N>,
-        ) -> Result<(), Self::Error> {
-            connection.initiate_response(404, None, &[]).await
-        }
-    }
+    // pub struct SvcHandler<H>(H);
 
-    impl<'b, const N: usize, T, H, Q> Handler<'b, T, N> for ChainHandler<H, Q>
-    where
-        H: embedded_svc::http::server::asynch::Handler<super::Connection<'b, T, N>>,
-        Q: Handler<'b, T, N>,
-        Q::Error: Into<H::Error>,
-        T: Read + Write,
-    {
-        type Error = H::Error;
+    // impl<'b, T, const N: usize, H> Handler for SvcHandler<H>
+    // where
+    //     H: embedded_svc::http::server::asynch::Handler<super::Connection<'b, T, N>>,
+    //     T: Read + Write,
+    // {
+    //     type Error<E> = Error<E> where E: Debug;
 
-        async fn handle(
-            &self,
-            task_id: impl core::fmt::Display + Copy,
-            connection: &mut super::Connection<'b, T, N>,
-        ) -> Result<(), Self::Error> {
-            let headers = connection.headers().ok();
+    //     async fn handle<T, const N: usize>(
+    //         &self,
+    //         _task_id: impl core::fmt::Display + Copy,
+    //         connection: &mut super::Connection<'_, T, N>,
+    //     ) -> Result<(), Self::Error<T::Error>>
+    //     where
+    //         T: Read + Write,
+    //     {
+    //         self.0.handle(connection).await.unwrap();
 
-            if let Some(headers) = headers {
-                if headers.path == self.path && headers.method == self.method.into() {
-                    return self.handler.handle(connection).await;
-                }
-            }
-
-            self.next
-                .handle(task_id, connection)
-                .await
-                .map_err(Into::into)
-        }
-    }
+    //         Ok(())
+    //     }
+    // }
 }

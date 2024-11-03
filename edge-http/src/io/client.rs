@@ -473,7 +473,7 @@ mod embedded_svc_compat {
 
     use embedded_svc::http::client::asynch::{Connection, Headers, Method, Status};
 
-    impl<'b, T, const N: usize> Headers for super::Connection<'b, T, N>
+    impl<T, const N: usize> Headers for super::Connection<'_, T, N>
     where
         T: TcpConnect,
     {
@@ -484,7 +484,7 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, T, const N: usize> Status for super::Connection<'b, T, N>
+    impl<T, const N: usize> Status for super::Connection<'_, T, N>
     where
         T: TcpConnect,
     {

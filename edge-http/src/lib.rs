@@ -1411,7 +1411,7 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize> embedded_svc::http::Query for super::RequestHeaders<'b, N> {
+    impl<const N: usize> embedded_svc::http::Query for super::RequestHeaders<'_, N> {
         fn uri(&self) -> &'_ str {
             self.path
         }
@@ -1421,13 +1421,13 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize> embedded_svc::http::Headers for super::RequestHeaders<'b, N> {
+    impl<const N: usize> embedded_svc::http::Headers for super::RequestHeaders<'_, N> {
         fn header(&self, name: &str) -> Option<&'_ str> {
             self.headers.get(name)
         }
     }
 
-    impl<'b, const N: usize> embedded_svc::http::Status for super::ResponseHeaders<'b, N> {
+    impl<const N: usize> embedded_svc::http::Status for super::ResponseHeaders<'_, N> {
         fn status(&self) -> u16 {
             self.code
         }
@@ -1437,13 +1437,13 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, const N: usize> embedded_svc::http::Headers for super::ResponseHeaders<'b, N> {
+    impl<const N: usize> embedded_svc::http::Headers for super::ResponseHeaders<'_, N> {
         fn header(&self, name: &str) -> Option<&'_ str> {
             self.headers.get(name)
         }
     }
 
-    impl<'b, const N: usize> embedded_svc::http::Headers for super::Headers<'b, N> {
+    impl<const N: usize> embedded_svc::http::Headers for super::Headers<'_, N> {
         fn header(&self, name: &str) -> Option<&'_ str> {
             self.get(name)
         }
