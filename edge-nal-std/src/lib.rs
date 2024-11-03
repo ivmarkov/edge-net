@@ -101,7 +101,12 @@ impl TcpAccept for TcpAcceptor {
             match self.0.as_ref().accept() {
                 Ok((socket, _)) => break Ok((socket.peer_addr()?, TcpSocket(Async::new(socket)?))),
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                    async_io::Timer::after(core::time::Duration::from_millis(20)).await;
+                    #[cfg(not(feature = "async-io-mini"))]
+                    use async_io::Timer;
+                    #[cfg(feature = "async-io-mini")]
+                    use async_io_mini::Timer;
+
+                    Timer::after(core::time::Duration::from_millis(20)).await;
                 }
                 Err(err) => break Err(err),
             }

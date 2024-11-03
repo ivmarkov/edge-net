@@ -194,7 +194,8 @@ where
 {
     type Error = WithTimeoutError<T::Error>;
 
-    type Socket<'a> = WithTimeout<T::Socket<'a>>
+    type Socket<'a>
+        = WithTimeout<T::Socket<'a>>
     where
         Self: 'a;
 
