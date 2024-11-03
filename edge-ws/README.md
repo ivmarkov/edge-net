@@ -148,7 +148,7 @@ where
 ### Websocket echo server
 
 ```rust
-use core::fmt::Display;
+use core::fmt::{Debug, Display};
 
 use edge_http::io::server::{Connection, DefaultServer, Handler};
 use edge_http::io::Error;
@@ -187,29 +187,32 @@ pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
 
 #[derive(Debug)]
 enum WsHandlerError<C, W> {
-    ConnectionError(C),
-    WsError(W),
+    Connection(C),
+    Ws(W),
 }
 
 impl<C, W> From<C> for WsHandlerError<C, W> {
     fn from(e: C) -> Self {
-        Self::ConnectionError(e)
+        Self::Connection(e)
     }
 }
 
 struct WsHandler;
 
-impl<'b, T, const N: usize> Handler<'b, T, N> for WsHandler
-where
-    T: Read + Write,
-{
-    type Error = WsHandlerError<Error<T::Error>, edge_ws::Error<T::Error>>;
+impl Handler for WsHandler {
+    type Error<E>
+        = WsHandlerError<Error<E>, edge_ws::Error<E>>
+    where
+        E: Debug;
 
-    async fn handle(
+    async fn handle<T, const N: usize>(
         &self,
         _task_id: impl Display + Clone,
-        conn: &mut Connection<'b, T, N>,
-    ) -> Result<(), Self::Error> {
+        conn: &mut Connection<'_, T, N>,
+    ) -> Result<(), Self::Error<T::Error>>
+    where
+        T: Read + Write,
+    {
         let headers = conn.headers()?;
 
         if headers.method != Method::Get {
@@ -241,11 +244,11 @@ where
             loop {
                 let mut header = FrameHeader::recv(&mut socket)
                     .await
-                    .map_err(WsHandlerError::WsError)?;
+                    .map_err(WsHandlerError::Ws)?;
                 let payload = header
                     .recv_payload(&mut socket, &mut buf)
                     .await
-                    .map_err(WsHandlerError::WsError)?;
+                    .map_err(WsHandlerError::Ws)?;
 
                 match header.frame_type {
                     FrameType::Text(_) => {
@@ -276,14 +279,11 @@ where
 
                 info!("Echoing back as {header}");
 
-                header
-                    .send(&mut socket)
-                    .await
-                    .map_err(WsHandlerError::WsError)?;
+                header.send(&mut socket).await.map_err(WsHandlerError::Ws)?;
                 header
                     .send_payload(&mut socket, payload)
                     .await
-                    .map_err(WsHandlerError::WsError)?;
+                    .map_err(WsHandlerError::Ws)?;
             }
         }
 

@@ -401,7 +401,7 @@ where
     type Error = Error<T::Error>;
 }
 
-impl<'b, T, const N: usize> Read for Connection<'b, T, N>
+impl<T, const N: usize> Read for Connection<'_, T, N>
 where
     T: TcpConnect,
 {
@@ -410,7 +410,7 @@ where
     }
 }
 
-impl<'b, T, const N: usize> Write for Connection<'b, T, N>
+impl<T, const N: usize> Write for Connection<'_, T, N>
 where
     T: TcpConnect,
 {

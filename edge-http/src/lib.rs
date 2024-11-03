@@ -734,7 +734,7 @@ impl<const N: usize> RequestHeaders<'_, N> {
     }
 }
 
-impl<'b, const N: usize> Default for RequestHeaders<'b, N> {
+impl<const N: usize> Default for RequestHeaders<'_, N> {
     #[inline(always)]
     fn default() -> Self {
         Self::new()
@@ -795,7 +795,7 @@ impl<const N: usize> ResponseHeaders<'_, N> {
     }
 }
 
-impl<'b, const N: usize> Default for ResponseHeaders<'b, N> {
+impl<const N: usize> Default for ResponseHeaders<'_, N> {
     #[inline(always)]
     fn default() -> Self {
         Self::new()

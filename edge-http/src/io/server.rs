@@ -23,6 +23,8 @@ pub use embedded_svc_compat::*;
 pub const DEFAULT_HANDLER_TASKS_COUNT: usize = 4;
 pub const DEFAULT_BUF_SIZE: usize = 2048;
 
+pub mod registration;
+
 const COMPLETION_BUF_SIZE: usize = 64;
 
 /// A connection state machine for handling HTTP server requests-response cycles.
@@ -287,7 +289,7 @@ where
     type Error = Error<T::Error>;
 }
 
-impl<'b, T, const N: usize> Read for Connection<'b, T, N>
+impl<T, const N: usize> Read for Connection<'_, T, N>
 where
     T: Read + Write,
 {
@@ -296,7 +298,7 @@ where
     }
 }
 
-impl<'b, T, const N: usize> Write for Connection<'b, T, N>
+impl<T, const N: usize> Write for Connection<'_, T, N>
 where
     T: Read + Write,
 {
@@ -331,69 +333,98 @@ where
     }
 }
 
+#[derive(Debug)]
+pub enum HandlerError<T, E> {
+    Io(T),
+    Connection(Error<T>),
+    Handler(E),
+}
+
+impl<T, E> From<Error<T>> for HandlerError<T, E> {
+    fn from(e: Error<T>) -> Self {
+        Self::Connection(e)
+    }
+}
+
 /// A trait (async callback) for handling incoming HTTP requests
-pub trait Handler<'b, T, const N: usize>
-where
-    T: Read + Write,
-{
-    type Error: Debug;
+pub trait Handler {
+    type Error<E>: Debug
+    where
+        E: Debug;
 
     /// Handle an incoming HTTP request
     ///
     /// Parameters:
     /// - `task_id`: An identifier for the task, thast can be used by the handler for logging purposes
     /// - `connection`: A connection state machine for the request-response cycle
-    async fn handle(
+    async fn handle<T, const N: usize>(
         &self,
         task_id: impl Display + Copy,
-        connection: &mut Connection<'b, T, N>,
-    ) -> Result<(), Self::Error>;
+        connection: &mut Connection<'_, T, N>,
+    ) -> Result<(), Self::Error<T::Error>>
+    where
+        T: Read + Write;
 }
 
-impl<'b, const N: usize, T, H> Handler<'b, T, N> for &H
+impl<H> Handler for &H
 where
-    T: Read + Write,
-    H: Handler<'b, T, N>,
+    H: Handler,
 {
-    type Error = H::Error;
+    type Error<E>
+        = H::Error<E>
+    where
+        E: Debug;
 
-    async fn handle(
+    async fn handle<T, const N: usize>(
         &self,
         task_id: impl Display + Copy,
-        connection: &mut Connection<'b, T, N>,
-    ) -> Result<(), Self::Error> {
+        connection: &mut Connection<'_, T, N>,
+    ) -> Result<(), Self::Error<T::Error>>
+    where
+        T: Read + Write,
+    {
         (**self).handle(task_id, connection).await
     }
 }
 
-impl<'b, const N: usize, T, H> Handler<'b, T, N> for &mut H
+impl<H> Handler for &mut H
 where
-    T: Read + Write,
-    H: Handler<'b, T, N>,
+    H: Handler,
 {
-    type Error = H::Error;
+    type Error<E>
+        = H::Error<E>
+    where
+        E: Debug;
 
-    async fn handle(
+    async fn handle<T, const N: usize>(
         &self,
         task_id: impl Display + Copy,
-        connection: &mut Connection<'b, T, N>,
-    ) -> Result<(), Self::Error> {
+        connection: &mut Connection<'_, T, N>,
+    ) -> Result<(), Self::Error<T::Error>>
+    where
+        T: Read + Write,
+    {
         (**self).handle(task_id, connection).await
     }
 }
 
-impl<'b, const N: usize, T, H> Handler<'b, T, N> for WithTimeout<H>
+impl<H> Handler for WithTimeout<H>
 where
-    T: Read + Write,
-    H: Handler<'b, T, N>,
+    H: Handler,
 {
-    type Error = WithTimeoutError<H::Error>;
+    type Error<E>
+        = WithTimeoutError<H::Error<E>>
+    where
+        E: Debug;
 
-    async fn handle(
+    async fn handle<T, const N: usize>(
         &self,
         task_id: impl Display + Copy,
-        connection: &mut Connection<'b, T, N>,
-    ) -> Result<(), Self::Error> {
+        connection: &mut Connection<'_, T, N>,
+    ) -> Result<(), Self::Error<T::Error>>
+    where
+        T: Read + Write,
+    {
         let mut io = pin!(self.io().handle(task_id, connection));
 
         with_timeout(self.timeout_ms(), &mut io).await?;
@@ -413,22 +444,22 @@ where
 /// - `buf`: A work-area buffer used by the implementation
 /// - `task_id`: An identifier for the task, used for logging purposes
 /// - `handler`: An implementation of `Handler` to handle incoming requests
-pub async fn handle_connection<const N: usize, T, H>(
+pub async fn handle_connection<H, T, const N: usize>(
     mut io: T,
     buf: &mut [u8],
     task_id: impl Display + Copy,
     handler: H,
 ) where
-    H: for<'b> Handler<'b, &'b mut T, N>,
+    H: Handler,
     T: Read + Write + TcpShutdown,
 {
     let close = loop {
         debug!("Handler task {task_id}: Waiting for new request");
 
-        let result = handle_request::<N, _, _>(buf, &mut io, task_id, &handler).await;
+        let result = handle_request::<_, _, N>(buf, &mut io, task_id, &handler).await;
 
         match result {
-            Err(HandleRequestError::Connection(Error::ConnectionClosed)) => {
+            Err(HandlerError::Connection(Error::ConnectionClosed)) => {
                 debug!("Handler task {task_id}: Connection closed");
                 break false;
             }
@@ -518,14 +549,14 @@ where
 /// - `io`: A socket stream
 /// - `task_id`: An identifier for the task, used for logging purposes
 /// - `handler`: An implementation of `Handler` to handle incoming requests
-pub async fn handle_request<'b, const N: usize, H, T>(
-    buf: &'b mut [u8],
+pub async fn handle_request<H, T, const N: usize>(
+    buf: &mut [u8],
     io: T,
     task_id: impl Display + Copy,
     handler: H,
-) -> Result<bool, HandleRequestError<T::Error, H::Error>>
+) -> Result<bool, HandlerError<T::Error, H::Error<T::Error>>>
 where
-    H: Handler<'b, T, N>,
+    H: Handler,
     T: Read + Write,
 {
     let mut connection = Connection::<_, N>::new(buf, io).await?;
@@ -537,7 +568,7 @@ where
         Result::Err(e) => connection
             .complete_err("INTERNAL ERROR")
             .await
-            .map_err(|_| HandleRequestError::Handler(e))?,
+            .map_err(|_| HandlerError::Handler(e))?,
     }
 
     Ok(connection.needs_close())
@@ -587,7 +618,7 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
     pub async fn run<A, H>(&mut self, acceptor: A, handler: H) -> Result<(), Error<A::Error>>
     where
         A: edge_nal::TcpAccept,
-        H: for<'b, 't> Handler<'b, &'b mut A::Socket<'t>, N>,
+        H: Handler,
     {
         let mutex = Mutex::<NoopRawMutex, _>::new(());
         let mut tasks = heapless::Vec::<_, P>::new();
@@ -617,7 +648,7 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
 
                         debug!("Handler task {task_id}: Got connection request");
 
-                        handle_connection::<N, _, _>(
+                        handle_connection::<_, _, N>(
                             io,
                             unsafe { buf.as_mut() }.unwrap(),
                             task_id,

@@ -373,7 +373,7 @@ where
     Ok((connection_type, body_type))
 }
 
-impl<'b, const N: usize> Headers<'b, N> {
+impl<const N: usize> Headers<'_, N> {
     fn resolve<E>(
         &self,
         carry_over_connection_type: Option<ConnectionType>,
@@ -497,7 +497,7 @@ where
     type Error = Error<R::Error>;
 }
 
-impl<'b, R> Read for Body<'b, R>
+impl<R> Read for Body<'_, R>
 where
     R: Read,
 {
@@ -545,7 +545,7 @@ where
     type Error = R::Error;
 }
 
-impl<'b, R> Read for PartiallyRead<'b, R>
+impl<R> Read for PartiallyRead<'_, R>
 where
     R: Read,
 {
@@ -824,7 +824,7 @@ where
     type Error = Error<R::Error>;
 }
 
-impl<'b, R> Read for ChunkedRead<'b, R>
+impl<R> Read for ChunkedRead<'_, R>
 where
     R: Read,
 {
