@@ -23,8 +23,6 @@ pub use embedded_svc_compat::*;
 pub const DEFAULT_HANDLER_TASKS_COUNT: usize = 4;
 pub const DEFAULT_BUF_SIZE: usize = 2048;
 
-pub mod registration;
-
 const COMPLETION_BUF_SIZE: usize = 64;
 
 /// A connection state machine for handling HTTP server requests-response cycles.
