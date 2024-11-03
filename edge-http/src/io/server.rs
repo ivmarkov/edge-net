@@ -1,5 +1,6 @@
 use core::fmt::{self, Debug, Display};
 use core::mem::{self, MaybeUninit};
+use core::pin::pin;
 
 use edge_nal::{with_timeout, Close, TcpShutdown, WithTimeout, WithTimeoutError};
 
@@ -393,7 +394,9 @@ where
         task_id: impl Display + Copy,
         connection: &mut Connection<'b, T, N>,
     ) -> Result<(), Self::Error> {
-        with_timeout(self.timeout_ms(), self.io().handle(task_id, connection)).await?;
+        let mut io = pin!(self.io().handle(task_id, connection));
+
+        with_timeout(self.timeout_ms(), &mut io).await?;
 
         Ok(())
     }
