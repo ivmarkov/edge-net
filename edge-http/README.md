@@ -133,7 +133,7 @@ pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
         .bind(addr.parse().unwrap())
         .await?;
 
-    server.run(acceptor, HttpHandler).await?;
+    server.run(None, acceptor, HttpHandler).await?;
 
     Ok(())
 }
