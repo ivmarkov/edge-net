@@ -287,7 +287,7 @@ where
     type Error = Error<T::Error>;
 }
 
-impl<'b, T, const N: usize> Read for Connection<'b, T, N>
+impl<T, const N: usize> Read for Connection<'_, T, N>
 where
     T: Read + Write,
 {
@@ -296,7 +296,7 @@ where
     }
 }
 
-impl<'b, T, const N: usize> Write for Connection<'b, T, N>
+impl<T, const N: usize> Write for Connection<'_, T, N>
 where
     T: Read + Write,
 {
@@ -331,69 +331,98 @@ where
     }
 }
 
+#[derive(Debug)]
+pub enum HandlerError<T, E> {
+    Io(T),
+    Connection(Error<T>),
+    Handler(E),
+}
+
+impl<T, E> From<Error<T>> for HandlerError<T, E> {
+    fn from(e: Error<T>) -> Self {
+        Self::Connection(e)
+    }
+}
+
 /// A trait (async callback) for handling incoming HTTP requests
-pub trait Handler<'b, T, const N: usize>
-where
-    T: Read + Write,
-{
-    type Error: Debug;
+pub trait Handler {
+    type Error<E>: Debug
+    where
+        E: Debug;
 
     /// Handle an incoming HTTP request
     ///
     /// Parameters:
     /// - `task_id`: An identifier for the task, thast can be used by the handler for logging purposes
     /// - `connection`: A connection state machine for the request-response cycle
-    async fn handle(
+    async fn handle<T, const N: usize>(
         &self,
         task_id: impl Display + Copy,
-        connection: &mut Connection<'b, T, N>,
-    ) -> Result<(), Self::Error>;
+        connection: &mut Connection<'_, T, N>,
+    ) -> Result<(), Self::Error<T::Error>>
+    where
+        T: Read + Write;
 }
 
-impl<'b, const N: usize, T, H> Handler<'b, T, N> for &H
+impl<H> Handler for &H
 where
-    T: Read + Write,
-    H: Handler<'b, T, N>,
+    H: Handler,
 {
-    type Error = H::Error;
+    type Error<E>
+        = H::Error<E>
+    where
+        E: Debug;
 
-    async fn handle(
+    async fn handle<T, const N: usize>(
         &self,
         task_id: impl Display + Copy,
-        connection: &mut Connection<'b, T, N>,
-    ) -> Result<(), Self::Error> {
+        connection: &mut Connection<'_, T, N>,
+    ) -> Result<(), Self::Error<T::Error>>
+    where
+        T: Read + Write,
+    {
         (**self).handle(task_id, connection).await
     }
 }
 
-impl<'b, const N: usize, T, H> Handler<'b, T, N> for &mut H
+impl<H> Handler for &mut H
 where
-    T: Read + Write,
-    H: Handler<'b, T, N>,
+    H: Handler,
 {
-    type Error = H::Error;
+    type Error<E>
+        = H::Error<E>
+    where
+        E: Debug;
 
-    async fn handle(
+    async fn handle<T, const N: usize>(
         &self,
         task_id: impl Display + Copy,
-        connection: &mut Connection<'b, T, N>,
-    ) -> Result<(), Self::Error> {
+        connection: &mut Connection<'_, T, N>,
+    ) -> Result<(), Self::Error<T::Error>>
+    where
+        T: Read + Write,
+    {
         (**self).handle(task_id, connection).await
     }
 }
 
-impl<'b, const N: usize, T, H> Handler<'b, T, N> for WithTimeout<H>
+impl<H> Handler for WithTimeout<H>
 where
-    T: Read + Write,
-    H: Handler<'b, T, N>,
+    H: Handler,
 {
-    type Error = WithTimeoutError<H::Error>;
+    type Error<E>
+        = WithTimeoutError<H::Error<E>>
+    where
+        E: Debug;
 
-    async fn handle(
+    async fn handle<T, const N: usize>(
         &self,
         task_id: impl Display + Copy,
-        connection: &mut Connection<'b, T, N>,
-    ) -> Result<(), Self::Error> {
+        connection: &mut Connection<'_, T, N>,
+    ) -> Result<(), Self::Error<T::Error>>
+    where
+        T: Read + Write,
+    {
         let mut io = pin!(self.io().handle(task_id, connection));
 
         with_timeout(self.timeout_ms(), &mut io).await?;
@@ -413,22 +442,22 @@ where
 /// - `buf`: A work-area buffer used by the implementation
 /// - `task_id`: An identifier for the task, used for logging purposes
 /// - `handler`: An implementation of `Handler` to handle incoming requests
-pub async fn handle_connection<const N: usize, T, H>(
+pub async fn handle_connection<H, T, const N: usize>(
     mut io: T,
     buf: &mut [u8],
     task_id: impl Display + Copy,
     handler: H,
 ) where
-    H: for<'b> Handler<'b, &'b mut T, N>,
+    H: Handler,
     T: Read + Write + TcpShutdown,
 {
     let close = loop {
         debug!("Handler task {task_id}: Waiting for new request");
 
-        let result = handle_request::<N, _, _>(buf, &mut io, task_id, &handler).await;
+        let result = handle_request::<_, _, N>(buf, &mut io, task_id, &handler).await;
 
         match result {
-            Err(HandleRequestError::Connection(Error::ConnectionClosed)) => {
+            Err(HandlerError::Connection(Error::ConnectionClosed)) => {
                 debug!("Handler task {task_id}: Connection closed");
                 break false;
             }
@@ -518,14 +547,14 @@ where
 /// - `io`: A socket stream
 /// - `task_id`: An identifier for the task, used for logging purposes
 /// - `handler`: An implementation of `Handler` to handle incoming requests
-pub async fn handle_request<'b, const N: usize, H, T>(
-    buf: &'b mut [u8],
+pub async fn handle_request<H, T, const N: usize>(
+    buf: &mut [u8],
     io: T,
     task_id: impl Display + Copy,
     handler: H,
-) -> Result<bool, HandleRequestError<T::Error, H::Error>>
+) -> Result<bool, HandlerError<T::Error, H::Error<T::Error>>>
 where
-    H: Handler<'b, T, N>,
+    H: Handler,
     T: Read + Write,
 {
     let mut connection = Connection::<_, N>::new(buf, io).await?;
@@ -537,7 +566,7 @@ where
         Result::Err(e) => connection
             .complete_err("INTERNAL ERROR")
             .await
-            .map_err(|_| HandleRequestError::Handler(e))?,
+            .map_err(|_| HandlerError::Handler(e))?,
     }
 
     Ok(connection.needs_close())
@@ -587,7 +616,7 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
     pub async fn run<A, H>(&mut self, acceptor: A, handler: H) -> Result<(), Error<A::Error>>
     where
         A: edge_nal::TcpAccept,
-        H: for<'b, 't> Handler<'b, &'b mut A::Socket<'t>, N>,
+        H: Handler,
     {
         let mutex = Mutex::<NoopRawMutex, _>::new(());
         let mut tasks = heapless::Vec::<_, P>::new();
@@ -617,7 +646,7 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
 
                         debug!("Handler task {task_id}: Got connection request");
 
-                        handle_connection::<N, _, _>(
+                        handle_connection::<_, _, N>(
                             io,
                             unsafe { buf.as_mut() }.unwrap(),
                             task_id,
@@ -649,14 +678,11 @@ mod embedded_svc_compat {
     use embedded_io_async::{Read, Write};
 
     use embedded_svc::http::server::asynch::{Connection, Headers, Query};
-    use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
     use crate::io::Body;
     use crate::RequestHeaders;
 
-    use super::*;
-
-    impl<'b, T, const N: usize> Headers for super::Connection<'b, T, N>
+    impl<T, const N: usize> Headers for super::Connection<'_, T, N>
     where
         T: Read + Write,
     {
@@ -668,7 +694,7 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, T, const N: usize> Query for super::Connection<'b, T, N>
+    impl<T, const N: usize> Query for super::Connection<'_, T, N>
     where
         T: Read + Write,
     {
@@ -724,47 +750,33 @@ mod embedded_svc_compat {
         }
     }
 
-    impl<'b, T, const N: usize> Handler<'b, T, N> for ChainRoot
-    where
-        T: Read + Write,
-    {
-        type Error = Error<T::Error>;
+    // NOTE: Currently, the `edge-http` and the `embedded-svc` Handler traits are
+    // incompatible, in that the `edge-http` async `Handler`'s `handle` method is generic,
+    // while the `embedded-svc` `Handler`'s `handle` method is not.
+    //
+    // Code below is commented out until `embedded-svc`'s `Handler` signature is changed
+    // to match the `edge-http` `Handler` signature.
 
-        async fn handle(
-            &self,
-            _task_id: impl core::fmt::Display + Copy,
-            connection: &mut super::Connection<'b, T, N>,
-        ) -> Result<(), Self::Error> {
-            connection.initiate_response(404, None, &[]).await
-        }
-    }
+    // pub struct SvcHandler<H>(H);
 
-    impl<'b, const N: usize, T, H, Q> Handler<'b, T, N> for ChainHandler<H, Q>
-    where
-        H: embedded_svc::http::server::asynch::Handler<super::Connection<'b, T, N>>,
-        Q: Handler<'b, T, N>,
-        Q::Error: Into<H::Error>,
-        T: Read + Write,
-    {
-        type Error = H::Error;
+    // impl<'b, T, const N: usize, H> Handler for SvcHandler<H>
+    // where
+    //     H: embedded_svc::http::server::asynch::Handler<super::Connection<'b, T, N>>,
+    //     T: Read + Write,
+    // {
+    //     type Error<E> = Error<E> where E: Debug;
 
-        async fn handle(
-            &self,
-            task_id: impl core::fmt::Display + Copy,
-            connection: &mut super::Connection<'b, T, N>,
-        ) -> Result<(), Self::Error> {
-            let headers = connection.headers().ok();
+    //     async fn handle<T, const N: usize>(
+    //         &self,
+    //         _task_id: impl core::fmt::Display + Copy,
+    //         connection: &mut super::Connection<'_, T, N>,
+    //     ) -> Result<(), Self::Error<T::Error>>
+    //     where
+    //         T: Read + Write,
+    //     {
+    //         self.0.handle(connection).await.unwrap();
 
-            if let Some(headers) = headers {
-                if headers.path == self.path && headers.method == self.method.into() {
-                    return self.handler.handle(connection).await;
-                }
-            }
-
-            self.next
-                .handle(task_id, connection)
-                .await
-                .map_err(Into::into)
-        }
-    }
+    //         Ok(())
+    //     }
+    // }
 }

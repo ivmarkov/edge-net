@@ -43,8 +43,8 @@ where
     Ok(())
 }
 
-async fn request<'b, const N: usize, T: TcpConnect>(
-    conn: &mut Connection<'b, T, N>,
+async fn request<const N: usize, T: TcpConnect>(
+    conn: &mut Connection<'_, T, N>,
     uri: &str,
 ) -> Result<(), Error<T::Error>> {
     conn.initiate_request(true, Method::Get, uri, &[("Host", "httpbin.org")])

@@ -1,4 +1,4 @@
-use core::fmt::Display;
+use core::fmt::{Debug, Display};
 
 use edge_http::io::server::{Connection, DefaultServer, Handler};
 use edge_http::io::Error;
@@ -35,17 +35,20 @@ pub async fn run(server: &mut DefaultServer) -> Result<(), anyhow::Error> {
 
 struct HttpHandler;
 
-impl<'b, T, const N: usize> Handler<'b, T, N> for HttpHandler
-where
-    T: Read + Write,
-{
-    type Error = Error<T::Error>;
+impl Handler for HttpHandler {
+    type Error<E>
+        = Error<E>
+    where
+        E: Debug;
 
-    async fn handle(
+    async fn handle<T, const N: usize>(
         &self,
         _task_id: impl Display + Copy,
-        conn: &mut Connection<'b, T, N>,
-    ) -> Result<(), Self::Error> {
+        conn: &mut Connection<'_, T, N>,
+    ) -> Result<(), Self::Error<T::Error>>
+    where
+        T: Read + Write,
+    {
         let headers = conn.headers()?;
 
         if headers.method != Method::Get {
