@@ -17,7 +17,7 @@ pub mod server;
 #[cfg(feature = "io")]
 pub mod io;
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Error {
     DataUnderflow,
     BufferOverflow,

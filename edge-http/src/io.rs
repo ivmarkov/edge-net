@@ -18,7 +18,7 @@ pub mod client;
 pub mod server;
 
 /// An error in parsing the headers or the body.
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Error<E> {
     InvalidHeaders,
     InvalidBody,

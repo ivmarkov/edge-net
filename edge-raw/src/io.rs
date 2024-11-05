@@ -9,7 +9,7 @@ use edge_nal::{MacAddr, RawReceive, RawSend, RawSplit, Readable, UdpReceive, Udp
 use crate as raw;
 
 /// An error that can occur when sending or receiving UDP packets over a raw socket.
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Error<E> {
     Io(E),
     UnsupportedProtocol,

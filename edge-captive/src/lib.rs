@@ -24,7 +24,7 @@ use domain::{
 #[cfg(feature = "io")]
 pub mod io;
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DnsError {
     ShortBuf,
     InvalidMessage,

@@ -31,7 +31,7 @@ pub const IPV6_BROADCAST_ADDR: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0
 pub const PORT: u16 = 5353;
 
 /// A wrapper for mDNS and IO errors.
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum MdnsIoError<E> {
     MdnsError(MdnsError),
     NoRecvBufError,

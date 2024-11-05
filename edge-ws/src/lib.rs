@@ -63,7 +63,7 @@ impl fmt::Display for FrameType {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Error<E> {
     Incomplete(usize),
     Invalid,

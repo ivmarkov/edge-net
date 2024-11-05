@@ -18,7 +18,7 @@ pub mod udp;
 use bytes::BytesIn;
 
 /// An error type for decoding and encoding IP and UDP oackets
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Error {
     DataUnderflow,
     BufferOverflow,
