@@ -37,7 +37,7 @@ pub const DNS_SD_OWNER: NameSlice = NameSlice::new(&["_services", "_dns-sd", "_u
 
 /// A wrapper type for the errors returned by the `domain` library during parsing and
 /// constructing mDNS messages.
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum MdnsError {
     ShortBuf,
     InvalidMessage,

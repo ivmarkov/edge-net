@@ -9,7 +9,7 @@ pub mod server;
 pub const DEFAULT_SERVER_PORT: u16 = 67;
 pub const DEFAULT_CLIENT_PORT: u16 = 68;
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Error<E> {
     Io(E),
     Format(dhcp::Error),

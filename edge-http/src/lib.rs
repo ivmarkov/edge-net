@@ -16,7 +16,7 @@ pub mod io;
 
 /// Errors related to invalid combinations of connection type
 /// and body type (Content-Length, Transfer-Encoding) in the headers
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum HeadersMismatchError {
     /// Connection type mismatch: Keep-Alive connection type in the response,
     /// while the request contained a Close connection type
@@ -888,7 +888,7 @@ pub mod ws {
     }
 
     /// Websocket upgrade errors
-    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
     pub enum UpgradeError {
         /// No `Sec-WebSocket-Version` header
         NoVersion,
