@@ -39,6 +39,22 @@ pub enum MdnsIoError<E> {
     IoError(E),
 }
 
+pub type MdnsIoErrorKind = MdnsIoError<edge_nal::io::ErrorKind>;
+
+impl<E> MdnsIoError<E>
+where
+    E: edge_nal::io::Error,
+{
+    pub fn erase(&self) -> MdnsIoError<edge_nal::io::ErrorKind> {
+        match self {
+            Self::MdnsError(e) => MdnsIoError::MdnsError(*e),
+            Self::NoRecvBufError => MdnsIoError::NoRecvBufError,
+            Self::NoSendBufError => MdnsIoError::NoSendBufError,
+            Self::IoError(e) => MdnsIoError::IoError(e.kind()),
+        }
+    }
+}
+
 impl<E> From<MdnsError> for MdnsIoError<E> {
     fn from(err: MdnsError) -> Self {
         Self::MdnsError(err)

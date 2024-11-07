@@ -9,6 +9,21 @@ pub use embedded_svc_compat::*;
 
 pub type Error<E> = super::Error<E>;
 
+impl<E> Error<E>
+where
+    E: embedded_io_async::Error,
+{
+    pub fn erase(&self) -> Error<embedded_io_async::ErrorKind> {
+        match self {
+            Self::Incomplete(size) => Error::Incomplete(*size),
+            Self::Invalid => Error::Invalid,
+            Self::BufferOverflow => Error::BufferOverflow,
+            Self::InvalidLen => Error::InvalidLen,
+            Self::Io(e) => Error::Io(e.kind()),
+        }
+    }
+}
+
 impl<E> From<ReadExactError<E>> for Error<E> {
     fn from(e: ReadExactError<E>) -> Self {
         match e {

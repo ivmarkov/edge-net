@@ -15,6 +15,20 @@ pub enum Error<E> {
     Format(dhcp::Error),
 }
 
+pub type ErrorKind = Error<edge_nal::io::ErrorKind>;
+
+impl<E> Error<E>
+where
+    E: edge_nal::io::Error,
+{
+    pub fn erase(&self) -> Error<edge_nal::io::ErrorKind> {
+        match self {
+            Self::Io(e) => Error::Io(e.kind()),
+            Self::Format(e) => Error::Format(*e),
+        }
+    }
+}
+
 impl<E> From<dhcp::Error> for Error<E> {
     fn from(value: dhcp::Error) -> Self {
         Self::Format(value)

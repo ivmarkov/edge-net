@@ -34,6 +34,30 @@ pub enum Error<E> {
     Io(E),
 }
 
+pub type ErrorKind = Error<edge_nal::io::ErrorKind>;
+
+impl<E> Error<E>
+where
+    E: edge_nal::io::Error,
+{
+    pub fn erase(&self) -> Error<edge_nal::io::ErrorKind> {
+        match self {
+            Self::InvalidHeaders => Error::InvalidHeaders,
+            Self::InvalidBody => Error::InvalidBody,
+            Self::TooManyHeaders => Error::TooManyHeaders,
+            Self::TooLongHeaders => Error::TooLongHeaders,
+            Self::TooLongBody => Error::TooLongBody,
+            Self::IncompleteHeaders => Error::IncompleteHeaders,
+            Self::IncompleteBody => Error::IncompleteBody,
+            Self::InvalidState => Error::InvalidState,
+            Self::ConnectionClosed => Error::ConnectionClosed,
+            Self::HeadersMismatchError(e) => Error::HeadersMismatchError(*e),
+            Self::WsUpgradeError(e) => Error::WsUpgradeError(*e),
+            Self::Io(e) => Error::Io(e.kind()),
+        }
+    }
+}
+
 impl<E> From<httparse::Error> for Error<E> {
     fn from(e: httparse::Error) -> Self {
         match e {

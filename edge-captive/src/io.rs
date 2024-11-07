@@ -18,6 +18,20 @@ pub enum DnsIoError<E> {
     IoError(E),
 }
 
+pub type DnsIoErrorKind = DnsIoError<edge_nal::io::ErrorKind>;
+
+impl<E> DnsIoError<E>
+where
+    E: edge_nal::io::Error,
+{
+    pub fn erase(&self) -> DnsIoError<edge_nal::io::ErrorKind> {
+        match self {
+            Self::DnsError(e) => DnsIoError::DnsError(*e),
+            Self::IoError(e) => DnsIoError::IoError(e.kind()),
+        }
+    }
+}
+
 impl<E> From<DnsError> for DnsIoError<E> {
     fn from(err: DnsError) -> Self {
         Self::DnsError(err)

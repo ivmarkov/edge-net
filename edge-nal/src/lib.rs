@@ -17,3 +17,7 @@ mod stack;
 mod tcp;
 mod timeout;
 mod udp;
+
+pub mod io {
+    pub use embedded_io_async::*;
+}
