@@ -12,7 +12,7 @@ pub const DEFAULT_SOCKET: SocketAddr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSP
 
 const PORT: u16 = 53;
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DnsIoError<E> {
     DnsError(DnsError),
     IoError(E),
