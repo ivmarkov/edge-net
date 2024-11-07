@@ -317,7 +317,7 @@ where
                         // Support one-shot legacy queries by replying privately
                         // to the remote address, if the query was not sent from the mDNS port (as per the spec)
 
-                        info!("Replying privately to a one-shot mDNS query from {remote}");
+                        debug!("Replying privately to a one-shot mDNS query from {remote}");
 
                         if let Err(err) = send.send(remote, data).await {
                             warn!("Failed to reply privately to {remote}: {err:?}");
@@ -329,7 +329,7 @@ where
                             self.delay().await;
                         }
 
-                        info!("Re-broadcasting due to mDNS query from {remote}");
+                        debug!("Re-broadcasting due to mDNS query from {remote}");
 
                         self.broadcast_once(send, data).await?;
                     }
@@ -356,7 +356,7 @@ where
                 )
         {
             if !data.is_empty() {
-                info!("Broadcasting mDNS entry to {remote_addr}");
+                debug!("Broadcasting mDNS entry to {remote_addr}");
 
                 let fut = pin!(send.send(remote_addr, data));
 
