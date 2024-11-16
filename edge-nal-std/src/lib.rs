@@ -25,7 +25,7 @@ use edge_nal::{
 #[cfg(all(unix, not(target_os = "espidf")))]
 pub use raw::*;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Stack(());
 
 impl Stack {
