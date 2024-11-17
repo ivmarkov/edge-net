@@ -5,6 +5,7 @@ use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddr
 use core::pin::pin;
 
 use buf::BufferAccess;
+
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex;
 use embassy_sync::blocking_mutex::raw::RawMutex;
@@ -14,7 +15,8 @@ use embassy_sync::signal::Signal;
 use edge_nal::{MulticastV4, MulticastV6, Readable, UdpBind, UdpReceive, UdpSend};
 
 use embassy_time::{Duration, Timer};
-use log::{info, warn};
+
+use log::{debug, warn};
 
 use super::*;
 
