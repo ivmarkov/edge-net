@@ -228,7 +228,7 @@ where
             let needs_close = if self.response_mut().is_ok() {
                 self.complete_response().await?
             } else {
-                true
+                false
             };
 
             Result::<_, Error<T::Error>>::Ok(needs_close)
