@@ -239,11 +239,13 @@ where
 
         match result {
             Ok(true) | Err(_) => {
-                let mut io = state.io.take().unwrap();
+                let io = state.io.take();
                 *self = Self::Unbound(state);
 
-                io.close(Close::Both).await.map_err(Error::Io)?;
-                let _ = io.abort().await;
+                if let Some(mut io) = io {
+                    io.close(Close::Both).await.map_err(Error::Io)?;
+                    let _ = io.abort().await;
+                }
             }
             _ => {
                 *self = Self::Unbound(state);
@@ -253,6 +255,17 @@ where
         result?;
 
         Ok(())
+    }
+
+    pub async fn close(mut self) -> Result<(), Error<T::Error>> {
+        let res = self.complete().await;
+
+        if let Some(mut io) = self.unbind().io.take() {
+            io.close(Close::Both).await.map_err(Error::Io)?;
+            let _ = io.abort().await;
+        }
+
+        res
     }
 
     async fn complete_request(&mut self) -> Result<(), Error<T::Error>> {
