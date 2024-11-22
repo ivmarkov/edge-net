@@ -581,7 +581,9 @@ fn dns_lookup_host(host: &str, addr_type: AddrType) -> Result<IpAddr, io::Error>
         .ok_or_else(|| io::ErrorKind::AddrNotAvailable.into())
 }
 
-#[cfg(all(unix, not(target_os = "espidf")))]
+// TODO: Figure out if the RAW socket implementation can be used on any other OS.
+// It seems, that would be difficult on Darwin; wondering about the other BSDs though?
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod raw {
     use core::ops::Deref;
     use core::pin::pin;
