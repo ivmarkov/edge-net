@@ -22,7 +22,7 @@ use edge_nal::{
     TcpSplit, UdpBind, UdpConnect, UdpReceive, UdpSend, UdpSplit,
 };
 
-#[cfg(all(unix, not(target_os = "espidf")))]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub use raw::*;
 
 #[derive(Default, Clone)]
