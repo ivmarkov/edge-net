@@ -1,3 +1,5 @@
+#![warn(clippy::large_futures)]
+
 use core::fmt::{Debug, Display};
 
 use edge_http::io::server::{Connection, DefaultServer, Handler};

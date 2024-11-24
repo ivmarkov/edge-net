@@ -4,14 +4,10 @@ use core::str;
 
 use embedded_io_async::{ErrorType, Read, Write};
 
-use httparse::Status;
-
-use log::trace;
-
 use crate::ws::UpgradeError;
 use crate::{
-    BodyType, ConnectionType, Headers, HeadersMismatchError, Method, RequestHeaders,
-    ResponseHeaders,
+    BodyType, ConnectionType, Headers, HeadersMismatchError, LoadHeadersError, Method,
+    RequestHeaders, ResponseHeaders,
 };
 
 pub mod client;
@@ -58,16 +54,12 @@ where
     }
 }
 
-impl<E> From<httparse::Error> for Error<E> {
-    fn from(e: httparse::Error) -> Self {
+impl<E> From<LoadHeadersError> for Error<E> {
+    fn from(e: LoadHeadersError) -> Self {
         match e {
-            httparse::Error::HeaderName => Self::InvalidHeaders,
-            httparse::Error::HeaderValue => Self::InvalidHeaders,
-            httparse::Error::NewLine => Self::InvalidHeaders,
-            httparse::Error::Status => Self::InvalidHeaders,
-            httparse::Error::Token => Self::InvalidHeaders,
-            httparse::Error::TooManyHeaders => Self::TooManyHeaders,
-            httparse::Error::Version => Self::InvalidHeaders,
+            LoadHeadersError::InvalidHeaders => Self::InvalidHeaders,
+            LoadHeadersError::TooManyHeaders => Self::TooManyHeaders,
+            LoadHeadersError::IncompleteHeaders => Self::IncompleteHeaders,
         }
     }
 }
@@ -126,48 +118,21 @@ impl<'b, const N: usize> RequestHeaders<'b, N> {
     pub async fn receive<R>(
         &mut self,
         buf: &'b mut [u8],
-        mut input: R,
-        exact: bool,
+        input: R,
     ) -> Result<(&'b mut [u8], usize), Error<R::Error>>
     where
         R: Read,
     {
-        let (read_len, headers_len) =
-            match raw::read_reply_buf::<N, _>(&mut input, buf, true, exact).await {
-                Ok(read_len) => read_len,
-                Err(e) => return Err(e),
-            };
+        let (headers_len, read_len) = raw::read_raw_headers(input, buf).await?;
 
-        let mut parser = httparse::Request::new(&mut self.headers.0);
+        let (headers_data, body_buf) = buf.split_at_mut(headers_len);
 
-        let (headers_buf, body_buf) = buf.split_at_mut(headers_len);
-
-        let status = match parser.parse(headers_buf) {
-            Ok(status) => status,
-            Err(e) => return Err(e.into()),
-        };
-
-        if let Status::Complete(headers_len2) = status {
-            if headers_len != headers_len2 {
-                unreachable!("Should not happen. HTTP header parsing is indeterminate.")
-            }
-
-            self.http11 = match parser.version {
-                Some(0) => false,
-                Some(1) => true,
-                _ => Err(Error::InvalidHeaders)?,
-            };
-
-            let method_str = parser.method.ok_or(Error::InvalidHeaders)?;
-            self.method = Method::new(method_str).ok_or(Error::InvalidHeaders)?;
-            self.path = parser.path.ok_or(Error::InvalidHeaders)?;
-
-            trace!("Received:\n{}", self);
-
-            Ok((body_buf, read_len - headers_len))
-        } else {
-            unreachable!("Secondary parse of already loaded buffer failed.")
+        let headers_len = self.load(headers_data)?;
+        if headers_data.len() != headers_len {
+            unreachable!("Should not happen. HTTP header parsing is indeterminate.")
         }
+
+        Ok((body_buf, read_len))
     }
 
     /// Resolve the connection type and body type from the headers
@@ -197,41 +162,21 @@ impl<'b, const N: usize> ResponseHeaders<'b, N> {
     pub async fn receive<R>(
         &mut self,
         buf: &'b mut [u8],
-        mut input: R,
-        exact: bool,
+        input: R,
     ) -> Result<(&'b mut [u8], usize), Error<R::Error>>
     where
         R: Read,
     {
-        let (read_len, headers_len) =
-            raw::read_reply_buf::<N, _>(&mut input, buf, false, exact).await?;
+        let (headers_len, read_len) = raw::read_raw_headers(input, buf).await?;
 
-        let mut parser = httparse::Response::new(&mut self.headers.0);
+        let (headers_data, body_buf) = buf.split_at_mut(headers_len);
 
-        let (headers_buf, body_buf) = buf.split_at_mut(headers_len);
-
-        let status = parser.parse(headers_buf).map_err(Error::from)?;
-
-        if let Status::Complete(headers_len2) = status {
-            if headers_len != headers_len2 {
-                unreachable!("Should not happen. HTTP header parsing is indeterminate.")
-            }
-
-            self.http11 = match parser.version {
-                Some(0) => false,
-                Some(1) => true,
-                _ => Err(Error::InvalidHeaders)?,
-            };
-
-            self.code = parser.code.ok_or(Error::InvalidHeaders)?;
-            self.reason = parser.reason;
-
-            trace!("Received:\n{}", self);
-
-            Ok((body_buf, read_len - headers_len))
-        } else {
-            unreachable!("Secondary parse of already loaded buffer failed.")
+        let headers_len = self.load(headers_data)?;
+        if headers_data.len() != headers_len {
+            unreachable!("Should not happen. HTTP header parsing is indeterminate.")
         }
+
+        Ok((body_buf, read_len))
     }
 
     /// Resolve the connection type and body type from the headers
@@ -1110,72 +1055,19 @@ mod raw {
 
     use super::Error;
 
-    pub(crate) async fn read_reply_buf<const N: usize, R>(
+    pub(crate) async fn read_raw_headers<R>(
         mut input: R,
         buf: &mut [u8],
-        request: bool,
-        exact: bool,
     ) -> Result<(usize, usize), Error<R::Error>>
     where
         R: Read,
     {
-        if exact {
-            let raw_headers_len = read_headers(&mut input, buf).await?;
+        // For now, always read _exactly_ the headers and no more
+        // This is because the calling code cannot yet cope with a non-zero read into the
+        // body (which might even go into the next request/response of HTTP 1.1 keep-alive connections)
+        //
+        // TODO: Slow
 
-            let mut headers = [httparse::EMPTY_HEADER; N];
-
-            let status = if request {
-                httparse::Request::new(&mut headers).parse(&buf[..raw_headers_len])?
-            } else {
-                httparse::Response::new(&mut headers).parse(&buf[..raw_headers_len])?
-            };
-
-            if let httparse::Status::Complete(headers_len) = status {
-                return Ok((raw_headers_len, headers_len));
-            }
-
-            Err(Error::TooManyHeaders)
-        } else {
-            let mut offset = 0;
-            let mut size = 0;
-
-            while buf.len() > size {
-                let read = input.read(&mut buf[offset..]).await.map_err(Error::Io)?;
-                if read == 0 {
-                    Err(if offset == 0 {
-                        Error::ConnectionClosed
-                    } else {
-                        Error::IncompleteHeaders
-                    })?;
-                }
-
-                offset += read;
-                size += read;
-
-                let mut headers = [httparse::EMPTY_HEADER; N];
-
-                let status = if request {
-                    httparse::Request::new(&mut headers).parse(&buf[..size])?
-                } else {
-                    httparse::Response::new(&mut headers).parse(&buf[..size])?
-                };
-
-                if let httparse::Status::Complete(headers_len) = status {
-                    return Ok((size, headers_len));
-                }
-            }
-
-            Err(Error::TooManyHeaders)
-        }
-    }
-
-    pub(crate) async fn read_headers<R>(
-        mut input: R,
-        buf: &mut [u8],
-    ) -> Result<usize, Error<R::Error>>
-    where
-        R: Read,
-    {
         let mut offset = 0;
         let mut byte = [0];
 
@@ -1199,7 +1091,7 @@ mod raw {
             offset += 1;
 
             if offset >= b"\r\n\r\n".len() && buf[offset - 4..offset] == *b"\r\n\r\n" {
-                break Ok(offset);
+                break Ok((offset, 0));
             }
         }
     }

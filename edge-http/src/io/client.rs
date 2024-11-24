@@ -19,7 +19,7 @@ pub use embedded_svc_compat::*;
 
 use super::Method;
 
-const COMPLETION_BUF_SIZE: usize = 64;
+const COMPLETION_BUF_SIZE: usize = 128;
 
 /// A client connection that can be used to send HTTP requests and receive responses.
 #[allow(private_interfaces)]
@@ -28,8 +28,8 @@ where
     T: TcpConnect,
 {
     Transition(TransitionState),
-    Unbound(UnboundState<'b, T, N>),
-    Request(RequestState<'b, T, N>),
+    Unbound(UnboundState<'b, T>),
+    Request(RequestState<'b, T>),
     Response(ResponseState<'b, T, N>),
 }
 
@@ -122,19 +122,22 @@ where
     ///
     /// The connection must be in response mode.
     #[allow(clippy::type_complexity)]
-    pub fn split(&mut self) -> (&ResponseHeaders<'b, N>, &mut Body<'b, T::Socket<'b>>) {
+    pub fn split(&mut self) -> (&ResponseHeaders<'_, N>, &mut Body<'b, T::Socket<'b>>) {
         let response = self.response_mut().expect("Not in response mode");
 
-        (&response.response, &mut response.io)
+        (
+            unsafe { response.response.as_ref().unwrap() },
+            &mut response.io,
+        )
     }
 
     /// Get the headers of the response.
     ///
     /// The connection must be in response mode.
-    pub fn headers(&self) -> Result<&ResponseHeaders<'b, N>, Error<T::Error>> {
+    pub fn headers(&self) -> Result<&ResponseHeaders<'_, N>, Error<T::Error>> {
         let response = self.response_ref()?;
 
-        Ok(&response.response)
+        Ok(unsafe { response.response.as_ref().unwrap() })
     }
 
     /// Get a mutable reference to the raw connection.
@@ -275,21 +278,24 @@ where
 
         let mut state = self.unbind();
         let buf_ptr: *mut [u8] = state.buf;
-        let mut response = ResponseHeaders::new();
 
-        match response
-            .receive(state.buf, &mut state.io.as_mut().unwrap(), true)
-            .await
-        {
+        let (response, buf) = ResponseHeaders::alloc_inside(state.buf).unwrap();
+
+        match response.receive(buf, &mut state.io.as_mut().unwrap()).await {
             Ok((buf, read_len)) => {
+                assert_eq!(read_len, 0);
+
                 let (connection_type, body_type) =
                     response.resolve::<T::Error>(request_connection_type)?;
+
+                let (completion_buf, buf) = buf.split_at_mut(COMPLETION_BUF_SIZE);
 
                 let io = Body::new(body_type, buf, read_len, state.io.unwrap());
 
                 *self = Self::Response(ResponseState {
                     buf: buf_ptr,
                     response,
+                    completion_buf,
                     socket: state.socket,
                     addr: state.addr,
                     connection_type,
@@ -316,8 +322,7 @@ where
 
         let response = self.response_mut()?;
 
-        let mut buf = [0; COMPLETION_BUF_SIZE];
-        while response.io.read(&mut buf).await? > 0 {}
+        while response.io.read(response.completion_buf).await? > 0 {}
 
         let needs_close = response.needs_close();
 
@@ -334,7 +339,7 @@ where
         }
     }
 
-    fn unbind(&mut self) -> UnboundState<'b, T, N> {
+    fn unbind(&mut self) -> UnboundState<'b, T> {
         let state = mem::replace(self, Self::Transition(TransitionState(())));
 
         let unbound = match state {
@@ -365,7 +370,7 @@ where
         unbound
     }
 
-    fn unbound_mut(&mut self) -> Result<&mut UnboundState<'b, T, N>, Error<T::Error>> {
+    fn unbound_mut(&mut self) -> Result<&mut UnboundState<'b, T>, Error<T::Error>> {
         if let Self::Unbound(new) = self {
             Ok(new)
         } else {
@@ -373,7 +378,7 @@ where
         }
     }
 
-    fn request_mut(&mut self) -> Result<&mut RequestState<'b, T, N>, Error<T::Error>> {
+    fn request_mut(&mut self) -> Result<&mut RequestState<'b, T>, Error<T::Error>> {
         if let Self::Request(request) = self {
             Ok(request)
         } else {
@@ -438,7 +443,7 @@ where
 
 struct TransitionState(());
 
-struct UnboundState<'b, T, const N: usize>
+struct UnboundState<'b, T>
 where
     T: TcpConnect,
 {
@@ -448,7 +453,7 @@ where
     io: Option<T::Socket<'b>>,
 }
 
-struct RequestState<'b, T, const N: usize>
+struct RequestState<'b, T>
 where
     T: TcpConnect,
 {
@@ -464,7 +469,8 @@ where
     T: TcpConnect,
 {
     buf: *mut [u8],
-    response: ResponseHeaders<'b, N>,
+    response: *const ResponseHeaders<'b, N>,
+    completion_buf: &'b mut [u8],
     socket: &'b T,
     addr: SocketAddr,
     connection_type: ConnectionType,

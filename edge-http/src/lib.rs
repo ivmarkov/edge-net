@@ -5,14 +5,47 @@
 use core::fmt::{self, Display};
 use core::str;
 
-use httparse::{Header, EMPTY_HEADER};
-use log::{debug, warn};
+use httparse::{Header, Status};
+use log::{debug, trace, warn};
 use ws::{is_upgrade_accepted, is_upgrade_request, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN};
-
-pub const DEFAULT_MAX_HEADERS_COUNT: usize = 64;
 
 #[cfg(feature = "io")]
 pub mod io;
+
+pub const DEFAULT_MAX_HEADERS_COUNT: usize = 64;
+
+/// Errors related to invalid combinations of connection type
+/// and body type (Content-Length, Transfer-Encoding) in the headers
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum LoadHeadersError {
+    InvalidHeaders,
+    IncompleteHeaders,
+    TooManyHeaders,
+}
+
+impl Display for LoadHeadersError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidHeaders => write!(f, "Invalid headers"),
+            Self::IncompleteHeaders => write!(f, "Incomplete headers"),
+            Self::TooManyHeaders => write!(f, "Too many headers"),
+        }
+    }
+}
+
+impl From<httparse::Error> for LoadHeadersError {
+    fn from(e: httparse::Error) -> Self {
+        match e {
+            httparse::Error::HeaderName => Self::InvalidHeaders,
+            httparse::Error::HeaderValue => Self::InvalidHeaders,
+            httparse::Error::NewLine => Self::InvalidHeaders,
+            httparse::Error::Status => Self::InvalidHeaders,
+            httparse::Error::Token => Self::InvalidHeaders,
+            httparse::Error::TooManyHeaders => Self::TooManyHeaders,
+            httparse::Error::Version => Self::InvalidHeaders,
+        }
+    }
+}
 
 /// Errors related to invalid combinations of connection type
 /// and body type (Content-Length, Transfer-Encoding) in the headers
@@ -201,13 +234,21 @@ impl Display for Method {
 
 /// HTTP headers
 #[derive(Debug)]
-pub struct Headers<'b, const N: usize = 64>([httparse::Header<'b>; N]);
+pub struct Headers<'b, const N: usize = DEFAULT_MAX_HEADERS_COUNT>([httparse::Header<'b>; N]);
 
 impl<'b, const N: usize> Headers<'b, N> {
     /// Create a new Headers instance
     #[inline(always)]
     pub const fn new() -> Self {
         Self([httparse::EMPTY_HEADER; N])
+    }
+
+    /// Re-initialize by removing all existing headers
+    pub fn init(&mut self) {
+        for header in &mut self.0 {
+            header.name = "";
+            header.value = b"";
+        }
     }
 
     /// Utility method to return the value of the `Content-Length` header, if present
@@ -315,7 +356,7 @@ impl<'b, const N: usize> Headers<'b, N> {
                 index += 1;
             }
 
-            self.0[index] = EMPTY_HEADER;
+            self.0[index] = httparse::EMPTY_HEADER;
         }
 
         self
@@ -434,6 +475,7 @@ impl<'b, const N: usize> Headers<'b, N> {
 }
 
 impl<const N: usize> Default for Headers<'_, N> {
+    #[inline(always)]
     fn default() -> Self {
         Self::new()
     }
@@ -705,7 +747,7 @@ impl Display for BodyType {
 
 /// Request headers including the request line (method, path)
 #[derive(Debug)]
-pub struct RequestHeaders<'b, const N: usize> {
+pub struct RequestHeaders<'b, const N: usize = DEFAULT_MAX_HEADERS_COUNT> {
     /// Whether the request is HTTP/1.1
     pub http11: bool,
     /// The HTTP method
@@ -716,15 +758,74 @@ pub struct RequestHeaders<'b, const N: usize> {
     pub headers: Headers<'b, N>,
 }
 
-impl<const N: usize> RequestHeaders<'_, N> {
+impl<'b, const N: usize> RequestHeaders<'b, N> {
+    pub const BYTE_SIZE: usize =
+        core::mem::size_of::<Self>() + core::mem::size_of::<httparse::Header>();
+
     // Create a new RequestHeaders instance, defaults to GET / HTTP/1.1
     #[inline(always)]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             http11: true,
             method: Method::Get,
             path: "/",
             headers: Headers::new(),
+        }
+    }
+
+    /// Re-initialize by removing all existing headers and setting the other members to default values
+    pub fn init(&mut self) {
+        self.http11 = true;
+        self.method = Method::Get;
+        self.path = "/";
+        self.headers.init();
+    }
+
+    /// Allocate the headers inside the provided buffer
+    ///
+    /// Returns a tuple with the headers and the remaining buffer
+    pub fn alloc_inside(buf: &mut [u8]) -> Option<(&mut Self, &mut [u8])> {
+        let (headers_buf, buf) = buf.split_at_mut(Self::BYTE_SIZE);
+
+        let (_, headers, _) = unsafe { headers_buf.align_to_mut() };
+
+        if headers.len() == 1 {
+            let headers: &mut Self = &mut headers[0];
+
+            headers.init();
+
+            Some((headers, buf))
+        } else {
+            None
+        }
+    }
+
+    /// Parse the headers from the input stream
+    pub fn load(&mut self, headers_data: &'b [u8]) -> Result<usize, LoadHeadersError> {
+        self.headers.init();
+
+        let mut parser = httparse::Request::new(&mut self.headers.0);
+
+        let status = parser
+            .parse(headers_data)
+            .map_err(|_| LoadHeadersError::InvalidHeaders)?;
+        match status {
+            Status::Complete(headers_len) => {
+                self.http11 = match parser.version {
+                    Some(0) => false,
+                    Some(1) => true,
+                    _ => Err(LoadHeadersError::InvalidHeaders)?,
+                };
+
+                let method_str = parser.method.ok_or(LoadHeadersError::InvalidHeaders)?;
+                self.method = Method::new(method_str).ok_or(LoadHeadersError::InvalidHeaders)?;
+                self.path = parser.path.ok_or(LoadHeadersError::InvalidHeaders)?;
+
+                trace!("Received:\n{}", self);
+
+                Ok(headers_len)
+            }
+            Status::Partial => Err(LoadHeadersError::IncompleteHeaders),
         }
     }
 
@@ -761,7 +862,7 @@ impl<const N: usize> Display for RequestHeaders<'_, N> {
 
 /// Response headers including the response line (HTTP version, status code, reason phrase)
 #[derive(Debug)]
-pub struct ResponseHeaders<'b, const N: usize> {
+pub struct ResponseHeaders<'b, const N: usize = DEFAULT_MAX_HEADERS_COUNT> {
     /// Whether the response is HTTP/1.1
     pub http11: bool,
     /// The status code
@@ -772,7 +873,10 @@ pub struct ResponseHeaders<'b, const N: usize> {
     pub headers: Headers<'b, N>,
 }
 
-impl<const N: usize> ResponseHeaders<'_, N> {
+impl<'b, const N: usize> ResponseHeaders<'b, N> {
+    pub const BYTE_SIZE: usize =
+        core::mem::size_of::<Self>() + core::mem::size_of::<httparse::Header>();
+
     /// Create a new ResponseHeaders instance, defaults to HTTP/1.1 200 OK
     #[inline(always)]
     pub const fn new() -> Self {
@@ -781,6 +885,61 @@ impl<const N: usize> ResponseHeaders<'_, N> {
             code: 200,
             reason: None,
             headers: Headers::new(),
+        }
+    }
+
+    /// Re-initialize by removing all existing headers and setting the other members to default values
+    pub fn init(&mut self) {
+        self.http11 = true;
+        self.code = 200;
+        self.reason = None;
+        self.headers.init();
+    }
+
+    /// Allocate the headers inside the provided buffer
+    ///
+    /// Returns a tuple with the headers and the remaining buffer
+    pub fn alloc_inside(buf: &mut [u8]) -> Option<(&mut Self, &mut [u8])> {
+        let (headers_buf, buf) = buf.split_at_mut(Self::BYTE_SIZE);
+
+        let (_, headers, _) = unsafe { headers_buf.align_to_mut() };
+
+        if headers.len() == 1 {
+            let headers: &mut Self = &mut headers[0];
+
+            headers.init();
+
+            Some((headers, buf))
+        } else {
+            None
+        }
+    }
+
+    /// Load the headers from the input stream
+    pub fn load(&mut self, headers_data: &'b [u8]) -> Result<usize, LoadHeadersError> {
+        self.headers.init();
+
+        let mut parser = httparse::Response::new(&mut self.headers.0);
+
+        let status = parser
+            .parse(headers_data)
+            .map_err(|_| LoadHeadersError::InvalidHeaders)?;
+        match status {
+            Status::Complete(headers_len) => {
+                self.http11 = match parser.version {
+                    Some(0) => false,
+                    Some(1) => true,
+                    _ => Err(LoadHeadersError::InvalidHeaders)?,
+                };
+
+                self.code = parser.code.ok_or(LoadHeadersError::InvalidHeaders)?;
+                self.reason = parser.reason;
+
+                trace!("Received:\n{}", self);
+
+                Ok(headers_len)
+            }
+            Status::Partial => Err(LoadHeadersError::IncompleteHeaders),
         }
     }
 

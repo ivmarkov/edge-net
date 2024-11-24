@@ -1,3 +1,5 @@
+#![warn(clippy::large_futures)]
+
 use core::net::SocketAddr;
 
 use embedded_io_async::Read;
@@ -15,14 +17,16 @@ fn main() {
 
     let stack: edge_nal_std::Stack = Default::default();
 
-    let mut buf = [0_u8; 8192];
+    let mut conn_buf = [0_u8; 8192];
+    let mut data_buf = [0_u8; 1024];
 
-    futures_lite::future::block_on(read(&stack, &mut buf)).unwrap();
+    futures_lite::future::block_on(read(&stack, &mut conn_buf, &mut data_buf)).unwrap();
 }
 
 async fn read<T: TcpConnect + Dns>(
     stack: &T,
-    buf: &mut [u8],
+    conn_buf: &mut [u8],
+    data_buf: &mut [u8],
 ) -> Result<(), Error<<T as TcpConnect>::Error>>
 where
     <T as Dns>::Error: Into<<T as TcpConnect>::Error>,
@@ -34,10 +38,10 @@ where
         .await
         .map_err(|e| Error::Io(e.into()))?;
 
-    let mut conn: Connection<_> = Connection::new(buf, stack, SocketAddr::new(ip, 80));
+    let mut conn: Connection<_> = Connection::new(conn_buf, stack, SocketAddr::new(ip, 80));
 
     for uri in ["/ip", "/headers"] {
-        request(&mut conn, uri).await?;
+        request(&mut conn, uri, data_buf).await?;
     }
 
     Ok(())
@@ -46,6 +50,7 @@ where
 async fn request<const N: usize, T: TcpConnect>(
     conn: &mut Connection<'_, T, N>,
     uri: &str,
+    buf: &mut [u8],
 ) -> Result<(), Error<T::Error>> {
     conn.initiate_request(true, Method::Get, uri, &[("Host", "httpbin.org")])
         .await?;
@@ -54,10 +59,8 @@ async fn request<const N: usize, T: TcpConnect>(
 
     let mut result = Vec::new();
 
-    let mut buf = [0_u8; 1024];
-
     loop {
-        let len = conn.read(&mut buf).await?;
+        let len = conn.read(buf).await?;
 
         if len > 0 {
             result.extend_from_slice(&buf[0..len]);
