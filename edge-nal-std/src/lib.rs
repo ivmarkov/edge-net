@@ -823,6 +823,7 @@ mod raw {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod sys {
     pub use libc::*;
 
