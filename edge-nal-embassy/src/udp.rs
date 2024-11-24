@@ -29,6 +29,10 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
     Udp<'d, D, N, TX_SZ, RX_SZ, M>
 {
     /// Create a new `Udp` instance for the provided Embassy networking stack using the provided UDP buffers.
+    ///
+    /// Ensure that the number of buffers `N` fits within StackResources<N> of
+    /// [embassy_net::Stack], while taking into account the sockets used for DHCP, DNS, etc. else
+    /// [smoltcp::iface::SocketSet] will panic with `adding a socket to a full SocketSet`.
     pub fn new(stack: &'d Stack<D>, buffers: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>) -> Self {
         Self { stack, buffers }
     }
