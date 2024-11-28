@@ -215,18 +215,24 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Mul
 {
     async fn join_v6(
         &mut self,
-        _multicast_addr: Ipv6Addr,
+        multicast_addr: Ipv6Addr,
         _interface: u32,
     ) -> Result<(), Self::Error> {
-        panic!("Joining an Ipv6 multicast group is not supported yet")
+        self.stack
+            .join_multicast_group(IpAddr::V6(multicast_addr))?;
+
+        Ok(())
     }
 
     async fn leave_v6(
         &mut self,
-        _multicast_addr: Ipv6Addr,
+        multicast_addr: Ipv6Addr,
         _interface: u32,
     ) -> Result<(), Self::Error> {
-        panic!("Leaving an Ipv6 multicast group is not supported yet")
+        self.stack
+            .leave_multicast_group(IpAddr::V6(multicast_addr))?;
+
+        Ok(())
     }
 }
 
