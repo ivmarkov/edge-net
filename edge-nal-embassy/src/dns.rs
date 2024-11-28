@@ -8,8 +8,6 @@ use embassy_net::{
 };
 use embedded_io_async::ErrorKind;
 
-use crate::to_net_addr;
-
 /// A struct that implements the `Dns` trait from `edge-nal`
 pub struct Dns<'a> {
     stack: Stack<'a>,
@@ -38,7 +36,7 @@ impl<'a> edge_nal::Dns for Dns<'a> {
         };
         let addrs = self.stack.dns_query(host, qtype).await?;
         if let Some(first) = addrs.first() {
-            Ok(to_net_addr(*first))
+            Ok((*first).into())
         } else {
             Err(Error::Failed.into())
         }

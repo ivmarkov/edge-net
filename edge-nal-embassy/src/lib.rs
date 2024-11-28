@@ -4,10 +4,10 @@
 
 use core::cell::{Cell, UnsafeCell};
 use core::mem::MaybeUninit;
-use core::net::{IpAddr, SocketAddr};
+use core::net::SocketAddr;
 use core::ptr::NonNull;
 
-use embassy_net::{IpAddress, IpEndpoint, IpListenEndpoint};
+use embassy_net::IpEndpoint;
 
 pub use dns::*;
 pub use tcp::*;
@@ -59,7 +59,7 @@ impl<T, const N: usize> Pool<T, N> {
 }
 
 pub(crate) fn to_net_socket(socket: IpEndpoint) -> SocketAddr {
-    SocketAddr::new(to_net_addr(socket.addr), socket.port)
+    SocketAddr::new(socket.addr.into(), socket.port)
 }
 
 // pub(crate) fn to_net_socket2(socket: IpListenEndpoint) -> SocketAddr {
@@ -71,43 +71,3 @@ pub(crate) fn to_net_socket(socket: IpEndpoint) -> SocketAddr {
 //         socket.port,
 //     )
 // }
-
-pub(crate) fn to_emb_socket(socket: SocketAddr) -> IpEndpoint {
-    IpEndpoint {
-        addr: to_emb_addr(socket.ip()),
-        port: socket.port(),
-    }
-}
-
-pub(crate) fn to_emb_bind_socket(socket: SocketAddr) -> IpListenEndpoint {
-    IpListenEndpoint {
-        addr: (!socket.ip().is_unspecified()).then(|| to_emb_addr(socket.ip())),
-        port: socket.port(),
-    }
-}
-
-pub(crate) fn to_net_addr(addr: IpAddress) -> IpAddr {
-    match addr {
-        //#[cfg(feature = "proto-ipv4")]
-        IpAddress::Ipv4(addr) => addr.into(),
-        // #[cfg(not(feature = "proto-ipv4"))]
-        // IpAddr::V4(_) => panic!("ipv4 support not enabled"),
-        //#[cfg(feature = "proto-ipv6")]
-        IpAddress::Ipv6(addr) => addr.into(),
-        // #[cfg(not(feature = "proto-ipv6"))]
-        // IpAddr::V6(_) => panic!("ipv6 support not enabled"),
-    }
-}
-
-pub(crate) fn to_emb_addr(addr: IpAddr) -> IpAddress {
-    match addr {
-        //#[cfg(feature = "proto-ipv4")]
-        IpAddr::V4(addr) => IpAddress::Ipv4(addr),
-        // #[cfg(not(feature = "proto-ipv4"))]
-        // IpAddr::V4(_) => panic!("ipv4 support not enabled"),
-        //#[cfg(feature = "proto-ipv6")]
-        IpAddr::V6(addr) => IpAddress::Ipv6(addr),
-        // #[cfg(not(feature = "proto-ipv6"))]
-        // IpAddr::V6(_) => panic!("ipv6 support not enabled"),
-    }
-}
