@@ -36,8 +36,8 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpBind
-    for Udp<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpBind
+    for Udp<'_, N, TX_SZ, RX_SZ, M>
 {
     type Error = UdpError;
 
@@ -93,8 +93,8 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Drop
-    for UdpSocket<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Drop
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     fn drop(&mut self) {
         unsafe {
@@ -105,14 +105,14 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> ErrorType
-    for UdpSocket<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> ErrorType
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     type Error = UdpError;
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpReceive
-    for UdpSocket<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpReceive
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn receive(&mut self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), Self::Error> {
         let (len, remote_endpoint) = self.socket.recv_from(buffer).await?;
@@ -121,8 +121,8 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSend
-    for UdpSocket<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSend
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn send(&mut self, remote: SocketAddr, data: &[u8]) -> Result<(), Self::Error> {
         self.socket.send_to(data, remote).await?;
@@ -131,14 +131,14 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> ErrorType
-    for &UdpSocket<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> ErrorType
+    for &UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     type Error = UdpError;
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpReceive
-    for &UdpSocket<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpReceive
+    for &UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn receive(&mut self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), Self::Error> {
         let (len, remote_endpoint) = self.socket.recv_from(buffer).await?;
@@ -147,8 +147,8 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSend
-    for &UdpSocket<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSend
+    for &UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn send(&mut self, remote: SocketAddr, data: &[u8]) -> Result<(), Self::Error> {
         self.socket.send_to(data, remote).await?;
@@ -157,16 +157,17 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Readable
-    for &UdpSocket<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Readable
+    for &UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn readable(&mut self) -> Result<(), Self::Error> {
-        Ok(self.socket.wait_recv_ready().await)
+        self.socket.wait_recv_ready().await;
+        Ok(())
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSplit
-    for UdpSocket<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSplit
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     type Receive<'a>
         = &'a Self
@@ -183,8 +184,8 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> MulticastV4
-    for UdpSocket<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> MulticastV4
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn join_v4(
         &mut self,
@@ -209,8 +210,8 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> MulticastV6
-    for UdpSocket<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> MulticastV6
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn join_v6(
         &mut self,
@@ -229,11 +230,12 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Readable
-    for UdpSocket<'d, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Readable
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn readable(&mut self) -> Result<(), Self::Error> {
-        Ok(self.socket.wait_recv_ready().await)
+        self.socket.wait_recv_ready().await;
+        Ok(())
     }
 }
 
@@ -294,6 +296,14 @@ pub struct UdpBuffers<const N: usize, const TX_SZ: usize, const RX_SZ: usize, co
         ),
         N,
     >,
+}
+
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Default
+    for UdpBuffers<N, TX_SZ, RX_SZ, M>
+{
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>

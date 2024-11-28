@@ -31,8 +31,8 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Tcp<'d, N, TX_S
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpConnect
-    for Tcp<'d, N, TX_SZ, RX_SZ>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpConnect
+    for Tcp<'_, N, TX_SZ, RX_SZ>
 {
     type Error = TcpError;
 
@@ -50,9 +50,7 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpConnect
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpBind
-    for Tcp<'d, N, TX_SZ, RX_SZ>
-{
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpBind for Tcp<'_, N, TX_SZ, RX_SZ> {
     type Error = TcpError;
 
     type Accept<'a>
@@ -71,8 +69,8 @@ pub struct TcpAccept<'d, const N: usize, const TX_SZ: usize = 1024, const RX_SZ:
     local: SocketAddr,
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> edge_nal::TcpAccept
-    for TcpAccept<'d, N, TX_SZ, RX_SZ>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> edge_nal::TcpAccept
+    for TcpAccept<'_, N, TX_SZ, RX_SZ>
 {
     type Error = TcpError;
 
@@ -161,8 +159,8 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpSocket<'d, N
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Drop
-    for TcpSocket<'d, N, TX_SZ, RX_SZ>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> Drop
+    for TcpSocket<'_, N, TX_SZ, RX_SZ>
 {
     fn drop(&mut self) {
         unsafe {
@@ -172,22 +170,22 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Drop
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> ErrorType
-    for TcpSocket<'d, N, TX_SZ, RX_SZ>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> ErrorType
+    for TcpSocket<'_, N, TX_SZ, RX_SZ>
 {
     type Error = TcpError;
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Read
-    for TcpSocket<'d, N, TX_SZ, RX_SZ>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> Read
+    for TcpSocket<'_, N, TX_SZ, RX_SZ>
 {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         Ok(self.socket.read(buf).await?)
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Write
-    for TcpSocket<'d, N, TX_SZ, RX_SZ>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> Write
+    for TcpSocket<'_, N, TX_SZ, RX_SZ>
 {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         Ok(self.socket.write(buf).await?)
@@ -200,16 +198,17 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Write
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Readable
-    for TcpSocket<'d, N, TX_SZ, RX_SZ>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> Readable
+    for TcpSocket<'_, N, TX_SZ, RX_SZ>
 {
     async fn readable(&mut self) -> Result<(), Self::Error> {
-        Ok(self.socket.wait_read_ready().await)
+        self.socket.wait_read_ready().await;
+        Ok(())
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpShutdown
-    for TcpSocket<'d, N, TX_SZ, RX_SZ>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpShutdown
+    for TcpSocket<'_, N, TX_SZ, RX_SZ>
 {
     async fn close(&mut self, what: Close) -> Result<(), Self::Error> {
         TcpSocket::close(self, what).await
@@ -224,19 +223,20 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpShutdown
 /// Implements the `Read` trait from `embedded-io-async`
 pub struct TcpSocketRead<'a>(TcpReader<'a>);
 
-impl<'a> ErrorType for TcpSocketRead<'a> {
+impl ErrorType for TcpSocketRead<'_> {
     type Error = TcpError;
 }
 
-impl<'a> Read for TcpSocketRead<'a> {
+impl Read for TcpSocketRead<'_> {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         self.0.read(buf).await.map_err(TcpError::from)
     }
 }
 
-impl<'a> Readable for TcpSocketRead<'a> {
+impl Readable for TcpSocketRead<'_> {
     async fn readable(&mut self) -> Result<(), Self::Error> {
-        Ok(self.0.wait_read_ready().await)
+        self.0.wait_read_ready().await;
+        Ok(())
     }
 }
 
@@ -244,11 +244,11 @@ impl<'a> Readable for TcpSocketRead<'a> {
 /// Implements the `Write` trait from `embedded-io-async`
 pub struct TcpSocketWrite<'a>(TcpWriter<'a>);
 
-impl<'a> ErrorType for TcpSocketWrite<'a> {
+impl ErrorType for TcpSocketWrite<'_> {
     type Error = TcpError;
 }
 
-impl<'a> Write for TcpSocketWrite<'a> {
+impl Write for TcpSocketWrite<'_> {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         self.0.write(buf).await.map_err(TcpError::from)
     }
@@ -258,8 +258,8 @@ impl<'a> Write for TcpSocketWrite<'a> {
     }
 }
 
-impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpSplit
-    for TcpSocket<'d, N, TX_SZ, RX_SZ>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpSplit
+    for TcpSocket<'_, N, TX_SZ, RX_SZ>
 {
     type Read<'a>
         = TcpSocketRead<'a>
@@ -320,6 +320,14 @@ impl embedded_io_async::Error for TcpError {
 /// A struct that holds a pool of TCP buffers
 pub struct TcpBuffers<const N: usize, const TX_SZ: usize, const RX_SZ: usize> {
     pool: Pool<([u8; TX_SZ], [u8; RX_SZ]), N>,
+}
+
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> Default
+    for TcpBuffers<N, TX_SZ, RX_SZ>
+{
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpBuffers<N, TX_SZ, RX_SZ> {
