@@ -22,7 +22,7 @@ impl<'a> Dns<'a> {
     }
 }
 
-impl<'a> edge_nal::Dns for Dns<'a> {
+impl edge_nal::Dns for Dns<'_> {
     type Error = DnsError;
 
     async fn get_host_by_name(

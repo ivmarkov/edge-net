@@ -25,6 +25,7 @@ pub(crate) struct Pool<T, const N: usize> {
 impl<T, const N: usize> Pool<T, N> {
     #[allow(clippy::declare_interior_mutable_const)]
     const VALUE: Cell<bool> = Cell::new(false);
+    #[allow(clippy::declare_interior_mutable_const)]
     const UNINIT: UnsafeCell<MaybeUninit<T>> = UnsafeCell::new(MaybeUninit::uninit());
 
     const fn new() -> Self {
