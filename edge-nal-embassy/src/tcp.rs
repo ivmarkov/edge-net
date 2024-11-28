@@ -6,7 +6,6 @@ use edge_nal::{Close, Readable, TcpBind, TcpConnect, TcpShutdown, TcpSplit};
 
 use embassy_futures::join::join;
 
-use embassy_net::driver::Driver;
 use embassy_net::tcp::{AcceptError, ConnectError, Error, TcpReader, TcpWriter};
 use embassy_net::Stack;
 

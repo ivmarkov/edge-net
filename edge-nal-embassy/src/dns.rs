@@ -4,7 +4,6 @@ use edge_nal::AddrType;
 
 use embassy_net::{
     dns::{DnsQueryType, Error},
-    driver::Driver,
     Stack,
 };
 use embedded_io_async::ErrorKind;

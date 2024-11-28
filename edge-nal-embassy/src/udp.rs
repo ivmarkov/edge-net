@@ -3,7 +3,6 @@ use core::ptr::NonNull;
 
 use edge_nal::{MulticastV4, MulticastV6, Readable, UdpBind, UdpReceive, UdpSend, UdpSplit};
 
-use embassy_net::driver::Driver;
 use embassy_net::udp::{BindError, PacketMetadata, RecvError, SendError};
 use embassy_net::{MulticastError, Stack};
 
