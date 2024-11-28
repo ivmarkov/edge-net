@@ -161,7 +161,7 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     for &UdpSocket<'d, N, TX_SZ, RX_SZ, M>
 {
     async fn readable(&mut self) -> Result<(), Self::Error> {
-        panic!("Not implemented yet")
+        Ok(self.socket.wait_recv_ready().await)
     }
 }
 
@@ -233,7 +233,7 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
     for UdpSocket<'d, N, TX_SZ, RX_SZ, M>
 {
     async fn readable(&mut self) -> Result<(), Self::Error> {
-        panic!("Not implemented yet")
+        Ok(self.socket.wait_recv_ready().await)
     }
 }
 

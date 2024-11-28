@@ -204,7 +204,7 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize> Readable
     for TcpSocket<'d, N, TX_SZ, RX_SZ>
 {
     async fn readable(&mut self) -> Result<(), Self::Error> {
-        panic!("Not implemented yet")
+        Ok(self.socket.wait_read_ready().await)
     }
 }
 
@@ -236,7 +236,7 @@ impl<'a> Read for TcpSocketRead<'a> {
 
 impl<'a> Readable for TcpSocketRead<'a> {
     async fn readable(&mut self) -> Result<(), Self::Error> {
-        panic!("Not implemented yet")
+        Ok(self.0.wait_read_ready().await)
     }
 }
 
