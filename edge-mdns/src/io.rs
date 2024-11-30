@@ -20,9 +20,19 @@ use log::{debug, warn};
 
 use super::*;
 
-/// A quick-and-dirty socket address that binds to a "default" interface.
+/// Socket address that binds to any IPv4-configured interface available
+pub const IPV4_DEFAULT_SOCKET: SocketAddr =
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PORT);
+
+/// Socket address that binds to any IPv6-configured interface available on single-stack
+/// implementations and to any configured interface available on dual-stack implementations.
+pub const IPV6_DEFAULT_SOCKET: SocketAddr =
+    SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), PORT);
+
+/// A quick-and-dirty socket address that binds to any interface available on dual-stack
+/// implementations.
 /// Don't use in production code.
-pub const DEFAULT_SOCKET: SocketAddr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), PORT);
+pub const DEFAULT_SOCKET: SocketAddr = IPV6_DEFAULT_SOCKET;
 
 /// The IPv4 mDNS broadcast address, as per spec.
 pub const IP_BROADCAST_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
