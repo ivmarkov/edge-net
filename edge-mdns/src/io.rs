@@ -299,11 +299,6 @@ where
                     .get()
                     .await
                     .ok_or(MdnsIoError::NoRecvBufError)?;
-                let mut send_buf = self
-                    .send_buf
-                    .get()
-                    .await
-                    .ok_or(MdnsIoError::NoSendBufError)?;
 
                 let (len, remote) = recv
                     .receive(recv_buf.as_mut())
@@ -312,49 +307,57 @@ where
 
                 debug!("Got mDNS query from {remote}");
 
-                let mut send_guard = self.send.lock().await;
-                let send = &mut *send_guard;
+                {
+                    let mut send_buf = self
+                        .send_buf
+                        .get()
+                        .await
+                        .ok_or(MdnsIoError::NoSendBufError)?;
 
-                let response = match handler.lock(|handler| {
-                    handler.borrow_mut().handle(
-                        MdnsRequest::Request {
-                            data: &recv_buf.as_mut()[..len],
-                            legacy: remote.port() != PORT,
-                            multicast: true, // TODO: Cannot determine this
+                    let mut send_guard = self.send.lock().await;
+                    let send = &mut *send_guard;
+
+                    let response = match handler.lock(|handler| {
+                        handler.borrow_mut().handle(
+                            MdnsRequest::Request {
+                                data: &recv_buf.as_mut()[..len],
+                                legacy: remote.port() != PORT,
+                                multicast: true, // TODO: Cannot determine this
+                            },
+                            send_buf.as_mut(),
+                        )
+                    }) {
+                        Ok(len) => len,
+                        Err(err) => match err {
+                            MdnsError::InvalidMessage => {
+                                warn!("Got invalid message from {remote}, skipping");
+                                continue;
+                            }
+                            other => Err(other)?,
                         },
-                        send_buf.as_mut(),
-                    )
-                }) {
-                    Ok(len) => len,
-                    Err(err) => match err {
-                        MdnsError::InvalidMessage => {
-                            warn!("Got invalid message from {remote}, skipping");
-                            continue;
+                    };
+
+                    if let MdnsResponse::Reply { data, delay } = response {
+                        if remote.port() != PORT {
+                            // Support one-shot legacy queries by replying privately
+                            // to the remote address, if the query was not sent from the mDNS port (as per the spec)
+
+                            debug!("Replying privately to a one-shot mDNS query from {remote}");
+
+                            if let Err(err) = send.send(remote, data).await {
+                                warn!("Failed to reply privately to {remote}: {err:?}");
+                            }
+                        } else {
+                            // Otherwise, re-broadcast the response
+
+                            if delay {
+                                self.delay().await;
+                            }
+
+                            debug!("Re-broadcasting due to mDNS query from {remote}");
+
+                            self.broadcast_once(send, data).await?;
                         }
-                        other => Err(other)?,
-                    },
-                };
-
-                if let MdnsResponse::Reply { data, delay } = response {
-                    if remote.port() != PORT {
-                        // Support one-shot legacy queries by replying privately
-                        // to the remote address, if the query was not sent from the mDNS port (as per the spec)
-
-                        debug!("Replying privately to a one-shot mDNS query from {remote}");
-
-                        if let Err(err) = send.send(remote, data).await {
-                            warn!("Failed to reply privately to {remote}: {err:?}");
-                        }
-                    } else {
-                        // Otherwise, re-broadcast the response
-
-                        if delay {
-                            self.delay().await;
-                        }
-
-                        debug!("Re-broadcasting due to mDNS query from {remote}");
-
-                        self.broadcast_once(send, data).await?;
                     }
                 }
             }
