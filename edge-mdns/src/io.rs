@@ -143,6 +143,7 @@ where
     send_buf: SB,
     rand: fn(&mut [u8]),
     broadcast_signal: &'a Signal<M, ()>,
+    wait_readable: bool,
 }
 
 impl<'a, M, R, S, RB, SB> Mdns<'a, M, R, S, RB, SB>
@@ -174,7 +175,15 @@ where
             send_buf,
             rand,
             broadcast_signal,
+            wait_readable: false,
         }
+    }
+
+    /// Sets whether the mDNS service should wait for the socket to be readable before reading.
+    ///
+    /// Setting this to `true` is only useful when the read buffer is shared with other tasks
+    pub fn wait_readable(&mut self, wait_readable: bool) {
+        self.wait_readable = wait_readable;
     }
 
     /// Runs the mDNS service, handling queries and responding to them, as well as broadcasting
@@ -280,7 +289,9 @@ where
         let mut recv = self.recv.lock().await;
 
         loop {
-            recv.readable().await.map_err(MdnsIoError::IoError)?;
+            if self.wait_readable {
+                recv.readable().await.map_err(MdnsIoError::IoError)?;
+            }
 
             {
                 let mut recv_buf = self
