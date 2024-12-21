@@ -15,10 +15,10 @@ categories = [
 ]
 
 [features]
-default = ["io"]
-std = ["io"]
+default = ["io", "std"]
 io = ["embassy-futures", "edge-nal", "time"]
 time = ["embassy-time"]
+std = []
 
 [dependencies]
 heapless = { workspace = true }
