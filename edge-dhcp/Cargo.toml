@@ -17,14 +17,15 @@ categories = [
 [features]
 default = ["io"]
 std = ["io"]
-io = ["embassy-futures", "edge-nal"]
+io = ["embassy-futures", "edge-nal", "time"]
+time = ["embassy-time"]
 
 [dependencies]
 heapless = { workspace = true }
 log = { workspace = true }
 rand_core = "0.6"
 embassy-futures = { workspace = true, optional = true }
-embassy-time = { workspace = true, default-features = false } # TODO: Make optional
+embassy-time = { workspace = true, optional = true, default-features = false }
 edge-nal = { workspace = true, optional = true }
 num_enum = { version = "0.7", default-features = false }
 edge-raw = { workspace = true, default-features = false }

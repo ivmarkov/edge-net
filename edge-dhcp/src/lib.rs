@@ -12,6 +12,7 @@ use num_enum::TryFromPrimitive;
 use edge_raw::bytes::{self, BytesIn, BytesOut};
 
 pub mod client;
+#[cfg(feature = "time")]
 pub mod server;
 
 #[cfg(feature = "io")]
