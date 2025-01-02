@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2024-01-02
+* Connection type support (#33)
+* Proper TCP socket shutdown; Generic TCP timeout utils; built-in HTTP server timeouts; update docu (#34)
+* Always send a SP after status code, even if no reason is given (#36)
+* edge-http: make fields in {Req,Resp}Headers non-optional (#37)
+* Combine Handler and TaskHandler; eradicate all explicit timeouts, now that both TcpAccept and Handler are implemented for WithTimeout
+* Fix memory consumption when using a handler with a timeout
+* (edge-http) Server non-static handler (#40)
+* Option to erase the generics from the IO errors
+* HTTP client: Close method for connections
+
 ## [0.3.0] - 2024-09-10
 * Migrated the client and the server to the `edge-nal` traits
 * Fixed a nasty bug where when multiple HTTP requests were carried over a single TCP connection, in certain cases the server was "eating" into the data of the next HTTP request

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2024-01-02
+* Fix for #24 / avahi - always broadcast to any of the enabled muticast addresses, regardless how we were contacted with a query
+* Support for one-shot queries
+* Option to erase the generics from the IO errors
+* Reduce logging level for the mDNS responder (#43)
+* Provide an IPv4-only default socket for mdns (#51)
+* wait_readable flag; waiting for the socket is now turned off by default due to suspicions that it does not work quite right with embassy-net; Only lock the send buffer once we received a packet
+
 ## [0.3.0] - 2024-09-10
 Almost a complete rewrite:
 * New query API (`Mdns::query`) complementing the responder / query answers' processing one (`Mdns::run`)
