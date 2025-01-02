@@ -1,7 +1,5 @@
 use core::fmt::Debug;
 
-use embassy_time::{Duration, Instant};
-
 use log::{debug, warn};
 
 use super::*;
@@ -9,7 +7,7 @@ use super::*;
 #[derive(Clone, Debug)]
 pub struct Lease {
     mac: [u8; 16],
-    expires: Instant,
+    expires: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -168,17 +166,27 @@ impl<'a> ServerOptions<'a> {
 /// The server is unaware of the IP/UDP transport layer and operates purely in terms of packets
 /// represented as Rust slices.
 #[derive(Clone, Debug)]
-pub struct Server<const N: usize> {
+pub struct Server<F, const N: usize> {
+    pub now: F,
     pub range_start: Ipv4Addr,
     pub range_end: Ipv4Addr,
     pub leases: heapless::LinearMap<Ipv4Addr, Lease, N>,
 }
 
-impl<const N: usize> Server<N> {
-    pub const fn new(ip: Ipv4Addr) -> Self {
+impl<F, const N: usize> Server<F, N>
+where
+    F: FnMut() -> u64,
+{
+    /// Create a new DHCP server.
+    ///
+    /// # Arguments
+    /// - `now`: A closure that returns the current time in seconds since some epoch.
+    /// - `ip`: The IP address of the server.
+    pub const fn new(now: F, ip: Ipv4Addr) -> Self {
         let octets = ip.octets();
 
         Self {
+            now,
             range_start: Ipv4Addr::new(octets[0], octets[1], octets[2], 50),
             range_end: Ipv4Addr::new(octets[0], octets[1], octets[2], 200),
             leases: heapless::LinearMap::new(),
@@ -203,12 +211,13 @@ impl<const N: usize> Server<N> {
                     ip.map(|ip| server_options.offer(request, ip, opt_buf))
                 }
                 Action::Request(ip, mac) => {
+                    let now = (self.now)();
+
                     let ip = (self.is_available(mac, ip)
                         && self.add_lease(
                             ip,
                             request.chaddr,
-                            Instant::now()
-                                + Duration::from_secs(server_options.lease_duration_secs as _),
+                            now + server_options.lease_duration_secs as u64,
                         ))
                     .then_some(ip);
 
@@ -222,7 +231,7 @@ impl<const N: usize> Server<N> {
             })
     }
 
-    fn is_available(&self, mac: &[u8; 16], addr: Ipv4Addr) -> bool {
+    fn is_available(&mut self, mac: &[u8; 16], addr: Ipv4Addr) -> bool {
         let pos: u32 = addr.into();
 
         let start: u32 = self.range_start.into();
@@ -231,7 +240,7 @@ impl<const N: usize> Server<N> {
         pos >= start
             && pos <= end
             && match self.leases.get(&addr) {
-                Some(lease) => lease.mac == *mac || Instant::now() > lease.expires,
+                Some(lease) => lease.mac == *mac || (self.now)() > lease.expires,
                 None => true,
             }
     }
@@ -251,7 +260,7 @@ impl<const N: usize> Server<N> {
         if let Some(addr) = self
             .leases
             .iter()
-            .find_map(|(addr, lease)| (Instant::now() > lease.expires).then_some(*addr))
+            .find_map(|(addr, lease)| ((self.now)() > lease.expires).then_some(*addr))
         {
             self.leases.remove(&addr);
 
@@ -267,7 +276,7 @@ impl<const N: usize> Server<N> {
             .find_map(|(addr, lease)| (lease.mac == *mac).then_some(*addr))
     }
 
-    fn add_lease(&mut self, addr: Ipv4Addr, mac: [u8; 16], expires: Instant) -> bool {
+    fn add_lease(&mut self, addr: Ipv4Addr, mac: [u8; 16], expires: u64) -> bool {
         self.remove_lease(&mac);
 
         self.leases.insert(addr, Lease { mac, expires }).is_ok()
@@ -281,5 +290,16 @@ impl<const N: usize> Server<N> {
         } else {
             false
         }
+    }
+}
+
+#[cfg(feature = "io")]
+impl<const N: usize> Server<fn() -> u64, N> {
+    /// Create a new DHCP server using `embassy-time::Instant::now` as the currtent time epoch provider.
+    ///
+    /// # Arguments
+    /// - `ip`: The IP address of the server.
+    pub const fn new_with_et(ip: Ipv4Addr) -> Self {
+        Self::new(|| embassy_time::Instant::now().as_secs(), ip)
     }
 }

@@ -23,14 +23,15 @@ pub use super::*;
 ///
 /// This is currently only possible with STD's BSD raw sockets' implementation. Unfortunately, `smoltcp` and thus `embassy-net`
 /// do not have an equivalent (yet).
-pub async fn run<T, const N: usize>(
-    server: &mut dhcp::server::Server<N>,
+pub async fn run<T, F, const N: usize>(
+    server: &mut dhcp::server::Server<F, N>,
     server_options: &dhcp::server::ServerOptions<'_>,
     socket: &mut T,
     buf: &mut [u8],
 ) -> Result<(), Error<T::Error>>
 where
     T: UdpReceive + UdpSend,
+    F: FnMut() -> u64,
 {
     info!(
         "Running DHCP server for addresses {}-{} with configuration {server_options:?}",

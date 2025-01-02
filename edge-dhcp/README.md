@@ -113,7 +113,7 @@ async fn run(if_index: u32) -> Result<(), anyhow::Error> {
     let mut gw_buf = [Ipv4Addr::UNSPECIFIED];
 
     io::server::run(
-        &mut Server::<64>::new(ip), // Will give IP addresses in the range 192.168.0.50 - 192.168.0.200, subnet 255.255.255.0
+        &mut Server::<_, 64>::new_with_et(ip), // Will give IP addresses in the range 192.168.0.50 - 192.168.0.200, subnet 255.255.255.0
         &ServerOptions::new(ip, Some(&mut gw_buf)),
         &mut socket,
         &mut buf,
