@@ -3,55 +3,53 @@ use core::ptr::NonNull;
 
 use edge_nal::{MulticastV4, MulticastV6, Readable, UdpBind, UdpReceive, UdpSend, UdpSplit};
 
-use embassy_net::driver::Driver;
 use embassy_net::udp::{BindError, PacketMetadata, RecvError, SendError};
 use embassy_net::{MulticastError, Stack};
 
 use embedded_io_async::{ErrorKind, ErrorType};
 
-use crate::{to_emb_addr, to_emb_bind_socket, to_emb_socket, to_net_socket, Pool};
+use crate::{to_net_socket, Pool};
 
 /// A struct that implements the `UdpBind` factory trait from `edge-nal`
 /// Capable of managing up to N concurrent connections with TX and RX buffers according to TX_SZ and RX_SZ, and packet metadata according to `M`.
 pub struct Udp<
     'd,
-    D: Driver,
     const N: usize,
     const TX_SZ: usize = 1500,
     const RX_SZ: usize = 1500,
     const M: usize = 2,
 > {
-    stack: &'d Stack<D>,
+    stack: Stack<'d>,
     buffers: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>,
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
-    Udp<'d, D, N, TX_SZ, RX_SZ, M>
+impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
+    Udp<'d, N, TX_SZ, RX_SZ, M>
 {
     /// Create a new `Udp` instance for the provided Embassy networking stack using the provided UDP buffers.
     ///
     /// Ensure that the number of buffers `N` fits within StackResources<N> of
     /// [embassy_net::Stack], while taking into account the sockets used for DHCP, DNS, etc. else
     /// [smoltcp::iface::SocketSet] will panic with `adding a socket to a full SocketSet`.
-    pub fn new(stack: &'d Stack<D>, buffers: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>) -> Self {
+    pub fn new(stack: Stack<'d>, buffers: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>) -> Self {
         Self { stack, buffers }
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpBind
-    for Udp<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpBind
+    for Udp<'_, N, TX_SZ, RX_SZ, M>
 {
     type Error = UdpError;
 
     type Socket<'a>
-        = UdpSocket<'a, D, N, TX_SZ, RX_SZ, M>
+        = UdpSocket<'a, N, TX_SZ, RX_SZ, M>
     where
         Self: 'a;
 
     async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = UdpSocket::new(self.stack, self.buffers)?;
 
-        socket.socket.bind(to_emb_bind_socket(local))?;
+        socket.socket.bind(local)?;
 
         Ok(socket)
     }
@@ -59,26 +57,19 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
 
 /// A UDP socket
 /// Implements the `UdpReceive` `UdpSend` and `UdpSplit` traits from `edge-nal`
-pub struct UdpSocket<
-    'd,
-    D: Driver,
-    const N: usize,
-    const TX_SZ: usize,
-    const RX_SZ: usize,
-    const M: usize,
-> {
-    stack: &'d embassy_net::Stack<D>,
+pub struct UdpSocket<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> {
+    stack: embassy_net::Stack<'d>,
     socket: embassy_net::udp::UdpSocket<'d>,
     stack_buffers: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>,
     socket_buffers: NonNull<([u8; TX_SZ], [u8; RX_SZ])>,
     socket_meta_buffers: NonNull<([PacketMetadata; M], [PacketMetadata; M])>,
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
-    UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
+    UdpSocket<'d, N, TX_SZ, RX_SZ, M>
 {
     fn new(
-        stack: &'d Stack<D>,
+        stack: Stack<'d>,
         stack_buffers: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>,
     ) -> Result<Self, UdpError> {
         let mut socket_buffers = stack_buffers.pool.alloc().ok_or(UdpError::NoBuffers)?;
@@ -102,8 +93,8 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Drop
-    for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Drop
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     fn drop(&mut self) {
         unsafe {
@@ -114,68 +105,69 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
-    ErrorType for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> ErrorType
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     type Error = UdpError;
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
-    UdpReceive for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpReceive
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn receive(&mut self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), Self::Error> {
         let (len, remote_endpoint) = self.socket.recv_from(buffer).await?;
 
-        Ok((len, to_net_socket(remote_endpoint)))
+        Ok((len, to_net_socket(remote_endpoint.endpoint)))
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSend
-    for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSend
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn send(&mut self, remote: SocketAddr, data: &[u8]) -> Result<(), Self::Error> {
-        self.socket.send_to(data, to_emb_socket(remote)).await?;
+        self.socket.send_to(data, remote).await?;
 
         Ok(())
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
-    ErrorType for &UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> ErrorType
+    for &UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     type Error = UdpError;
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
-    UdpReceive for &UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpReceive
+    for &UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn receive(&mut self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), Self::Error> {
         let (len, remote_endpoint) = self.socket.recv_from(buffer).await?;
 
-        Ok((len, to_net_socket(remote_endpoint)))
+        Ok((len, to_net_socket(remote_endpoint.endpoint)))
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSend
-    for &UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSend
+    for &UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn send(&mut self, remote: SocketAddr, data: &[u8]) -> Result<(), Self::Error> {
-        self.socket.send_to(data, to_emb_socket(remote)).await?;
+        self.socket.send_to(data, remote).await?;
 
         Ok(())
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Readable
-    for &UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Readable
+    for &UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn readable(&mut self) -> Result<(), Self::Error> {
-        panic!("Not implemented yet")
+        self.socket.wait_recv_ready().await;
+        Ok(())
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSplit
-    for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> UdpSplit
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     type Receive<'a>
         = &'a Self
@@ -192,8 +184,8 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
-    MulticastV4 for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> MulticastV4
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn join_v4(
         &mut self,
@@ -201,8 +193,7 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
         _interface: Ipv4Addr,
     ) -> Result<(), Self::Error> {
         self.stack
-            .join_multicast_group(to_emb_addr(IpAddr::V4(multicast_addr)))
-            .await?;
+            .join_multicast_group(IpAddr::V4(multicast_addr))?;
 
         Ok(())
     }
@@ -213,38 +204,44 @@ impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, cons
         _interface: Ipv4Addr,
     ) -> Result<(), Self::Error> {
         self.stack
-            .leave_multicast_group(to_emb_addr(IpAddr::V4(multicast_addr)))
-            .await?;
+            .leave_multicast_group(IpAddr::V4(multicast_addr))?;
 
         Ok(())
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
-    MulticastV6 for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> MulticastV6
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn join_v6(
         &mut self,
-        _multicast_addr: Ipv6Addr,
+        multicast_addr: Ipv6Addr,
         _interface: u32,
     ) -> Result<(), Self::Error> {
-        panic!("Joining an Ipv6 multicast group is not supported yet")
+        self.stack
+            .join_multicast_group(IpAddr::V6(multicast_addr))?;
+
+        Ok(())
     }
 
     async fn leave_v6(
         &mut self,
-        _multicast_addr: Ipv6Addr,
+        multicast_addr: Ipv6Addr,
         _interface: u32,
     ) -> Result<(), Self::Error> {
-        panic!("Leaving an Ipv6 multicast group is not supported yet")
+        self.stack
+            .leave_multicast_group(IpAddr::V6(multicast_addr))?;
+
+        Ok(())
     }
 }
 
-impl<'d, D: Driver, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Readable
-    for UdpSocket<'d, D, N, TX_SZ, RX_SZ, M>
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Readable
+    for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn readable(&mut self) -> Result<(), Self::Error> {
-        panic!("Not implemented yet")
+        self.socket.wait_recv_ready().await;
+        Ok(())
     }
 }
 
@@ -305,6 +302,14 @@ pub struct UdpBuffers<const N: usize, const TX_SZ: usize, const RX_SZ: usize, co
         ),
         N,
     >,
+}
+
+impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Default
+    for UdpBuffers<N, TX_SZ, RX_SZ, M>
+{
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
