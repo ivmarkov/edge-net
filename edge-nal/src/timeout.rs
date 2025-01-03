@@ -16,7 +16,7 @@ use core::{
 use embassy_time::Duration;
 use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
 
-use crate::{Readable, TcpAccept, TcpConnect, TcpShutdown};
+use crate::{Readable, TcpAccept, TcpConnect, TcpShutdown, TcpSplit};
 
 /// Error type for the `with_timeout` function and `WithTimeout` struct.
 #[derive(Debug)]
@@ -172,6 +172,26 @@ where
 {
     async fn readable(&mut self) -> Result<(), Self::Error> {
         with_timeout(self.1, self.0.readable()).await
+    }
+}
+
+impl<T> TcpSplit for WithTimeout<T>
+where
+    T: TcpSplit,
+{
+    type Read<'a>
+        = WithTimeout<T::Read<'a>>
+    where
+        Self: 'a;
+
+    type Write<'a>
+        = WithTimeout<T::Write<'a>>
+    where
+        Self: 'a;
+
+    fn split(&mut self) -> (Self::Read<'_>, Self::Write<'_>) {
+        let (r, w) = self.0.split();
+        (WithTimeout::new(self.1, r), WithTimeout::new(self.1, w))
     }
 }
 

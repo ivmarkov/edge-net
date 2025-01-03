@@ -2,7 +2,9 @@ use core::fmt::{self, Debug, Display};
 use core::mem::{self, MaybeUninit};
 use core::pin::pin;
 
-use edge_nal::{with_timeout, Close, Readable, TcpShutdown, WithTimeout, WithTimeoutError};
+use edge_nal::{
+    with_timeout, Close, Readable, TcpShutdown, TcpSplit, WithTimeout, WithTimeoutError,
+};
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -361,7 +363,7 @@ pub trait Handler {
         connection: &mut Connection<'_, T, N>,
     ) -> Result<(), Self::Error<T::Error>>
     where
-        T: Read + Write;
+        T: Read + Write + TcpSplit;
 }
 
 impl<H> Handler for &H
@@ -379,7 +381,7 @@ where
         connection: &mut Connection<'_, T, N>,
     ) -> Result<(), Self::Error<T::Error>>
     where
-        T: Read + Write,
+        T: Read + Write + TcpSplit,
     {
         (**self).handle(task_id, connection).await
     }
@@ -400,7 +402,7 @@ where
         connection: &mut Connection<'_, T, N>,
     ) -> Result<(), Self::Error<T::Error>>
     where
-        T: Read + Write,
+        T: Read + Write + TcpSplit,
     {
         (**self).handle(task_id, connection).await
     }
@@ -421,7 +423,7 @@ where
         connection: &mut Connection<'_, T, N>,
     ) -> Result<(), Self::Error<T::Error>>
     where
-        T: Read + Write,
+        T: Read + Write + TcpSplit,
     {
         let mut io = pin!(self.io().handle(task_id, connection));
 
@@ -463,7 +465,7 @@ pub async fn handle_connection<H, T, const N: usize>(
     handler: H,
 ) where
     H: Handler,
-    T: Read + Write + Readable + TcpShutdown,
+    T: Read + Write + Readable + TcpSplit + TcpShutdown,
 {
     let close = loop {
         debug!("Handler task {task_id}: Waiting for a new request");
@@ -584,7 +586,7 @@ pub async fn handle_request<H, T, const N: usize>(
 ) -> Result<bool, HandlerError<T::Error, H::Error<T::Error>>>
 where
     H: Handler,
-    T: Read + Write,
+    T: Read + Write + TcpSplit,
 {
     let mut connection = Connection::<_, N>::new(buf, io).await?;
 
