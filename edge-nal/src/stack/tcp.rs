@@ -46,6 +46,7 @@ pub trait TcpConnect {
     type Socket<'a>: Read<Error = Self::Error>
         + Write<Error = Self::Error>
         + Readable<Error = Self::Error>
+        + TcpSplit<Error = Self::Error>
         + TcpShutdown<Error = Self::Error>
     where
         Self: 'a;
