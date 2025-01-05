@@ -1,6 +1,6 @@
 [package]
 name = "edge-net"
-version = "0.9.2"
+version = "0.9.3"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
 categories = ["embedded", "hardware-support", "network-programming", "asynchronous"]
@@ -124,4 +124,4 @@ edge-nal = { version = "0.4.2", path = "edge-nal", default-features = false }
 edge-raw = { version = "0.4.0", path = "edge-raw", default-features = false }
 edge-ws = { version = "0.4.0", path = "edge-ws", default-features = false }
 edge-nal-std = { version = "0.4.0", path = "edge-nal-std", default-features = false }
-edge-nal-embassy = { version = "0.4.0", path = "edge-nal-embassy", default-features = false }
+edge-nal-embassy = { version = "0.4.1", path = "edge-nal-embassy", default-features = false }
