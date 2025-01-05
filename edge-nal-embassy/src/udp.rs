@@ -8,7 +8,7 @@ use embassy_net::{MulticastError, Stack};
 
 use embedded_io_async::{ErrorKind, ErrorType};
 
-use crate::{to_net_socket, Pool};
+use crate::{to_emb_bind_socket, to_emb_socket, to_net_socket, Pool};
 
 /// A struct that implements the `UdpBind` factory trait from `edge-nal`
 /// Capable of managing up to N concurrent connections with TX and RX buffers according to TX_SZ and RX_SZ, and packet metadata according to `M`.
@@ -49,7 +49,7 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Udp
     async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = UdpSocket::new(self.stack, self.buffers)?;
 
-        socket.socket.bind(local)?;
+        socket.socket.bind(to_emb_bind_socket(local))?;
 
         Ok(socket)
     }
@@ -125,7 +125,7 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Udp
     for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn send(&mut self, remote: SocketAddr, data: &[u8]) -> Result<(), Self::Error> {
-        self.socket.send_to(data, remote).await?;
+        self.socket.send_to(data, to_emb_socket(remote)).await?;
 
         Ok(())
     }

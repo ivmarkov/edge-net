@@ -7,7 +7,7 @@ use core::mem::MaybeUninit;
 use core::net::SocketAddr;
 use core::ptr::NonNull;
 
-use embassy_net::IpEndpoint;
+use embassy_net::{IpEndpoint, IpListenEndpoint};
 
 pub use dns::*;
 pub use tcp::*;
@@ -72,3 +72,17 @@ pub(crate) fn to_net_socket(socket: IpEndpoint) -> SocketAddr {
 //         socket.port,
 //     )
 // }
+
+pub(crate) fn to_emb_socket(socket: SocketAddr) -> IpEndpoint {
+    IpEndpoint {
+        addr: socket.ip().into(),
+        port: socket.port(),
+    }
+}
+
+pub(crate) fn to_emb_bind_socket(socket: SocketAddr) -> IpListenEndpoint {
+    IpListenEndpoint {
+        addr: (!socket.ip().is_unspecified()).then(|| socket.ip().into()),
+        port: socket.port(),
+    }
+}
