@@ -98,7 +98,7 @@ where
     for payload in ["Hello world!", "How are you?", "I'm fine, thanks!"] {
         let header = FrameHeader {
             frame_type: FrameType::Text(false),
-            payload_len: payload.as_bytes().len() as _,
+            payload_len: payload.len() as _,
             mask_key: rng_source.next_u32().into(),
         };
 
