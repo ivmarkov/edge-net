@@ -18,7 +18,7 @@ categories = [
 embedded-io-async = { workspace = true, features = ["std"] }
 edge-nal = { workspace = true }
 async-io = "2"
-async-io-mini = { version = "0.2", optional = true }
+async-io-mini = { version = "0.3", git = "https://github.com/ivmarkov/async-io-mini", optional = true }
 futures-lite = "2"
 libc = "0.2"
 heapless = { workspace = true }
