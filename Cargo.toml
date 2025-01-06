@@ -1,6 +1,6 @@
 [package]
 name = "edge-net"
-version = "0.9.3"
+version = "0.10.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
 categories = ["embedded", "hardware-support", "network-programming", "asynchronous"]
@@ -9,7 +9,7 @@ description = "no_std and no-alloc async implementations of various network prot
 repository = "https://github.com/ivmarkov/edge-net"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.78"
+rust-version = "1.83"
 
 [features]
 default = ["io"]
@@ -115,13 +115,13 @@ log = { version = "0.4", default-features = false }
 heapless = { version = "0.8", default-features = false }
 domain = { version = "0.10", default-features = false, features = ["heapless"] }
 
-edge-captive = { version = "0.4.0", path = "edge-captive", default-features = false }
-edge-dhcp = { version = "0.4.0", path = "edge-dhcp", default-features = false }
-edge-http = { version = "0.4.1", path = "edge-http", default-features = false }
-edge-mdns = { version = "0.4.0", path = "edge-mdns", default-features = false }
+edge-captive = { version = "0.5.0", path = "edge-captive", default-features = false }
+edge-dhcp = { version = "0.5.0", path = "edge-dhcp", default-features = false }
+edge-http = { version = "0.5.0", path = "edge-http", default-features = false }
+edge-mdns = { version = "0.5.0", path = "edge-mdns", default-features = false }
 edge-mqtt = { version = "0.4.0", path = "edge-mqtt", default-features = false }
-edge-nal = { version = "0.4.2", path = "edge-nal", default-features = false }
-edge-raw = { version = "0.4.0", path = "edge-raw", default-features = false }
+edge-nal = { version = "0.5.0", path = "edge-nal", default-features = false }
+edge-raw = { version = "0.5.0", path = "edge-raw", default-features = false }
 edge-ws = { version = "0.4.0", path = "edge-ws", default-features = false }
-edge-nal-std = { version = "0.4.0", path = "edge-nal-std", default-features = false }
-edge-nal-embassy = { version = "0.4.1", path = "edge-nal-embassy", default-features = false }
+edge-nal-std = { version = "0.5.0", path = "edge-nal-std", default-features = false }
+edge-nal-embassy = { version = "0.5.0", path = "edge-nal-embassy", default-features = false }
