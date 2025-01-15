@@ -1,8 +1,8 @@
 [package]
 name = "edge-dhcp"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.83"
 description = "Async + `no_std` + no-alloc implementation of the DHCP protocol"
 repository = "https://github.com/ivmarkov/edge-net"
 readme = "README.md"
