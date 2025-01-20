@@ -444,6 +444,7 @@ impl<const N: usize> Default for Headers<'_, N> {
 pub enum ConnectionType {
     KeepAlive,
     Close,
+    Upgrade,
 }
 
 impl ConnectionType {
@@ -499,6 +500,8 @@ impl ConnectionType {
             && value.eq_ignore_ascii_case("Keep-Alive")
         {
             Some(Self::KeepAlive)
+        } else if "Connection".eq_ignore_ascii_case(name) && value.eq_ignore_ascii_case("Upgrade") {
+            Some(Self::Upgrade)
         } else {
             None
         }
@@ -535,6 +538,7 @@ impl ConnectionType {
         let connection = match self {
             Self::KeepAlive => "Keep-Alive",
             Self::Close => "Close",
+            Self::Upgrade => "Upgrade",
         };
 
         ("Connection", connection.as_bytes())
@@ -546,6 +550,7 @@ impl Display for ConnectionType {
         match self {
             Self::KeepAlive => write!(f, "Keep-Alive"),
             Self::Close => write!(f, "Close"),
+            Self::Upgrade => write!(f, "Upgrade"),
         }
     }
 }
@@ -619,6 +624,16 @@ impl BodyType {
                     }
                 } else if matches!(connection_type, ConnectionType::Close) {
                     Ok(BodyType::Raw)
+                } else if matches!(connection_type, ConnectionType::Upgrade) {
+                    if http11 {
+                        debug!("Unknown body type in response but the Connection is Upgrade. Assuming Content-Length=0.");
+                        Ok(BodyType::ContentLen(0))
+                    } else {
+                        warn!("Connection is set to Upgrade but the HTTP protocol version is not 1.1. This is not allowed.");
+                        Err(HeadersMismatchError::BodyTypeError(
+                            "Connection is set to Upgrade but the HTTP protocol version is not 1.1. This is not allowed.",
+                        ))
+                    }
                 } else if chunked_if_unspecified && http11 {
                     // With HTTP1.1 we can safely upgrade the body to a chunked one
                     Ok(BodyType::Chunked)
@@ -1183,6 +1198,14 @@ mod test {
             BodyType::resolve(None, ConnectionType::Close, true, false, false).unwrap(),
             BodyType::ContentLen(0)
         );
+        assert_eq!(
+            BodyType::resolve(None, ConnectionType::Upgrade, false, true, false).unwrap(),
+            BodyType::ContentLen(0)
+        );
+
+        // Receiving a response with no body type after requesting a connection upgrade with
+        // HTTP1.0 is no allowed.
+        assert!(BodyType::resolve(None, ConnectionType::Upgrade, false, false, false).is_err());
 
         // Request or response with a chunked body type is invalid for HTTP1.0
         assert!(BodyType::resolve(
