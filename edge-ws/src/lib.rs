@@ -193,12 +193,7 @@ impl FrameHeader {
 
             let frame_header = FrameHeader {
                 frame_type,
-                payload_len: matches!(
-                    frame_type,
-                    FrameType::Binary(_) | FrameType::Text(_) | FrameType::Continue(_)
-                )
-                .then(|| payload_len)
-                .unwrap_or(0),
+                payload_len,
                 mask_key,
             };
 
