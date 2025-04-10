@@ -60,7 +60,7 @@ where
     /// Reinitialize the connection with a new address.
     pub async fn reinitialize(&mut self, addr: SocketAddr) -> Result<(), Error<T::Error>> {
         let _ = self.complete().await;
-        self.unbound_mut().unwrap().addr = addr;
+        unwrap!(self.unbound_mut(), "Unreachable").addr = addr;
 
         Ok(())
     }
@@ -148,7 +148,7 @@ where
     pub fn release(mut self) -> (T::Socket<'b>, &'b mut [u8]) {
         let mut state = self.unbind();
 
-        let io = state.io.take().unwrap();
+        let io = unwrap!(state.io.take());
 
         (io, state.buf)
     }
@@ -174,7 +174,7 @@ where
         let mut state = self.unbind();
 
         let result = async {
-            match send_request(http11, method, uri, state.io.as_mut().unwrap()).await {
+            match send_request(http11, method, uri, unwrap!(state.io.as_mut())).await {
                 Ok(_) => (),
                 Err(Error::Io(_)) => {
                     if !fresh_connection {
@@ -182,13 +182,13 @@ where
                         state.io = None;
                         state.io = Some(state.socket.connect(state.addr).await.map_err(Error::Io)?);
 
-                        send_request(http11, method, uri, state.io.as_mut().unwrap()).await?;
+                        send_request(http11, method, uri, unwrap!(state.io.as_mut())).await?;
                     }
                 }
                 Err(other) => Err(other)?,
             }
 
-            let io = state.io.as_mut().unwrap();
+            let io = unwrap!(state.io.as_mut());
 
             send_headers(headers, None, true, http11, true, &mut *io).await
         }
@@ -201,7 +201,7 @@ where
                     socket: state.socket,
                     addr: state.addr,
                     connection_type,
-                    io: SendBody::new(body_type, state.io.unwrap()),
+                    io: SendBody::new(body_type, unwrap!(state.io)),
                 });
 
                 Ok(())
@@ -278,14 +278,14 @@ where
         let mut response = ResponseHeaders::new();
 
         match response
-            .receive(state.buf, &mut state.io.as_mut().unwrap(), true)
+            .receive(state.buf, &mut unwrap!(state.io.as_mut()), true)
             .await
         {
             Ok((buf, read_len)) => {
                 let (connection_type, body_type) =
                     response.resolve::<T::Error>(request_connection_type)?;
 
-                let io = Body::new(body_type, buf, read_len, state.io.unwrap());
+                let io = Body::new(body_type, buf, read_len, unwrap!(state.io));
 
                 *self = Self::Response(ResponseState {
                     buf: buf_ptr,
@@ -300,7 +300,7 @@ where
             }
             Err(e) => {
                 state.io = None;
-                state.buf = unsafe { buf_ptr.as_mut().unwrap() };
+                state.buf = unwrap!(unsafe { buf_ptr.as_mut() });
 
                 *self = Self::Unbound(state);
 
@@ -337,7 +337,7 @@ where
     fn unbind(&mut self) -> UnboundState<'b, T, N> {
         let state = mem::replace(self, Self::Transition(TransitionState(())));
 
-        let unbound = match state {
+        match state {
             Self::Unbound(unbound) => unbound,
             Self::Request(request) => {
                 let io = request.io.release();
@@ -353,16 +353,14 @@ where
                 let io = response.io.release();
 
                 UnboundState {
-                    buf: unsafe { response.buf.as_mut().unwrap() },
+                    buf: unwrap!(unsafe { response.buf.as_mut() }),
                     socket: response.socket,
                     addr: response.addr,
                     io: Some(io),
                 }
             }
             _ => unreachable!(),
-        };
-
-        unbound
+        }
     }
 
     fn unbound_mut(&mut self) -> Result<&mut UnboundState<'b, T, N>, Error<T::Error>> {
@@ -399,7 +397,7 @@ where
 
     fn io_mut(&mut self) -> &mut T::Socket<'b> {
         match self {
-            Self::Unbound(unbound) => unbound.io.as_mut().unwrap(),
+            Self::Unbound(unbound) => unwrap!(unbound.io.as_mut()),
             Self::Request(request) => request.io.as_raw_writer(),
             Self::Response(response) => response.io.as_raw_reader(),
             _ => unreachable!(),

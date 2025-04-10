@@ -48,7 +48,7 @@ impl<'a> BytesIn<'a> {
     }
 
     pub fn remaining(&mut self) -> &'a [u8] {
-        let data = self.slice(self.data.len() - self.offset).unwrap();
+        let data = unwrap!(self.slice(self.data.len() - self.offset), "Unreachable");
 
         self.offset = self.data.len();
 

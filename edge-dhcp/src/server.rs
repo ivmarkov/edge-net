@@ -1,16 +1,16 @@
 use core::fmt::Debug;
 
-use log::{debug, warn};
-
 use super::*;
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Lease {
     mac: [u8; 16],
     expires: u64,
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Action<'a> {
     Discover(Option<Ipv4Addr>, &'a [u8; 16]),
     Request(Ipv4Addr, &'a [u8; 16]),
@@ -19,6 +19,7 @@ pub enum Action<'a> {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[non_exhaustive]
 pub struct ServerOptions<'a> {
     pub ip: Ipv4Addr,
@@ -64,7 +65,10 @@ impl<'a> ServerOptions<'a> {
         let message_type = if let Some(message_type) = message_type {
             message_type
         } else {
-            warn!("Ignoring DHCP request, no message type found: {request:?}");
+            warn!(
+                "Ignoring DHCP request, no message type found: {:?}",
+                request
+            );
             return None;
         };
 
@@ -77,11 +81,14 @@ impl<'a> ServerOptions<'a> {
         });
 
         if server_identifier.is_some() && server_identifier != Some(self.ip) {
-            warn!("Ignoring {message_type} request, not addressed to this server: {request:?}");
+            warn!(
+                "Ignoring {} request, not addressed to this server: {:?}",
+                message_type, request
+            );
             return None;
         }
 
-        debug!("Received {message_type} request: {request:?}");
+        debug!("Received {} request: {:?}", message_type, request);
         match message_type {
             MessageType::Discover => Some(Action::Discover(
                 request.options.requested_ip(),
@@ -156,7 +163,7 @@ impl<'a> ServerOptions<'a> {
             ),
         );
 
-        debug!("Sending {message_type} reply: {reply:?}");
+        debug!("Sending {} reply: {:?}", message_type, reply);
 
         reply
     }
@@ -166,6 +173,7 @@ impl<'a> ServerOptions<'a> {
 /// The server is unaware of the IP/UDP transport layer and operates purely in terms of packets
 /// represented as Rust slices.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Server<F, const N: usize> {
     pub now: F,
     pub range_start: Ipv4Addr,

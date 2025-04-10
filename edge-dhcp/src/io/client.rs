@@ -5,8 +5,6 @@ use edge_nal::{UdpReceive, UdpSend};
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Instant, Timer};
 
-use log::{info, warn};
-
 use rand_core::RngCore;
 
 pub use super::*;
@@ -16,6 +14,7 @@ use crate::{Options, Packet};
 
 /// Represents the additional network-related information that might be returned by the DHCP server.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[non_exhaustive]
 pub struct NetworkInfo<'a> {
     pub gateway: Option<Ipv4Addr>,
@@ -30,6 +29,7 @@ pub struct NetworkInfo<'a> {
 /// This structure has a set of asynchronous methods that can utilize a supplied DHCP client instance and UDP socket to
 /// transparently implement all aspects of negotiating an IP with the DHCP server and then keeping the lease of that IP up to date.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[non_exhaustive]
 pub struct Lease {
     pub ip: Ipv4Addr,
@@ -54,7 +54,7 @@ impl Lease {
     {
         loop {
             let offer = Self::discover(client, socket, buf, Duration::from_secs(3)).await?;
-            let server_ip = offer.server_ip.unwrap();
+            let server_ip = unwrap!(offer.server_ip);
             let ip = offer.ip;
 
             let now = Instant::now();
@@ -79,7 +79,7 @@ impl Lease {
                     break Ok((
                         Self {
                             ip: settings.ip,
-                            server_ip: settings.server_ip.unwrap(),
+                            server_ip: unwrap!(settings.server_ip),
                             duration: Duration::from_secs(
                                 settings.lease_time_secs.unwrap_or(7200) as _
                             ),
@@ -230,7 +230,7 @@ impl Lease {
                     info!(
                         "IP {} offered by DHCP server {}",
                         settings.ip,
-                        settings.server_ip.unwrap()
+                        unwrap!(settings.server_ip)
                     );
 
                     return Ok(settings);
@@ -257,7 +257,7 @@ impl Lease {
         S: UdpReceive + UdpSend,
     {
         for _ in 0..retries {
-            info!("Requesting IP {ip} from DHCP server {server_ip}");
+            info!("Requesting IP {} from DHCP server {}", ip, server_ip);
 
             let start = Instant::now();
 

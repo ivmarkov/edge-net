@@ -84,7 +84,7 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> edge_nal::TcpAccept
 
         socket.socket.accept(to_emb_bind_socket(self.local)).await?;
 
-        let local_endpoint = socket.socket.local_endpoint().unwrap();
+        let local_endpoint = unwrap!(socket.socket.local_endpoint());
 
         Ok((to_net_socket(local_endpoint), socket))
     }
@@ -280,6 +280,7 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpSplit
 
 /// A shared error type that is used by the TCP factory traits implementation as well as the TCP socket
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum TcpError {
     General(Error),
     Connect(ConnectError),

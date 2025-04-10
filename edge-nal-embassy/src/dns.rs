@@ -52,6 +52,7 @@ impl edge_nal::Dns for Dns<'_> {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct DnsError(Error);
 
 impl From<Error> for DnsError {

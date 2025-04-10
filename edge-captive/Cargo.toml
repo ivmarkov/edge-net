@@ -20,6 +20,7 @@ std = ["io"]
 io = ["edge-nal"]
 
 [dependencies]
-log = { workspace = true }
+log = { version = "0.4", default-features = false, optional = true }
+defmt = { version = "0.3", optional = true }
 domain = { workspace = true }
 edge-nal = { workspace = true, optional = true }

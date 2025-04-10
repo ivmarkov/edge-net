@@ -36,11 +36,15 @@ jobs:
         run: cargo fmt -- --check
       - name: Build | Clippy
         run: cargo clippy --features std,embedded-svc,edge-nal-embassy --examples --no-deps -- -Dwarnings
+      - name: Build | Clippy - defmt
+        run: cargo clippy --features std,embedded-svc,edge-nal-embassy,defmt --no-deps -- -Dwarnings
+      - name: Build | Clippy - log
+        run: cargo clippy --features std,embedded-svc,edge-nal-embassy,log --examples --no-deps -- -Dwarnings
       - name: Build | Default
-        run: cargo build
+        run: cargo build --features log
       - name: Build | Non-default
         run: cargo build --no-default-features
       - name: Build | Embassy
-        run: cargo build --no-default-features --features embassy
+        run: cargo build --no-default-features --features embassy,defmt
       - name: Build | Examples
-        run: cargo build --examples
+        run: cargo build --examples --features log

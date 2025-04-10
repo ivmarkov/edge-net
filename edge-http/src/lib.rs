@@ -2,14 +2,17 @@
 #![allow(async_fn_in_trait)]
 #![warn(clippy::large_futures)]
 
-use core::fmt::{self, Display};
+use core::fmt::Display;
 use core::str;
 
 use httparse::{Header, EMPTY_HEADER};
-use log::{debug, warn};
+
 use ws::{is_upgrade_accepted, is_upgrade_request, MAX_BASE64_KEY_RESPONSE_LEN, NONCE_LEN};
 
 pub const DEFAULT_MAX_HEADERS_COUNT: usize = 64;
+
+// This mod MUST go first, so that the others see its macros.
+pub(crate) mod fmt;
 
 #[cfg(feature = "io")]
 pub mod io;
@@ -31,7 +34,7 @@ pub enum HeadersMismatchError {
 }
 
 impl Display for HeadersMismatchError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::ResponseConnectionTypeMismatchError => write!(
                 f,
@@ -194,7 +197,7 @@ impl Method {
 }
 
 impl Display for Method {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
@@ -212,8 +215,12 @@ impl<'b, const N: usize> Headers<'b, N> {
 
     /// Utility method to return the value of the `Content-Length` header, if present
     pub fn content_len(&self) -> Option<u64> {
-        self.get("Content-Length")
-            .map(|content_len_str| content_len_str.parse::<u64>().unwrap())
+        self.get("Content-Length").map(|content_len_str| {
+            unwrap!(
+                content_len_str.parse::<u64>(),
+                "Invalid Content-Length header"
+            )
+        })
     }
 
     /// Utility method to return the value of the `Content-Type` header, if present
@@ -327,7 +334,7 @@ impl<'b, const N: usize> Headers<'b, N> {
         content_len: u64,
         buf: &'b mut heapless::String<20>,
     ) -> &mut Self {
-        *buf = content_len.try_into().unwrap();
+        *buf = unwrap!(content_len.try_into());
 
         self.set("Content-Length", buf.as_str())
     }
@@ -522,7 +529,10 @@ impl ConnectionType {
 
             if let Some(header_connection) = header_connection {
                 if let Some(connection) = connection {
-                    warn!("Multiple Connection headers found. Current {connection} and new {header_connection}");
+                    warn!(
+                        "Multiple Connection headers found. Current {} and new {}",
+                        connection, header_connection
+                    );
                 }
 
                 // The last connection header wins
@@ -546,7 +556,7 @@ impl ConnectionType {
 }
 
 impl Display for ConnectionType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::KeepAlive => write!(f, "Keep-Alive"),
             Self::Close => write!(f, "Close"),
@@ -654,7 +664,10 @@ impl BodyType {
                 return Some(Self::Chunked);
             }
         } else if "Content-Length".eq_ignore_ascii_case(name) {
-            return Some(Self::ContentLen(value.parse::<u64>().unwrap())); // TODO
+            return Some(Self::ContentLen(unwrap!(
+                value.parse::<u64>(),
+                "Invalid Content-Length header"
+            ))); // TODO
         }
 
         None
@@ -675,7 +688,10 @@ impl BodyType {
 
             if let Some(header_body) = header_body {
                 if let Some(body) = body {
-                    warn!("Multiple body type headers found. Current {body} and new {header_body}");
+                    warn!(
+                        "Multiple body type headers found. Current {} and new {}",
+                        body, header_body
+                    );
                 }
 
                 // The last body header wins
@@ -699,7 +715,7 @@ impl BodyType {
 
                 buf.clear();
 
-                write!(buf, "{}", len).unwrap();
+                write_unwrap!(buf, "{}", len);
 
                 Some(("Content-Length", buf.as_bytes()))
             }
@@ -709,7 +725,7 @@ impl BodyType {
 }
 
 impl Display for BodyType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Chunked => write!(f, "Chunked"),
             Self::ContentLen(len) => write!(f, "Content-Length: {len}"),
@@ -757,7 +773,7 @@ impl<const N: usize> Default for RequestHeaders<'_, N> {
 }
 
 impl<const N: usize> Display for RequestHeaders<'_, N> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{} ", if self.http11 { "HTTP/1.1" } else { "HTTP/1.0" })?;
 
         writeln!(f, "{} {}", self.method, self.path)?;
@@ -818,7 +834,7 @@ impl<const N: usize> Default for ResponseHeaders<'_, N> {
 }
 
 impl<const N: usize> Display for ResponseHeaders<'_, N> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{} ", if self.http11 { "HTTP/1.1 " } else { "HTTP/1.0" })?;
 
         writeln!(f, "{} {}", self.code, self.reason.unwrap_or(""))?;
@@ -837,10 +853,6 @@ impl<const N: usize> Display for ResponseHeaders<'_, N> {
 
 /// Websocket utilities
 pub mod ws {
-    use core::fmt;
-
-    use log::debug;
-
     use crate::Method;
 
     pub const NONCE_LEN: usize = 16;
@@ -913,8 +925,8 @@ pub mod ws {
         UnsupportedVersion,
     }
 
-    impl fmt::Display for UpgradeError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    impl core::fmt::Display for UpgradeError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             match self {
                 Self::NoVersion => write!(f, "No Sec-WebSocket-Version header"),
                 Self::NoSecKey => write!(f, "No Sec-WebSocket-Key header"),
@@ -1035,7 +1047,7 @@ pub mod ws {
     }
 
     fn sec_key_response_start(sec_key: &str, sha1: &mut sha1_smol::Sha1) {
-        debug!("Computing response for key: {sec_key}");
+        debug!("Computing response for key: {}", sec_key);
 
         sha1.update(sec_key.as_bytes());
     }
@@ -1049,7 +1061,7 @@ pub mod ws {
 
         let sec_key_response = unsafe { core::str::from_utf8_unchecked(&buf[..len]) };
 
-        debug!("Computed response: {sec_key_response}");
+        debug!("Computed response: {}", sec_key_response);
 
         sec_key_response
     }
@@ -1074,86 +1086,105 @@ mod test {
     fn test_resolve_conn() {
         // Default connection type resolution
         assert_eq!(
-            ConnectionType::resolve(None, None, true).unwrap(),
+            unwrap!(ConnectionType::resolve(None, None, true)),
             ConnectionType::KeepAlive
         );
         assert_eq!(
-            ConnectionType::resolve(None, None, false).unwrap(),
+            unwrap!(ConnectionType::resolve(None, None, false)),
             ConnectionType::Close
         );
 
         // Connection type resolution based on carry-over (for responses)
         assert_eq!(
-            ConnectionType::resolve(None, Some(ConnectionType::KeepAlive), false).unwrap(),
+            unwrap!(ConnectionType::resolve(
+                None,
+                Some(ConnectionType::KeepAlive),
+                false
+            )),
             ConnectionType::KeepAlive
         );
         assert_eq!(
-            ConnectionType::resolve(None, Some(ConnectionType::KeepAlive), true).unwrap(),
+            unwrap!(ConnectionType::resolve(
+                None,
+                Some(ConnectionType::KeepAlive),
+                true
+            )),
             ConnectionType::KeepAlive
         );
 
         // Connection type resoluton based on the header value
         assert_eq!(
-            ConnectionType::resolve(Some(ConnectionType::Close), None, false).unwrap(),
+            unwrap!(ConnectionType::resolve(
+                Some(ConnectionType::Close),
+                None,
+                false
+            )),
             ConnectionType::Close
         );
         assert_eq!(
-            ConnectionType::resolve(Some(ConnectionType::KeepAlive), None, false).unwrap(),
+            unwrap!(ConnectionType::resolve(
+                Some(ConnectionType::KeepAlive),
+                None,
+                false
+            )),
             ConnectionType::KeepAlive
         );
         assert_eq!(
-            ConnectionType::resolve(Some(ConnectionType::Close), None, true).unwrap(),
+            unwrap!(ConnectionType::resolve(
+                Some(ConnectionType::Close),
+                None,
+                true
+            )),
             ConnectionType::Close
         );
         assert_eq!(
-            ConnectionType::resolve(Some(ConnectionType::KeepAlive), None, true).unwrap(),
+            unwrap!(ConnectionType::resolve(
+                Some(ConnectionType::KeepAlive),
+                None,
+                true
+            )),
             ConnectionType::KeepAlive
         );
 
         // Connection type in the headers should aggree with the carry-over one
         assert_eq!(
-            ConnectionType::resolve(
+            unwrap!(ConnectionType::resolve(
                 Some(ConnectionType::Close),
                 Some(ConnectionType::Close),
                 false
-            )
-            .unwrap(),
+            )),
             ConnectionType::Close
         );
         assert_eq!(
-            ConnectionType::resolve(
+            unwrap!(ConnectionType::resolve(
                 Some(ConnectionType::KeepAlive),
                 Some(ConnectionType::KeepAlive),
                 false
-            )
-            .unwrap(),
+            )),
             ConnectionType::KeepAlive
         );
         assert_eq!(
-            ConnectionType::resolve(
+            unwrap!(ConnectionType::resolve(
                 Some(ConnectionType::Close),
                 Some(ConnectionType::Close),
                 true
-            )
-            .unwrap(),
+            )),
             ConnectionType::Close
         );
         assert_eq!(
-            ConnectionType::resolve(
+            unwrap!(ConnectionType::resolve(
                 Some(ConnectionType::KeepAlive),
                 Some(ConnectionType::KeepAlive),
                 true
-            )
-            .unwrap(),
+            )),
             ConnectionType::KeepAlive
         );
         assert_eq!(
-            ConnectionType::resolve(
+            unwrap!(ConnectionType::resolve(
                 Some(ConnectionType::Close),
                 Some(ConnectionType::KeepAlive),
                 false
-            )
-            .unwrap(),
+            )),
             ConnectionType::Close
         );
         assert!(ConnectionType::resolve(
@@ -1163,12 +1194,11 @@ mod test {
         )
         .is_err());
         assert_eq!(
-            ConnectionType::resolve(
+            unwrap!(ConnectionType::resolve(
                 Some(ConnectionType::Close),
                 Some(ConnectionType::KeepAlive),
                 true
-            )
-            .unwrap(),
+            )),
             ConnectionType::Close
         );
         assert!(ConnectionType::resolve(
@@ -1183,23 +1213,53 @@ mod test {
     fn test_resolve_body() {
         // Request with no body type specified means Content-Length=0
         assert_eq!(
-            BodyType::resolve(None, ConnectionType::KeepAlive, true, true, false).unwrap(),
+            unwrap!(BodyType::resolve(
+                None,
+                ConnectionType::KeepAlive,
+                true,
+                true,
+                false
+            )),
             BodyType::ContentLen(0)
         );
         assert_eq!(
-            BodyType::resolve(None, ConnectionType::Close, true, true, false).unwrap(),
+            unwrap!(BodyType::resolve(
+                None,
+                ConnectionType::Close,
+                true,
+                true,
+                false
+            )),
             BodyType::ContentLen(0)
         );
         assert_eq!(
-            BodyType::resolve(None, ConnectionType::KeepAlive, true, false, false).unwrap(),
+            unwrap!(BodyType::resolve(
+                None,
+                ConnectionType::KeepAlive,
+                true,
+                false,
+                false
+            )),
             BodyType::ContentLen(0)
         );
         assert_eq!(
-            BodyType::resolve(None, ConnectionType::Close, true, false, false).unwrap(),
+            unwrap!(BodyType::resolve(
+                None,
+                ConnectionType::Close,
+                true,
+                false,
+                false
+            )),
             BodyType::ContentLen(0)
         );
         assert_eq!(
-            BodyType::resolve(None, ConnectionType::Upgrade, false, true, false).unwrap(),
+            unwrap!(BodyType::resolve(
+                None,
+                ConnectionType::Upgrade,
+                false,
+                true,
+                false
+            )),
             BodyType::ContentLen(0)
         );
 
@@ -1295,54 +1355,88 @@ mod test {
 
         // The same, but with a Close connection IS allowed
         assert_eq!(
-            BodyType::resolve(
+            unwrap!(BodyType::resolve(
                 Some(BodyType::Raw),
                 ConnectionType::Close,
                 false,
                 true,
                 false
-            )
-            .unwrap(),
+            )),
             BodyType::Raw
         );
         assert_eq!(
-            BodyType::resolve(
+            unwrap!(BodyType::resolve(
                 Some(BodyType::Raw),
                 ConnectionType::Close,
                 false,
                 false,
                 false
-            )
-            .unwrap(),
+            )),
             BodyType::Raw
         );
 
         // Request upgrades to chunked encoding should only work for HTTP1.1, and if there is no body type in the headers
         assert_eq!(
-            BodyType::resolve(None, ConnectionType::Close, true, true, true).unwrap(),
+            unwrap!(BodyType::resolve(
+                None,
+                ConnectionType::Close,
+                true,
+                true,
+                true
+            )),
             BodyType::Chunked
         );
         assert_eq!(
-            BodyType::resolve(None, ConnectionType::KeepAlive, true, true, true).unwrap(),
+            unwrap!(BodyType::resolve(
+                None,
+                ConnectionType::KeepAlive,
+                true,
+                true,
+                true
+            )),
             BodyType::Chunked
         );
         assert_eq!(
-            BodyType::resolve(None, ConnectionType::Close, true, false, true).unwrap(),
+            unwrap!(BodyType::resolve(
+                None,
+                ConnectionType::Close,
+                true,
+                false,
+                true
+            )),
             BodyType::ContentLen(0)
         );
         assert_eq!(
-            BodyType::resolve(None, ConnectionType::KeepAlive, true, false, true).unwrap(),
+            unwrap!(BodyType::resolve(
+                None,
+                ConnectionType::KeepAlive,
+                true,
+                false,
+                true
+            )),
             BodyType::ContentLen(0)
         );
 
         // Response upgrades to chunked encoding should only work for HTTP1.1, and if there is no body type in the headers, and if the connection is KeepAlive
         assert_eq!(
-            BodyType::resolve(None, ConnectionType::KeepAlive, false, true, true).unwrap(),
+            unwrap!(BodyType::resolve(
+                None,
+                ConnectionType::KeepAlive,
+                false,
+                true,
+                true
+            )),
             BodyType::Chunked
         );
         // Response upgrades should not be honored if the connection is Close
         assert_eq!(
-            BodyType::resolve(None, ConnectionType::Close, false, true, true).unwrap(),
+            unwrap!(BodyType::resolve(
+                None,
+                ConnectionType::Close,
+                false,
+                true,
+                true
+            )),
             BodyType::Raw
         );
     }

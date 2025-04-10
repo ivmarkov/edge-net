@@ -1,5 +1,3 @@
-use log::trace;
-
 use core::net::{Ipv4Addr, SocketAddrV4};
 
 use super::bytes::{BytesIn, BytesOut};
@@ -195,18 +193,27 @@ impl UdpPacketHeader {
         let mut buf = [0; 12];
 
         // Pseudo IP-header for UDP checksum calculation
-        let len = BytesOut::new(&mut buf)
-            .push(&u32::to_be_bytes(src.into()))
-            .unwrap()
-            .push(&u32::to_be_bytes(dst.into()))
-            .unwrap()
-            .byte(0)
-            .unwrap()
-            .byte(UdpPacketHeader::PROTO)
-            .unwrap()
-            .push(&u16::to_be_bytes(packet.len() as u16))
-            .unwrap()
-            .len();
+        let len = unwrap!(
+            unwrap!(
+                unwrap!(
+                    unwrap!(
+                        unwrap!(
+                            BytesOut::new(&mut buf).push(&u32::to_be_bytes(src.into())),
+                            "Unreachable"
+                        )
+                        .push(&u32::to_be_bytes(dst.into())),
+                        "Unreachable"
+                    )
+                    .byte(0),
+                    "Unreachable"
+                )
+                .byte(UdpPacketHeader::PROTO),
+                "Unreachable"
+            )
+            .push(&u16::to_be_bytes(packet.len() as u16)),
+            "Unreachable"
+        )
+        .len();
 
         let sum = checksum_accumulate(&buf[..len], usize::MAX)
             + checksum_accumulate(packet, Self::CHECKSUM_WORD);

@@ -73,7 +73,7 @@ impl<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize>
         stack_buffers: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>,
     ) -> Result<Self, UdpError> {
         let mut socket_buffers = stack_buffers.pool.alloc().ok_or(UdpError::NoBuffers)?;
-        let mut socket_meta_buffers = stack_buffers.meta_pool.alloc().unwrap();
+        let mut socket_meta_buffers = unwrap!(stack_buffers.meta_pool.alloc());
 
         Ok(Self {
             stack,
@@ -247,6 +247,7 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Rea
 
 /// A shared error type that is used by the UDP factory trait implementation as well as the UDP socket
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum UdpError {
     Recv(RecvError),
     Send(SendError),

@@ -19,13 +19,15 @@ categories = [
 default = ["io"]
 std = ["io"]
 io = ["embedded-io-async", "edge-nal", "embassy-sync", "embassy-futures", "embassy-time"]
+defmt = ["dep:defmt", "heapless/defmt-03", "embedded-svc?/defmt"]
 
 [dependencies]
 embedded-io-async = { workspace = true, optional = true }
 edge-nal = { workspace = true, optional = true }
 embedded-svc = { workspace = true, optional = true, default-features = false }
 heapless = { workspace = true }
-log = { workspace = true }
+log = { version = "0.4", default-features = false, optional = true }
+defmt = { version = "0.3", optional = true }
 embassy-sync = { workspace = true, optional = true }
 embassy-futures = { workspace = true, optional = true }
 embassy-time = { workspace = true, optional = true }

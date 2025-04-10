@@ -6,8 +6,6 @@ use embedded_io_async::{ErrorType, Read, Write};
 
 use httparse::Status;
 
-use log::trace;
-
 use crate::ws::UpgradeError;
 use crate::{
     BodyType, ConnectionType, Headers, HeadersMismatchError, Method, RequestHeaders,
@@ -304,7 +302,7 @@ where
 
     raw::send_version(&mut output, http11).await?;
     output.write_all(b" ").await.map_err(Error::Io)?;
-    let status_str: heapless::String<5> = status.try_into().unwrap();
+    let status_str: heapless::String<5> = unwrap!(status.try_into());
     output
         .write_all(status_str.as_bytes())
         .await
@@ -1077,7 +1075,7 @@ where
             Err(Error::InvalidState)
         } else if !buf.is_empty() {
             let mut len_str = heapless::String::<8>::new();
-            write!(&mut len_str, "{:x}", buf.len()).unwrap();
+            write_unwrap!(&mut len_str, "{:x}", buf.len());
 
             self.output
                 .write_all(len_str.as_bytes())
@@ -1103,8 +1101,6 @@ mod raw {
     use core::str;
 
     use embedded_io_async::{Read, Write};
-
-    use log::warn;
 
     use crate::{BodyType, ConnectionType};
 
@@ -1231,7 +1227,10 @@ mod raw {
 
             if let Some(header_connection) = header_connection {
                 if let Some(connection) = connection {
-                    warn!("Multiple Connection headers found. Current {connection} and new {header_connection}");
+                    warn!(
+                        "Multiple Connection headers found. Current {} and new {}",
+                        connection, header_connection
+                    );
                 }
 
                 // The last connection header wins
@@ -1243,7 +1242,10 @@ mod raw {
 
             if let Some(header_body) = header_body {
                 if let Some(body) = body {
-                    warn!("Multiple body type headers found. Current {body} and new {header_body}");
+                    warn!(
+                        "Multiple body type headers found. Current {} and new {}",
+                        body, header_body
+                    );
                 }
 
                 // The last body header wins
@@ -1339,7 +1341,7 @@ mod test {
                 let len = r.read(&mut buf2).await;
                 assert!(len.is_ok());
 
-                assert_eq!(len.unwrap(), 0);
+                assert_eq!(unwrap!(len), 0);
             } else {
                 assert!(r.read(&mut buf2).await.is_err());
             }

@@ -2,11 +2,12 @@
 #![allow(async_fn_in_trait)]
 #![warn(clippy::large_futures)]
 
-use core::fmt;
-
 use core::net::{Ipv4Addr, SocketAddrV4};
 
 use self::udp::UdpPacketHeader;
+
+// This mod MUST go first, so that the others see its macros.
+pub(crate) mod fmt;
 
 #[cfg(feature = "io")]
 pub mod io;
@@ -36,8 +37,8 @@ impl From<bytes::Error> for Error {
     }
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let str = match self {
             Self::DataUnderflow => "Data underflow",
             Self::BufferOverflow => "Buffer overflow",
@@ -46,6 +47,20 @@ impl fmt::Display for Error {
         };
 
         write!(f, "{}", str)
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for Error {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        let str = match self {
+            Self::DataUnderflow => "Data underflow",
+            Self::BufferOverflow => "Buffer overflow",
+            Self::InvalidFormat => "Invalid format",
+            Self::InvalidChecksum => "Invalid checksum",
+        };
+
+        defmt::write!(f, "{}", str)
     }
 }
 
@@ -101,7 +116,7 @@ pub fn checksum_accumulate(bytes: &[u8], checksum_word: usize) -> u32 {
         let arr = bytes
             .arr()
             .ok()
-            .unwrap_or_else(|| [bytes.byte().unwrap(), 0]);
+            .unwrap_or_else(|| [unwrap!(bytes.byte(), "Unreachable"), 0]);
 
         let word = if skip { 0 } else { u16::from_be_bytes(arr) };
 
