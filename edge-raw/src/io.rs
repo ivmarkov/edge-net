@@ -1,4 +1,4 @@
-use core::fmt::{self, Debug};
+use core::fmt::Debug;
 use core::mem::MaybeUninit;
 use core::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
@@ -35,15 +35,29 @@ where
     }
 }
 
-impl<E> fmt::Display for Error<E>
+impl<E> core::fmt::Display for Error<E>
 where
-    E: fmt::Display,
+    E: core::fmt::Display,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Io(err) => write!(f, "IO error: {err}"),
+            Self::Io(err) => write!(f, "IO error: {}", err),
             Self::UnsupportedProtocol => write!(f, "Unsupported protocol"),
-            Self::RawError(err) => write!(f, "Raw error: {err}"),
+            Self::RawError(err) => write!(f, "Raw error: {}", err),
+        }
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl<E> defmt::Format for Error<E>
+where
+    E: defmt::Format,
+{
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::Io(err) => defmt::write!(f, "IO error: {}", err),
+            Self::UnsupportedProtocol => defmt::write!(f, "Unsupported protocol"),
+            Self::RawError(err) => defmt::write!(f, "Raw error: {}", err),
         }
     }
 }

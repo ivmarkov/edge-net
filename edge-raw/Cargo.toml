@@ -20,6 +20,7 @@ std = ["io"]
 io = ["embedded-io-async", "edge-nal"]
 
 [dependencies]
-log = { workspace = true }
+log = { version = "0.4", default-features = false, optional = true }
+defmt = { version = "0.3", optional = true }
 embedded-io-async = { workspace = true, default-features = false, optional = true }
 edge-nal = { workspace = true, default-features = false, optional = true }

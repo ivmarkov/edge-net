@@ -1,12 +1,11 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::large_futures)]
 
-use core::fmt::{self, Display};
+use core::fmt::Display;
 use core::time::Duration;
 
 use domain::base::wire::Composer;
 use domain::dep::octseq::{OctetsBuilder, Truncate};
-use log::debug;
 
 use domain::{
     base::{
@@ -21,6 +20,9 @@ use domain::{
     rdata::A,
 };
 
+// This mod MUST go first, so that the others see its macros.
+pub(crate) mod fmt;
+
 #[cfg(feature = "io")]
 pub mod io;
 
@@ -31,10 +33,20 @@ pub enum DnsError {
 }
 
 impl Display for DnsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::ShortBuf => write!(f, "ShortBuf"),
             Self::InvalidMessage => write!(f, "InvalidMessage"),
+        }
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for DnsError {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::ShortBuf => defmt::write!(f, "ShortBuf"),
+            Self::InvalidMessage => defmt::write!(f, "InvalidMessage"),
         }
     }
 }

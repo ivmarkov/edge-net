@@ -3,7 +3,7 @@
 #![allow(async_fn_in_trait)]
 
 use core::cmp::Ordering;
-use core::fmt::{self, Display};
+use core::fmt::Display;
 use core::ops::RangeBounds;
 
 use domain::base::header::Flags;
@@ -19,7 +19,8 @@ use domain::base::{
 use domain::dep::octseq::{FreezeBuilder, FromBuilder, Octets, OctetsBuilder, ShortBuf, Truncate};
 use domain::rdata::AllRecordData;
 
-use log::debug;
+// This mod MUST go first, so that the others see its macros.
+pub(crate) mod fmt;
 
 #[cfg(feature = "io")]
 pub mod buf; // TODO: Maybe move to a generic `edge-buf` crate in future
@@ -44,10 +45,20 @@ pub enum MdnsError {
 }
 
 impl Display for MdnsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::ShortBuf => write!(f, "ShortBuf"),
             Self::InvalidMessage => write!(f, "InvalidMessage"),
+        }
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for MdnsError {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::ShortBuf => defmt::write!(f, "ShortBuf"),
+            Self::InvalidMessage => defmt::write!(f, "InvalidMessage"),
         }
     }
 }
@@ -99,13 +110,22 @@ impl<'a> NameSlice<'a> {
     }
 }
 
-impl fmt::Display for NameSlice<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl core::fmt::Display for NameSlice<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         for label in self.0 {
             write!(f, "{}.", label)?;
         }
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for NameSlice<'_> {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        for label in self.0 {
+            defmt::write!(f, "{}.", label);
+        }
     }
 }
 
@@ -124,7 +144,10 @@ impl<'a> Iterator for NameSliceIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match self.index.cmp(&self.name.0.len()) {
             Ordering::Less => {
-                let label = Label::from_slice(self.name.0[self.index].as_bytes()).unwrap();
+                let label = unwrap!(
+                    Label::from_slice(self.name.0[self.index].as_bytes()),
+                    "Unreachable"
+                );
                 self.index += 1;
                 Some(label)
             }
@@ -146,7 +169,10 @@ impl DoubleEndedIterator for NameSliceIter<'_> {
                 let label = Label::root();
                 Some(label)
             } else {
-                let label = Label::from_slice(self.name.0[self.index].as_bytes()).unwrap();
+                let label = unwrap!(
+                    Label::from_slice(self.name.0[self.index].as_bytes()),
+                    "Unreachable"
+                );
                 Some(label)
             }
         } else {
@@ -180,21 +206,38 @@ impl<'a> Txt<'a> {
     }
 }
 
-impl fmt::Display for Txt<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl core::fmt::Display for Txt<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "Txt [")?;
 
         for (i, (k, v)) in self.0.iter().enumerate() {
             if i > 0 {
-                write!(f, ", ")?;
+                write!(f, ", {}={}", k, v)?;
+            } else {
+                write!(f, "{}={}", k, v)?;
             }
-
-            write!(f, "{}={}", k, v)?;
         }
 
         write!(f, "]")?;
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for Txt<'_> {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        defmt::write!(f, "Txt [");
+
+        for (i, (k, v)) in self.0.iter().enumerate() {
+            if i > 0 {
+                defmt::write!(f, ", {}={}", k, v);
+            } else {
+                defmt::write!(f, "{}={}", k, v);
+            }
+        }
+
+        defmt::write!(f, "]");
     }
 }
 
@@ -244,15 +287,29 @@ pub enum RecordDataChain<T, U> {
     Next(U),
 }
 
-impl<T, U> fmt::Display for RecordDataChain<T, U>
+impl<T, U> core::fmt::Display for RecordDataChain<T, U>
 where
-    T: fmt::Display,
-    U: fmt::Display,
+    T: core::fmt::Display,
+    U: core::fmt::Display,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::This(data) => write!(f, "{}", data),
             Self::Next(data) => write!(f, "{}", data),
+        }
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl<T, U> defmt::Format for RecordDataChain<T, U>
+where
+    T: defmt::Format,
+    U: defmt::Format,
+{
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::This(data) => defmt::write!(f, "{}", data),
+            Self::Next(data) => defmt::write!(f, "{}", data),
         }
     }
 }
@@ -822,7 +879,7 @@ where
                     }
 
                     if question.qname().name_eq(&answer.owner()) {
-                        debug!("Answering question [{question}] with: [{answer}]");
+                        debug!("Answering question [{}] with: [{}]", question, answer);
 
                         ab.push(answer)?;
 
@@ -847,7 +904,7 @@ where
                             | RecordDataChain::Next(AllRecordData::Txt(_))
                             | RecordDataChain::This(Txt(_))
                     ) {
-                        debug!("Additional answer: [{answer}]");
+                        debug!("Additional answer: [{}]", answer);
 
                         aa.push(answer)?;
 

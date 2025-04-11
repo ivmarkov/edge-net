@@ -2,14 +2,15 @@
 #![allow(async_fn_in_trait)]
 #![warn(clippy::large_futures)]
 
-use core::fmt;
-
 pub type Fragmented = bool;
 pub type Final = bool;
 
 #[allow(unused)]
 #[cfg(feature = "embedded-svc")]
 pub use embedded_svc_compat::*;
+
+// This mod MUST go first, so that the others see its macros.
+pub(crate) mod fmt;
 
 #[cfg(feature = "io")]
 pub mod io;
@@ -42,8 +43,8 @@ impl FrameType {
     }
 }
 
-impl fmt::Display for FrameType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl core::fmt::Display for FrameType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Text(fragmented) => {
                 write!(f, "Text{}", if *fragmented { " (fragmented)" } else { "" })
@@ -58,6 +59,28 @@ impl fmt::Display for FrameType {
             Self::Close => write!(f, "Close"),
             Self::Continue(ffinal) => {
                 write!(f, "Continue{}", if *ffinal { " (final)" } else { "" })
+            }
+        }
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for FrameType {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::Text(fragmented) => {
+                defmt::write!(f, "Text{}", if *fragmented { " (fragmented)" } else { "" })
+            }
+            Self::Binary(fragmented) => defmt::write!(
+                f,
+                "Binary{}",
+                if *fragmented { " (fragmented)" } else { "" }
+            ),
+            Self::Ping => defmt::write!(f, "Ping"),
+            Self::Pong => defmt::write!(f, "Pong"),
+            Self::Close => defmt::write!(f, "Close"),
+            Self::Continue(ffinal) => {
+                defmt::write!(f, "Continue{}", if *ffinal { " (final)" } else { "" })
             }
         }
     }
@@ -84,17 +107,33 @@ impl Error<()> {
     }
 }
 
-impl<E> fmt::Display for Error<E>
+impl<E> core::fmt::Display for Error<E>
 where
-    E: fmt::Display,
+    E: core::fmt::Display,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Incomplete(size) => write!(f, "Incomplete: {} bytes missing", size),
             Self::Invalid => write!(f, "Invalid"),
             Self::BufferOverflow => write!(f, "Buffer overflow"),
             Self::InvalidLen => write!(f, "Invalid length"),
             Self::Io(err) => write!(f, "IO error: {}", err),
+        }
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl<E> defmt::Format for Error<E>
+where
+    E: defmt::Format,
+{
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::Incomplete(size) => defmt::write!(f, "Incomplete: {} bytes missing", size),
+            Self::Invalid => defmt::write!(f, "Invalid"),
+            Self::BufferOverflow => defmt::write!(f, "Buffer overflow"),
+            Self::InvalidLen => defmt::write!(f, "Invalid length"),
+            Self::Io(err) => defmt::write!(f, "IO error: {}", err),
         }
     }
 }
@@ -294,12 +333,25 @@ impl FrameHeader {
     }
 }
 
-impl fmt::Display for FrameHeader {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl core::fmt::Display for FrameHeader {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "Frame {{ {}, payload len {}, mask {:?} }}",
             self.frame_type, self.payload_len, self.mask_key
+        )
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for FrameHeader {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        defmt::write!(
+            f,
+            "Frame {{ {}, payload len {}, mask {:?} }}",
+            self.frame_type,
+            self.payload_len,
+            self.mask_key
         )
     }
 }

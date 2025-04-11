@@ -4,8 +4,6 @@ use core::time::Duration;
 
 use edge_nal::{UdpBind, UdpReceive, UdpSend};
 
-use log::*;
-
 use super::*;
 
 pub const DEFAULT_SOCKET: SocketAddr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), PORT);
@@ -50,6 +48,19 @@ where
     }
 }
 
+#[cfg(feature = "defmt")]
+impl<E> defmt::Format for DnsIoError<E>
+where
+    E: defmt::Format,
+{
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::DnsError(err) => defmt::write!(f, "DNS error: {}", err),
+            Self::IoError(err) => defmt::write!(f, "IO error: {}", err),
+        }
+    }
+}
+
 #[cfg(feature = "std")]
 impl<E> std::error::Error for DnsIoError<E> where E: std::error::Error {}
 
@@ -73,13 +84,13 @@ where
 
         let request = &rx_buf[..len];
 
-        debug!("Received {} bytes from {remote}", request.len());
+        debug!("Received {} bytes from {}", request.len(), remote);
 
         let len = match crate::reply(request, &ip.octets(), ttl, tx_buf) {
             Ok(len) => len,
             Err(err) => match err {
                 DnsError::InvalidMessage => {
-                    warn!("Got invalid message from {remote}, skipping");
+                    warn!("Got invalid message from {}, skipping", remote);
                     continue;
                 }
                 other => Err(other)?,
@@ -90,6 +101,6 @@ where
             .await
             .map_err(DnsIoError::IoError)?;
 
-        debug!("Sent {len} bytes to {remote}");
+        debug!("Sent {} bytes to {}", len, remote);
     }
 }

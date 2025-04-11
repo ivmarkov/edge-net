@@ -1,5 +1,4 @@
 use core::cell::RefCell;
-use core::fmt;
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use core::pin::pin;
@@ -15,8 +14,6 @@ use embassy_sync::signal::Signal;
 use edge_nal::{MulticastV4, MulticastV6, Readable, UdpBind, UdpReceive, UdpSend};
 
 use embassy_time::{Duration, Timer};
-
-use log::{debug, warn};
 
 use super::*;
 
@@ -73,16 +70,31 @@ impl<E> From<MdnsError> for MdnsIoError<E> {
     }
 }
 
-impl<E> fmt::Display for MdnsIoError<E>
+impl<E> core::fmt::Display for MdnsIoError<E>
 where
-    E: fmt::Display,
+    E: core::fmt::Display,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::MdnsError(err) => write!(f, "mDNS error: {}", err),
             Self::NoRecvBufError => write!(f, "No recv buf available"),
             Self::NoSendBufError => write!(f, "No send buf available"),
             Self::IoError(err) => write!(f, "IO error: {}", err),
+        }
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl<E> defmt::Format for MdnsIoError<E>
+where
+    E: defmt::Format,
+{
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::MdnsError(err) => defmt::write!(f, "mDNS error: {}", err),
+            Self::NoRecvBufError => defmt::write!(f, "No recv buf available"),
+            Self::NoSendBufError => defmt::write!(f, "No send buf available"),
+            Self::IoError(err) => defmt::write!(f, "IO error: {}", err),
         }
     }
 }
@@ -305,7 +317,7 @@ where
                     .await
                     .map_err(MdnsIoError::IoError)?;
 
-                debug!("Got mDNS query from {remote}");
+                debug!("Got mDNS query from {}", remote);
 
                 {
                     let mut send_buf = self
@@ -330,7 +342,7 @@ where
                         Ok(len) => len,
                         Err(err) => match err {
                             MdnsError::InvalidMessage => {
-                                warn!("Got invalid message from {remote}, skipping");
+                                warn!("Got invalid message from {}, skipping", remote);
                                 continue;
                             }
                             other => Err(other)?,
@@ -342,10 +354,13 @@ where
                             // Support one-shot legacy queries by replying privately
                             // to the remote address, if the query was not sent from the mDNS port (as per the spec)
 
-                            debug!("Replying privately to a one-shot mDNS query from {remote}");
+                            debug!(
+                                "Replying privately to a one-shot mDNS query from {}",
+                                remote
+                            );
 
                             if let Err(err) = send.send(remote, data).await {
-                                warn!("Failed to reply privately to {remote}: {err:?}");
+                                warn!("Failed to reply privately to {}: {:?}", remote, err);
                             }
                         } else {
                             // Otherwise, re-broadcast the response
@@ -354,7 +369,7 @@ where
                                 self.delay().await;
                             }
 
-                            debug!("Re-broadcasting due to mDNS query from {remote}");
+                            debug!("Re-broadcasting due to mDNS query from {}", remote);
 
                             self.broadcast_once(send, data).await?;
                         }
@@ -382,7 +397,7 @@ where
                 )
         {
             if !data.is_empty() {
-                debug!("Broadcasting mDNS entry to {remote_addr}");
+                debug!("Broadcasting mDNS entry to {}", remote_addr);
 
                 let fut = pin!(send.send(remote_addr, data));
 

@@ -2,7 +2,6 @@
 #![warn(clippy::large_futures)]
 
 /// This code is a `no_std` and no-alloc modification of https://github.com/krolaw/dhcp4r
-use core::fmt;
 use core::str::Utf8Error;
 
 pub use core::net::Ipv4Addr;
@@ -10,6 +9,9 @@ pub use core::net::Ipv4Addr;
 use num_enum::TryFromPrimitive;
 
 use edge_raw::bytes::{self, BytesIn, BytesOut};
+
+// This mod MUST go first, so that the others see its macros.
+pub(crate) mod fmt;
 
 pub mod client;
 pub mod server;
@@ -38,8 +40,8 @@ impl From<bytes::Error> for Error {
     }
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let str = match self {
             Self::DataUnderflow => "Data underflow",
             Self::BufferOverflow => "Buffer overflow",
@@ -51,6 +53,23 @@ impl fmt::Display for Error {
         };
 
         write!(f, "{}", str)
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for Error {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        let str = match self {
+            Self::DataUnderflow => "Data underflow",
+            Self::BufferOverflow => "Buffer overflow",
+            Self::InvalidPacket => "Invalid packet",
+            Self::InvalidUtf8Str(_) => "Invalid Utf8 string",
+            Self::InvalidMessageType => "Invalid message type",
+            Self::MissingCookie => "Missing cookie",
+            Self::InvalidHlen => "Invalid hlen",
+        };
+
+        defmt::write!(f, "{}", str)
     }
 }
 
@@ -101,8 +120,8 @@ pub enum MessageType {
     Inform = 8,
 }
 
-impl fmt::Display for MessageType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl core::fmt::Display for MessageType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Discover => "DHCPDISCOVER",
             Self::Offer => "DHCPOFFER",
@@ -117,8 +136,26 @@ impl fmt::Display for MessageType {
     }
 }
 
+#[cfg(feature = "defmt")]
+impl defmt::Format for MessageType {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::Discover => "DHCPDISCOVER",
+            Self::Offer => "DHCPOFFER",
+            Self::Request => "DHCPREQUEST",
+            Self::Decline => "DHCPDECLINE",
+            Self::Ack => "DHCPACK",
+            Self::Nak => "DHCPNAK",
+            Self::Release => "DHCPRELEASE",
+            Self::Inform => "DHCPINFORM",
+        }
+        .format(f)
+    }
+}
+
 /// DHCP Packet Structure
 #[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Packet<'a> {
     pub reply: bool,
     pub hops: u8,
@@ -287,6 +324,7 @@ impl<'a> Packet<'a> {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[non_exhaustive]
 pub struct Settings<'a> {
     pub ip: Ipv4Addr,
@@ -357,6 +395,7 @@ impl<'a> Settings<'a> {
 }
 
 #[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Options<'a>(OptionsInner<'a>);
 
 impl<'a> Options<'a> {
@@ -504,13 +543,14 @@ impl<'a> Options<'a> {
     }
 }
 
-impl fmt::Debug for Options<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl core::fmt::Debug for Options<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_set().entries(self.iter()).finish()
     }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 enum OptionsInner<'a> {
     ByteSlice(&'a [u8]),
     DataSlice(&'a [DhcpOption<'a>]),
@@ -543,7 +583,7 @@ impl<'a> OptionsInner<'a> {
                 if self.0.is_empty() {
                     None
                 } else {
-                    DhcpOption::decode(&mut self.0).unwrap()
+                    unwrap!(DhcpOption::decode(&mut self.0))
                 }
             }
         }
@@ -558,6 +598,7 @@ impl<'a> OptionsInner<'a> {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum DhcpOption<'a> {
     /// 53: DHCP Message Type
     MessageType(MessageType),
@@ -707,6 +748,7 @@ impl DhcpOption<'_> {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Ipv4Addrs<'a>(Ipv4AddrsInner<'a>);
 
 impl<'a> Ipv4Addrs<'a> {
@@ -720,6 +762,7 @@ impl<'a> Ipv4Addrs<'a> {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 enum Ipv4AddrsInner<'a> {
     ByteSlice(&'a [u8]),
     DataSlice(&'a [Ipv4Addr]),
@@ -730,7 +773,7 @@ impl<'a> Ipv4AddrsInner<'a> {
         match self {
             Self::ByteSlice(data) => {
                 EitherIterator::First((0..data.len()).step_by(4).map(|offset| {
-                    let octets: [u8; 4] = data[offset..offset + 4].try_into().unwrap();
+                    let octets: [u8; 4] = unwrap!(data[offset..offset + 4].try_into());
 
                     octets.into()
                 }))

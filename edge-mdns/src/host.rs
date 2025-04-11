@@ -10,6 +10,7 @@ use crate::{HostAnswer, HostAnswers, MdnsError, NameSlice, RecordDataChain, Txt,
 /// This structure implements the `HostAnswers` trait, which allows it to be used
 /// as a responder for mDNS queries coming from other network peers.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Host<'a> {
     /// The name of the host. I.e. a name "foo" will be pingable as "foo.local"
     pub hostname: &'a str,
@@ -20,6 +21,7 @@ pub struct Host<'a> {
     /// Leaving it as `Ipv6Addr::UNSPECIFIED` means that the host will not aswer it to AAAA queries.
     pub ipv6: Ipv6Addr,
     /// The time-to-live of the mDNS answers.
+    #[cfg_attr(feature = "defmt", defmt(Debug2Format))]
     pub ttl: Ttl,
 }
 
@@ -73,6 +75,7 @@ impl HostAnswers for Host<'_> {
 /// implements the `HostAnswers` trait, which allows it to be used as a responder for mDNS queries
 /// coming from other network peers.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Service<'a> {
     /// The name of the service.
     pub name: &'a str,

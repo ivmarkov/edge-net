@@ -96,7 +96,7 @@ where
     async fn get(&self) -> Option<Self::Buffer<'_>> {
         let mut guard = self.0.lock().await;
 
-        guard.resize_default(N).unwrap();
+        unwrap!(guard.resize_default(N));
 
         Some(VecBuf(guard))
     }

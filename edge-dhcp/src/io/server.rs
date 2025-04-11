@@ -1,7 +1,6 @@
 use core::net::Ipv4Addr;
 
 use edge_nal::{UdpReceive, UdpSend};
-use log::{info, warn};
 
 use self::dhcp::{Options, Packet};
 
@@ -34,8 +33,8 @@ where
     F: FnMut() -> u64,
 {
     info!(
-        "Running DHCP server for addresses {}-{} with configuration {server_options:?}",
-        server.range_start, server.range_end
+        "Running DHCP server for addresses {}-{} with configuration {:?}",
+        server.range_start, server.range_end, server_options
     );
 
     loop {

@@ -15,6 +15,7 @@ categories = [
 ]
 
 [dependencies]
+log = { version = "0.4", default-features = true }
 embedded-io-async = { workspace = true, features = ["std"] }
 edge-nal = { workspace = true }
 async-io = "2"

@@ -13,6 +13,9 @@ pub use dns::*;
 pub use tcp::*;
 pub use udp::*;
 
+// This mod MUST go first, so that the others see its macros.
+pub(crate) mod fmt;
+
 mod dns;
 mod tcp;
 mod udp;

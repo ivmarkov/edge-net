@@ -11,8 +11,6 @@ use embassy_sync::mutex::Mutex;
 
 use embedded_io_async::{ErrorType, Read, Write};
 
-use log::{debug, info, warn};
-
 use super::{send_headers, send_status, Body, Error, RequestHeaders, SendBody};
 
 use crate::ws::{upgrade_response_headers, MAX_BASE64_KEY_RESPONSE_LEN};
@@ -468,17 +466,23 @@ pub async fn handle_connection<H, T, const N: usize>(
     T: Read + Write + Readable + TcpSplit + TcpShutdown,
 {
     let close = loop {
-        debug!("Handler task {task_id}: Waiting for a new request");
+        debug!("Handler task {}: Waiting for a new request", task_id);
 
         if let Some(keepalive_timeout_ms) = keepalive_timeout_ms {
             let wait_data = with_timeout(keepalive_timeout_ms, io.readable()).await;
             match wait_data {
                 Err(WithTimeoutError::Timeout) => {
-                    info!("Handler task {task_id}: Closing connection due to inactivity");
+                    info!(
+                        "Handler task {}: Closing connection due to inactivity",
+                        task_id
+                    );
                     break true;
                 }
                 Err(e) => {
-                    warn!("Handler task {task_id}: Error when handling request: {e:?}");
+                    warn!(
+                        "Handler task {}: Error when handling request: {:?}",
+                        task_id, e
+                    );
                     break true;
                 }
                 Ok(_) => {}
@@ -489,19 +493,25 @@ pub async fn handle_connection<H, T, const N: usize>(
 
         match result {
             Err(HandlerError::Connection(Error::ConnectionClosed)) => {
-                debug!("Handler task {task_id}: Connection closed");
+                debug!("Handler task {}: Connection closed", task_id);
                 break false;
             }
             Err(e) => {
-                warn!("Handler task {task_id}: Error when handling request: {e:?}");
+                warn!(
+                    "Handler task {}: Error when handling request: {:?}",
+                    task_id, e
+                );
                 break true;
             }
             Ok(needs_close) => {
                 if needs_close {
-                    debug!("Handler task {task_id}: Request complete; closing connection");
+                    debug!(
+                        "Handler task {}: Request complete; closing connection",
+                        task_id
+                    );
                     break true;
                 } else {
-                    debug!("Handler task {task_id}: Request complete");
+                    debug!("Handler task {}: Request complete", task_id);
                 }
             }
         }
@@ -509,7 +519,10 @@ pub async fn handle_connection<H, T, const N: usize>(
 
     if close {
         if let Err(e) = io.close(Close::Both).await {
-            warn!("Handler task {task_id}: Error when closing the socket: {e:?}");
+            warn!(
+                "Handler task {}: Error when closing the socket: {:?}",
+                task_id, e
+            );
         }
     } else {
         let _ = io.abort().await;
@@ -662,7 +675,8 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
         let mut tasks = heapless::Vec::<_, P>::new();
 
         info!(
-            "Creating {P} handler tasks, memory: {}B",
+            "Creating {} handler tasks, memory: {}B",
+            P,
             core::mem::size_of_val(&tasks)
         );
 
@@ -673,10 +687,10 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
             let handler = &handler;
             let buf: *mut [u8; B] = &mut unsafe { self.0.assume_init_mut() }[index];
 
-            tasks
+            unwrap!(tasks
                 .push(async move {
                     loop {
-                        debug!("Handler task {task_id}: Waiting for connection");
+                        debug!("Handler task {}: Waiting for connection", task_id);
 
                         let io = {
                             let _guard = mutex.lock().await;
@@ -684,11 +698,11 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
                             acceptor.accept().await.map_err(Error::Io)?.1
                         };
 
-                        debug!("Handler task {task_id}: Got connection request");
+                        debug!("Handler task {}: Got connection request", task_id);
 
                         handle_connection::<_, _, N>(
                             io,
-                            unsafe { buf.as_mut() }.unwrap(),
+                            unwrap!(unsafe { buf.as_mut() }),
                             keepalive_timeout_ms,
                             task_id,
                             handler,
@@ -696,13 +710,12 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
                         .await;
                     }
                 })
-                .map_err(|_| ())
-                .unwrap();
+                .map_err(|_| ()));
         }
 
         let (result, _) = embassy_futures::select::select_slice(&mut tasks).await;
 
-        warn!("Server processing loop quit abruptly: {result:?}");
+        warn!("Server processing loop quit abruptly: {:?}", result);
 
         result
     }
@@ -815,7 +828,7 @@ mod embedded_svc_compat {
     //     where
     //         T: Read + Write,
     //     {
-    //         self.0.handle(connection).await.unwrap();
+    //         unwrap!(self.0.handle(connection).await);
 
     //         Ok(())
     //     }

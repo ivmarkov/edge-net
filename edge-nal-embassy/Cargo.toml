@@ -14,7 +14,12 @@ categories = [
     "network-programming",
 ]
 
+[features]
+defmt = ["dep:defmt", "heapless/defmt-03", "embassy-net/defmt"]
+
 [dependencies]
+log = { version = "0.4", default-features = false, optional = true }
+defmt = { version = "0.3", optional = true }
 embedded-io-async = { workspace = true }
 edge-nal = { workspace = true }
 heapless = { workspace = true }

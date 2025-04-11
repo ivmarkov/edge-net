@@ -63,7 +63,7 @@ impl FrameHeader {
         W: Write,
     {
         let mut header_buf = [0; FrameHeader::MAX_LEN];
-        let header_len = self.serialize(&mut header_buf).unwrap();
+        let header_len = unwrap!(self.serialize(&mut header_buf));
 
         write
             .write_all(&header_buf[..header_len])
@@ -219,7 +219,7 @@ mod embedded_svc_compat {
         ) -> Result<(), Self::Error> {
             super::send(
                 &mut self.0,
-                frame_type.try_into().unwrap(),
+                unwrap!(frame_type.try_into(), "Invalid frame type"),
                 (self.1)(),
                 frame_data,
             )

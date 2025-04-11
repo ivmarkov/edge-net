@@ -15,5 +15,5 @@ categories = [
 
 [dependencies]
 rumqttc = "0.23"
-log = { workspace = true }
+log = { version = "0.4", default-features = false }
 embedded-svc = { workspace = true, optional = true, default-features = false, features = ["std"] }

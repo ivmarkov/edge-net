@@ -1,5 +1,3 @@
-use log::trace;
-
 use core::net::Ipv4Addr;
 
 use super::bytes::{BytesIn, BytesOut};

@@ -47,5 +47,18 @@ where
     }
 }
 
+#[cfg(feature = "defmt")]
+impl<E> defmt::Format for Error<E>
+where
+    E: defmt::Format,
+{
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::Io(err) => defmt::write!(f, "IO error: {}", err),
+            Self::Format(err) => defmt::write!(f, "Format error: {}", err),
+        }
+    }
+}
+
 #[cfg(feature = "std")]
 impl<E> std::error::Error for Error<E> where E: std::error::Error {}
