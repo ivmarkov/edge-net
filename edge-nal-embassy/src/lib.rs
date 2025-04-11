@@ -4,20 +4,26 @@
 
 use core::cell::{Cell, UnsafeCell};
 use core::mem::MaybeUninit;
-use core::net::SocketAddr;
+use core::net::{IpAddr, SocketAddr};
 use core::ptr::NonNull;
 
-use embassy_net::{IpEndpoint, IpListenEndpoint};
+use embassy_net::{IpAddress, IpEndpoint, IpListenEndpoint};
 
+#[cfg(feature = "dns")]
 pub use dns::*;
+#[cfg(feature = "tcp")]
 pub use tcp::*;
+#[cfg(feature = "udp")]
 pub use udp::*;
 
 // This mod MUST go first, so that the others see its macros.
 pub(crate) mod fmt;
 
+#[cfg(feature = "dns")]
 mod dns;
+#[cfg(feature = "tcp")]
 mod tcp;
+#[cfg(feature = "udp")]
 mod udp;
 
 pub(crate) struct Pool<T, const N: usize> {
@@ -66,26 +72,33 @@ pub(crate) fn to_net_socket(socket: IpEndpoint) -> SocketAddr {
     SocketAddr::new(socket.addr.into(), socket.port)
 }
 
-// pub(crate) fn to_net_socket2(socket: IpListenEndpoint) -> SocketAddr {
-//     SocketAddr::new(
-//         socket
-//             .addr
-//             .map(to_net_addr)
-//             .unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
-//         socket.port,
-//     )
-// }
-
-pub(crate) fn to_emb_socket(socket: SocketAddr) -> IpEndpoint {
-    IpEndpoint {
-        addr: socket.ip().into(),
+pub(crate) fn to_emb_socket(socket: SocketAddr) -> Option<IpEndpoint> {
+    Some(IpEndpoint {
+        addr: to_emb_addr(socket.ip())?,
         port: socket.port(),
-    }
+    })
 }
 
-pub(crate) fn to_emb_bind_socket(socket: SocketAddr) -> IpListenEndpoint {
-    IpListenEndpoint {
-        addr: (!socket.ip().is_unspecified()).then(|| socket.ip().into()),
+pub(crate) fn to_emb_bind_socket(socket: SocketAddr) -> Option<IpListenEndpoint> {
+    let addr = if socket.ip().is_unspecified() {
+        None
+    } else {
+        Some(to_emb_addr(socket.ip())?)
+    };
+
+    Some(IpListenEndpoint {
+        addr,
         port: socket.port(),
+    })
+}
+
+pub(crate) fn to_emb_addr(addr: IpAddr) -> Option<IpAddress> {
+    match addr {
+        #[cfg(feature = "proto-ipv4")]
+        IpAddr::V4(addr) => Some(addr.into()),
+        #[cfg(feature = "proto-ipv6")]
+        IpAddr::V6(addr) => Some(addr.into()),
+        #[allow(unreachable_patterns)]
+        _ => None,
     }
 }
