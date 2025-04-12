@@ -332,6 +332,7 @@ where
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum HandlerError<T, E> {
     Io(T),
     Connection(Error<T>),
@@ -466,7 +467,10 @@ pub async fn handle_connection<H, T, const N: usize>(
     T: Read + Write + Readable + TcpSplit + TcpShutdown,
 {
     let close = loop {
-        debug!("Handler task {}: Waiting for a new request", task_id);
+        debug!(
+            "Handler task {}: Waiting for a new request",
+            display2format!(task_id)
+        );
 
         if let Some(keepalive_timeout_ms) = keepalive_timeout_ms {
             let wait_data = with_timeout(keepalive_timeout_ms, io.readable()).await;
@@ -474,14 +478,15 @@ pub async fn handle_connection<H, T, const N: usize>(
                 Err(WithTimeoutError::Timeout) => {
                     info!(
                         "Handler task {}: Closing connection due to inactivity",
-                        task_id
+                        display2format!(task_id)
                     );
                     break true;
                 }
                 Err(e) => {
                     warn!(
                         "Handler task {}: Error when handling request: {:?}",
-                        task_id, e
+                        display2format!(task_id),
+                        debug2format!(e)
                     );
                     break true;
                 }
@@ -493,13 +498,17 @@ pub async fn handle_connection<H, T, const N: usize>(
 
         match result {
             Err(HandlerError::Connection(Error::ConnectionClosed)) => {
-                debug!("Handler task {}: Connection closed", task_id);
+                debug!(
+                    "Handler task {}: Connection closed",
+                    display2format!(task_id)
+                );
                 break false;
             }
             Err(e) => {
                 warn!(
                     "Handler task {}: Error when handling request: {:?}",
-                    task_id, e
+                    display2format!(task_id),
+                    debug2format!(e)
                 );
                 break true;
             }
@@ -507,11 +516,14 @@ pub async fn handle_connection<H, T, const N: usize>(
                 if needs_close {
                     debug!(
                         "Handler task {}: Request complete; closing connection",
-                        task_id
+                        display2format!(task_id)
                     );
                     break true;
                 } else {
-                    debug!("Handler task {}: Request complete", task_id);
+                    debug!(
+                        "Handler task {}: Request complete",
+                        display2format!(task_id)
+                    );
                 }
             }
         }
@@ -521,7 +533,8 @@ pub async fn handle_connection<H, T, const N: usize>(
         if let Err(e) = io.close(Close::Both).await {
             warn!(
                 "Handler task {}: Error when closing the socket: {:?}",
-                task_id, e
+                display2format!(task_id),
+                debug2format!(e)
             );
         }
     } else {
@@ -553,6 +566,20 @@ where
         match self {
             Self::Connection(e) => write!(f, "Connection error: {}", e),
             Self::Handler(e) => write!(f, "Handler error: {}", e),
+        }
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl<C, E> defmt::Format for HandleRequestError<C, E>
+where
+    C: defmt::Format,
+    E: defmt::Format,
+{
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::Connection(e) => defmt::write!(f, "Connection error: {}", e),
+            Self::Handler(e) => defmt::write!(f, "Handler error: {}", e),
         }
     }
 }
@@ -690,7 +717,10 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
             unwrap!(tasks
                 .push(async move {
                     loop {
-                        debug!("Handler task {}: Waiting for connection", task_id);
+                        debug!(
+                            "Handler task {}: Waiting for connection",
+                            display2format!(task_id)
+                        );
 
                         let io = {
                             let _guard = mutex.lock().await;
@@ -698,7 +728,10 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
                             acceptor.accept().await.map_err(Error::Io)?.1
                         };
 
-                        debug!("Handler task {}: Got connection request", task_id);
+                        debug!(
+                            "Handler task {}: Got connection request",
+                            display2format!(task_id)
+                        );
 
                         handle_connection::<_, _, N>(
                             io,
@@ -715,7 +748,10 @@ impl<const P: usize, const B: usize, const N: usize> Server<P, B, N> {
 
         let (result, _) = embassy_futures::select::select_slice(&mut tasks).await;
 
-        warn!("Server processing loop quit abruptly: {:?}", result);
+        warn!(
+            "Server processing loop quit abruptly: {:?}",
+            debug2format!(result)
+        );
 
         result
     }

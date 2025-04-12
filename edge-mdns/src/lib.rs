@@ -438,6 +438,7 @@ impl AsRef<[u8]> for Buf<'_> {
 
 /// Type of request for `MdnsHandler::handle`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum MdnsRequest<'a> {
     /// No incoming mDNS request. Send a broadcast message
     None,
@@ -454,6 +455,7 @@ pub enum MdnsRequest<'a> {
 
 /// Return type for `MdnsHandler::handle`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum MdnsResponse<'a> {
     None,
     Reply { data: &'a [u8], delay: bool },
@@ -879,7 +881,11 @@ where
                     }
 
                     if question.qname().name_eq(&answer.owner()) {
-                        debug!("Answering question [{}] with: [{}]", question, answer);
+                        debug!(
+                            "Answering question [{}] with: [{}]",
+                            debug2format!(question),
+                            debug2format!(answer)
+                        );
 
                         ab.push(answer)?;
 
@@ -904,7 +910,7 @@ where
                             | RecordDataChain::Next(AllRecordData::Txt(_))
                             | RecordDataChain::This(Txt(_))
                     ) {
-                        debug!("Additional answer: [{}]", answer);
+                        debug!("Additional answer: [{}]", debug2format!(answer));
 
                         aa.push(answer)?;
 

@@ -41,6 +41,7 @@ where
 
 /// Represents a parsed UDP header
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct UdpPacketHeader {
     /// Source port
     pub src: u16,

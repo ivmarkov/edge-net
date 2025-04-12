@@ -48,3 +48,5 @@ jobs:
         run: cargo build --no-default-features --features embassy,defmt
       - name: Build | Examples
         run: cargo build --examples --features log
+      - name: Build | Examples - defmt
+        run: export DEFMT_LOG=trace; cargo check --examples --features std,defmt

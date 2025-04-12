@@ -116,6 +116,29 @@ where
     }
 }
 
+#[cfg(feature = "defmt")]
+impl<E> defmt::Format for Error<E>
+where
+    E: defmt::Format,
+{
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::InvalidHeaders => defmt::write!(f, "Invalid HTTP headers or status line"),
+            Self::InvalidBody => defmt::write!(f, "Invalid HTTP body"),
+            Self::TooManyHeaders => defmt::write!(f, "Too many HTTP headers"),
+            Self::TooLongHeaders => defmt::write!(f, "HTTP headers section is too long"),
+            Self::TooLongBody => defmt::write!(f, "HTTP body is too long"),
+            Self::IncompleteHeaders => defmt::write!(f, "HTTP headers section is incomplete"),
+            Self::IncompleteBody => defmt::write!(f, "HTTP body is incomplete"),
+            Self::InvalidState => defmt::write!(f, "Connection is not in requested state"),
+            Self::HeadersMismatchError(e) => defmt::write!(f, "Headers mismatch: {}", e),
+            Self::WsUpgradeError(e) => defmt::write!(f, "WebSocket upgrade error: {}", e),
+            Self::ConnectionClosed => defmt::write!(f, "Connection closed"),
+            Self::Io(e) => defmt::write!(f, "{}", e),
+        }
+    }
+}
+
 #[cfg(feature = "std")]
 impl<E> std::error::Error for Error<E> where E: std::error::Error {}
 
