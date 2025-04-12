@@ -172,3 +172,11 @@ impl Handler for HttpHandler {
     }
 }
 ```
+
+
+### More examples
+
+#### HTTPS server
+
+HTTPS server with embassy and embedded-tls [here](https://github.com/esp-rs/esp-mbedtls/blob/main/examples/edge_server.rs)
+
