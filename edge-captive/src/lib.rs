@@ -87,7 +87,10 @@ pub fn reply(
     let buf = Buf(buf, 0);
 
     let message = domain::base::Message::from_octets(request)?;
-    debug!("Processing message with header: {:?}", message.header());
+    debug!(
+        "Processing message with header: {:?}",
+        debug2format!(message.header())
+    );
 
     let mut responseb = domain::base::MessageBuilder::from_target(buf)?;
 
@@ -106,10 +109,17 @@ pub fn reply(
                     Ttl::from_duration_lossy(ttl),
                     A::from_octets(ip[0], ip[1], ip[2], ip[3]),
                 );
-                debug!("Answering {:?} with {:?}", question, record);
+                debug!(
+                    "Answering {:?} with {:?}",
+                    debug2format!(question),
+                    debug2format!(record)
+                );
                 answerb.push(record)?;
             } else {
-                debug!("Question {:?} is not of type A, not answering", question);
+                debug!(
+                    "Question {:?} is not of type A, not answering",
+                    debug2format!(question)
+                );
             }
         }
 

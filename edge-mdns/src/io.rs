@@ -360,7 +360,11 @@ where
                             );
 
                             if let Err(err) = send.send(remote, data).await {
-                                warn!("Failed to reply privately to {}: {:?}", remote, err);
+                                warn!(
+                                    "Failed to reply privately to {}: {:?}",
+                                    remote,
+                                    debug2format!(err)
+                                );
                             }
                         } else {
                             // Otherwise, re-broadcast the response

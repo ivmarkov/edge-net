@@ -34,6 +34,7 @@ where
 
 /// Represents a parsed IP header
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Ipv4PacketHeader {
     /// Version
     pub version: u8,

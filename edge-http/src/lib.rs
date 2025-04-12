@@ -45,6 +45,19 @@ impl Display for HeadersMismatchError {
     }
 }
 
+#[cfg(feature = "defmt")]
+impl defmt::Format for HeadersMismatchError {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::ResponseConnectionTypeMismatchError => defmt::write!(
+                f,
+                "Response connection type is different from the request connection type"
+            ),
+            Self::BodyTypeError(s) => defmt::write!(f, "Body type mismatch: {}", s),
+        }
+    }
+}
+
 /// Http methods
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Hash))]
@@ -199,6 +212,13 @@ impl Method {
 impl Display for Method {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for Method {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        defmt::write!(f, "{}", self.as_str())
     }
 }
 
@@ -565,6 +585,17 @@ impl Display for ConnectionType {
     }
 }
 
+#[cfg(feature = "defmt")]
+impl defmt::Format for ConnectionType {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::KeepAlive => defmt::write!(f, "Keep-Alive"),
+            Self::Close => defmt::write!(f, "Close"),
+            Self::Upgrade => defmt::write!(f, "Upgrade"),
+        }
+    }
+}
+
 /// Body type
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum BodyType {
@@ -734,6 +765,17 @@ impl Display for BodyType {
     }
 }
 
+#[cfg(feature = "defmt")]
+impl defmt::Format for BodyType {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            Self::Chunked => defmt::write!(f, "Chunked"),
+            Self::ContentLen(len) => defmt::write!(f, "Content-Length: {}", len),
+            Self::Raw => defmt::write!(f, "Raw"),
+        }
+    }
+}
+
 /// Request headers including the request line (method, path)
 #[derive(Debug)]
 pub struct RequestHeaders<'b, const N: usize> {
@@ -787,6 +829,23 @@ impl<const N: usize> Display for RequestHeaders<'_, N> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl<const N: usize> defmt::Format for RequestHeaders<'_, N> {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        defmt::write!(f, "{} ", if self.http11 { "HTTP/1.1" } else { "HTTP/1.0" });
+
+        defmt::write!(f, "{} {}\n", self.method, self.path);
+
+        for (name, value) in self.headers.iter() {
+            if name.is_empty() {
+                break;
+            }
+
+            defmt::write!(f, "{}: {}\n", name, value);
+        }
     }
 }
 
@@ -848,6 +907,23 @@ impl<const N: usize> Display for ResponseHeaders<'_, N> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl<const N: usize> defmt::Format for ResponseHeaders<'_, N> {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        defmt::write!(f, "{} ", if self.http11 { "HTTP/1.1 " } else { "HTTP/1.0" });
+
+        defmt::write!(f, "{} {}\n", self.code, self.reason.unwrap_or(""));
+
+        for (name, value) in self.headers.iter() {
+            if name.is_empty() {
+                break;
+            }
+
+            defmt::write!(f, "{}: {}\n", name, value);
+        }
     }
 }
 
@@ -931,6 +1007,17 @@ pub mod ws {
                 Self::NoVersion => write!(f, "No Sec-WebSocket-Version header"),
                 Self::NoSecKey => write!(f, "No Sec-WebSocket-Key header"),
                 Self::UnsupportedVersion => write!(f, "Unsupported Sec-WebSocket-Version"),
+            }
+        }
+    }
+
+    #[cfg(feature = "defmt")]
+    impl defmt::Format for UpgradeError {
+        fn format(&self, f: defmt::Formatter<'_>) {
+            match self {
+                Self::NoVersion => defmt::write!(f, "No Sec-WebSocket-Version header"),
+                Self::NoSecKey => defmt::write!(f, "No Sec-WebSocket-Key header"),
+                Self::UnsupportedVersion => defmt::write!(f, "Unsupported Sec-WebSocket-Version"),
             }
         }
     }
