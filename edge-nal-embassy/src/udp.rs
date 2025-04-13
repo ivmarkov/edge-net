@@ -1,10 +1,10 @@
-use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use core::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use core::ptr::NonNull;
 
 use edge_nal::{MulticastV4, MulticastV6, Readable, UdpBind, UdpReceive, UdpSend, UdpSplit};
 
 use embassy_net::udp::{BindError, PacketMetadata, RecvError, SendError};
-use embassy_net::{MulticastError, Stack};
+use embassy_net::Stack;
 
 use embedded_io_async::{ErrorKind, ErrorType};
 
@@ -49,7 +49,9 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Udp
     async fn bind(&self, local: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = UdpSocket::new(self.stack, self.buffers)?;
 
-        socket.socket.bind(to_emb_bind_socket(local))?;
+        socket
+            .socket
+            .bind(to_emb_bind_socket(local).ok_or(UdpError::UnsupportedProto)?)?;
 
         Ok(socket)
     }
@@ -58,6 +60,7 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Udp
 /// A UDP socket
 /// Implements the `UdpReceive` `UdpSend` and `UdpSplit` traits from `edge-nal`
 pub struct UdpSocket<'d, const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> {
+    #[allow(unused)]
     stack: embassy_net::Stack<'d>,
     socket: embassy_net::udp::UdpSocket<'d>,
     stack_buffers: &'d UdpBuffers<N, TX_SZ, RX_SZ, M>,
@@ -125,7 +128,12 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Udp
     for UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn send(&mut self, remote: SocketAddr, data: &[u8]) -> Result<(), Self::Error> {
-        self.socket.send_to(data, to_emb_socket(remote)).await?;
+        self.socket
+            .send_to(
+                data,
+                to_emb_socket(remote).ok_or(UdpError::UnsupportedProto)?,
+            )
+            .await?;
 
         Ok(())
     }
@@ -151,7 +159,12 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Udp
     for &UdpSocket<'_, N, TX_SZ, RX_SZ, M>
 {
     async fn send(&mut self, remote: SocketAddr, data: &[u8]) -> Result<(), Self::Error> {
-        self.socket.send_to(data, remote).await?;
+        self.socket
+            .send_to(
+                data,
+                to_emb_socket(remote).ok_or(UdpError::UnsupportedProto)?,
+            )
+            .await?;
 
         Ok(())
     }
@@ -189,22 +202,42 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Mul
 {
     async fn join_v4(
         &mut self,
-        multicast_addr: Ipv4Addr,
+        #[allow(unused)] multicast_addr: Ipv4Addr,
         _interface: Ipv4Addr,
     ) -> Result<(), Self::Error> {
-        self.stack
-            .join_multicast_group(IpAddr::V4(multicast_addr))?;
+        #[cfg(feature = "multicast")]
+        {
+            self.stack.join_multicast_group(
+                crate::to_emb_addr(core::net::IpAddr::V4(multicast_addr))
+                    .ok_or(UdpError::UnsupportedProto)?,
+            )?;
+        }
+
+        #[cfg(not(feature = "multicast"))]
+        {
+            Err(UdpError::UnsupportedProto)?;
+        }
 
         Ok(())
     }
 
     async fn leave_v4(
         &mut self,
-        multicast_addr: Ipv4Addr,
+        #[allow(unused)] multicast_addr: Ipv4Addr,
         _interface: Ipv4Addr,
     ) -> Result<(), Self::Error> {
-        self.stack
-            .leave_multicast_group(IpAddr::V4(multicast_addr))?;
+        #[cfg(feature = "multicast")]
+        {
+            self.stack.leave_multicast_group(
+                crate::to_emb_addr(core::net::IpAddr::V4(multicast_addr))
+                    .ok_or(UdpError::UnsupportedProto)?,
+            )?;
+        }
+
+        #[cfg(not(feature = "multicast"))]
+        {
+            Err(UdpError::UnsupportedProto)?;
+        }
 
         Ok(())
     }
@@ -215,22 +248,42 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize, const M: usize> Mul
 {
     async fn join_v6(
         &mut self,
-        multicast_addr: Ipv6Addr,
+        #[allow(unused)] multicast_addr: Ipv6Addr,
         _interface: u32,
     ) -> Result<(), Self::Error> {
-        self.stack
-            .join_multicast_group(IpAddr::V6(multicast_addr))?;
+        #[cfg(feature = "multicast")]
+        {
+            self.stack.join_multicast_group(
+                crate::to_emb_addr(core::net::IpAddr::V6(multicast_addr))
+                    .ok_or(UdpError::UnsupportedProto)?,
+            )?;
+        }
+
+        #[cfg(not(feature = "multicast"))]
+        {
+            Err(UdpError::UnsupportedProto)?;
+        }
 
         Ok(())
     }
 
     async fn leave_v6(
         &mut self,
-        multicast_addr: Ipv6Addr,
+        #[allow(unused)] multicast_addr: Ipv6Addr,
         _interface: u32,
     ) -> Result<(), Self::Error> {
-        self.stack
-            .leave_multicast_group(IpAddr::V6(multicast_addr))?;
+        #[cfg(feature = "multicast")]
+        {
+            self.stack.leave_multicast_group(
+                crate::to_emb_addr(core::net::IpAddr::V6(multicast_addr))
+                    .ok_or(UdpError::UnsupportedProto)?,
+            )?;
+        }
+
+        #[cfg(not(feature = "multicast"))]
+        {
+            Err(UdpError::UnsupportedProto)?;
+        }
 
         Ok(())
     }
@@ -252,8 +305,12 @@ pub enum UdpError {
     Recv(RecvError),
     Send(SendError),
     Bind(BindError),
-    Multicast(MulticastError),
+    /// The table of joined multicast groups is already full.
+    MulticastGroupTableFull,
+    /// Cannot join/leave the given multicast group.
+    MulticastUnaddressable,
     NoBuffers,
+    UnsupportedProto,
 }
 
 impl From<RecvError> for UdpError {
@@ -274,9 +331,16 @@ impl From<BindError> for UdpError {
     }
 }
 
-impl From<MulticastError> for UdpError {
-    fn from(e: MulticastError) -> Self {
-        UdpError::Multicast(e)
+#[cfg(all(
+    feature = "multicast",
+    any(feature = "proto-ipv4", feature = "proto-ipv6")
+))]
+impl From<embassy_net::MulticastError> for UdpError {
+    fn from(e: embassy_net::MulticastError) -> Self {
+        match e {
+            embassy_net::MulticastError::GroupTableFull => UdpError::MulticastGroupTableFull,
+            embassy_net::MulticastError::Unaddressable => UdpError::MulticastUnaddressable,
+        }
     }
 }
 
@@ -287,8 +351,10 @@ impl embedded_io_async::Error for UdpError {
             UdpError::Recv(_) => ErrorKind::Other,
             UdpError::Send(_) => ErrorKind::Other,
             UdpError::Bind(_) => ErrorKind::Other,
-            UdpError::Multicast(_) => ErrorKind::Other,
+            UdpError::MulticastGroupTableFull => ErrorKind::Other,
+            UdpError::MulticastUnaddressable => ErrorKind::Other,
             UdpError::NoBuffers => ErrorKind::OutOfMemory,
+            UdpError::UnsupportedProto => ErrorKind::InvalidInput,
         }
     }
 }
