@@ -19,6 +19,7 @@ default = ["proto-ipv4", "proto-ipv6", "medium-ethernet", "dns", "udp", "tcp", "
 defmt = ["dep:defmt", "heapless/defmt-03", "embassy-net/defmt"]
 proto-ipv4 = ["embassy-net/proto-ipv4"]
 proto-ipv6 = ["embassy-net/proto-ipv6"]
+proto-sixlowpan = ["embassy-net/proto-sixlowpan"]
 medium-ethernet = ["embassy-net/medium-ethernet"]
 medium-ip = ["embassy-net/medium-ip"]
 dns = ["embassy-net/dns"]
@@ -32,5 +33,5 @@ defmt = { version = "0.3", optional = true }
 embedded-io-async = { workspace = true }
 edge-nal = { workspace = true }
 heapless = { workspace = true }
-embassy-net = "0.6"
+embassy-net = "0.7"
 embassy-futures = { workspace = true }
