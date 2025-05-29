@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::large_futures)]
 #![allow(async_fn_in_trait)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(unknown_lints)]
 
 use core::cmp::Ordering;
 use core::fmt::Display;

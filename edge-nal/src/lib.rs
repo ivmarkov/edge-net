@@ -1,5 +1,7 @@
 #![no_std]
 #![allow(async_fn_in_trait)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(unknown_lints)]
 
 pub use multicast::*;
 pub use raw::*;

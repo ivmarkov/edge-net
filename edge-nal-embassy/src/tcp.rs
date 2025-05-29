@@ -44,7 +44,10 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> TcpConnect
     async fn connect(&self, remote: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
         let mut socket = TcpSocket::new(self.stack, self.buffers)?;
 
-        socket.socket.connect(to_emb_socket(remote)).await?;
+        socket
+            .socket
+            .connect(to_emb_socket(remote).ok_or(TcpError::UnsupportedProto)?)
+            .await?;
 
         Ok(socket)
     }
@@ -82,7 +85,10 @@ impl<const N: usize, const TX_SZ: usize, const RX_SZ: usize> edge_nal::TcpAccept
     async fn accept(&self) -> Result<(SocketAddr, Self::Socket<'_>), Self::Error> {
         let mut socket = TcpSocket::new(self.stack.stack, self.stack.buffers)?;
 
-        socket.socket.accept(to_emb_bind_socket(self.local)).await?;
+        socket
+            .socket
+            .accept(to_emb_bind_socket(self.local).ok_or(TcpError::UnsupportedProto)?)
+            .await?;
 
         let local_endpoint = unwrap!(socket.socket.local_endpoint());
 
@@ -286,6 +292,7 @@ pub enum TcpError {
     Connect(ConnectError),
     Accept(AcceptError),
     NoBuffers,
+    UnsupportedProto,
 }
 
 impl From<Error> for TcpError {
@@ -314,6 +321,7 @@ impl embedded_io_async::Error for TcpError {
             TcpError::Connect(_) => ErrorKind::Other,
             TcpError::Accept(_) => ErrorKind::Other,
             TcpError::NoBuffers => ErrorKind::OutOfMemory,
+            TcpError::UnsupportedProto => ErrorKind::InvalidInput,
         }
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "edge-nal-embassy"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 rust-version = "1.83"
 description = "An implementation of edge-nal based on `embassy-net`"
@@ -15,7 +15,20 @@ categories = [
 ]
 
 [features]
+default = ["all"]
+all = ["proto-ipv4", "proto-ipv6", "medium-ethernet", "medium-ip", "dns", "udp", "tcp", "multicast", "icmp", "dhcpv4", "dhcpv4-hostname"]
 defmt = ["dep:defmt", "heapless/defmt-03", "embassy-net/defmt"]
+proto-ipv4 = ["embassy-net/proto-ipv4"]
+proto-ipv6 = ["embassy-net/proto-ipv6"]
+medium-ethernet = ["embassy-net/medium-ethernet"]
+medium-ip = ["embassy-net/medium-ip"]
+dns = ["embassy-net/dns"]
+udp = ["embassy-net/udp"]
+tcp = ["embassy-net/tcp"]
+icmp = ["embassy-net/icmp"]
+multicast = ["embassy-net/multicast"]
+dhcpv4 = ["embassy-net/dhcpv4"]
+dhcpv4-hostname = ["embassy-net/dhcpv4-hostname"]
 
 [dependencies]
 log = { version = "0.4", default-features = false, optional = true }
@@ -23,14 +36,5 @@ defmt = { version = "0.3", optional = true }
 embedded-io-async = { workspace = true }
 edge-nal = { workspace = true }
 heapless = { workspace = true }
-# Do not require these features and conditionalize the code instead
-embassy-net = { version = "0.6", features = [
-    "tcp",
-    "udp",
-    "dns",
-    "proto-ipv6",
-    "medium-ethernet",
-    "proto-ipv4",
-    "multicast",
-] }
+embassy-net = "0.7"
 embassy-futures = { workspace = true }

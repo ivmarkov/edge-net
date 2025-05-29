@@ -1,5 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::large_futures)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(unknown_lints)]
 
 /// This code is a `no_std` and no-alloc modification of https://github.com/krolaw/dhcp4r
 use core::str::Utf8Error;
