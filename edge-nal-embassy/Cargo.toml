@@ -19,7 +19,6 @@ default = ["proto-ipv4", "proto-ipv6", "medium-ethernet", "dns", "udp", "tcp", "
 defmt = ["dep:defmt", "heapless/defmt-03", "embassy-net/defmt"]
 proto-ipv4 = ["embassy-net/proto-ipv4"]
 proto-ipv6 = ["embassy-net/proto-ipv6"]
-proto-sixlowpan = ["embassy-net/proto-sixlowpan"]
 medium-ethernet = ["embassy-net/medium-ethernet"]
 medium-ip = ["embassy-net/medium-ip"]
 dns = ["embassy-net/dns"]
