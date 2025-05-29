@@ -15,7 +15,8 @@ categories = [
 ]
 
 [features]
-default = ["proto-ipv4", "proto-ipv6", "medium-ethernet", "dns", "udp", "tcp", "multicast"]
+default = ["all"]
+all = ["proto-ipv4", "proto-ipv6", "medium-ethernet", "medium-ip", "dns", "udp", "tcp", "multicast", "icmp", "dhcpv4", "dhcpv4-hostname"]
 defmt = ["dep:defmt", "heapless/defmt-03", "embassy-net/defmt"]
 proto-ipv4 = ["embassy-net/proto-ipv4"]
 proto-ipv6 = ["embassy-net/proto-ipv6"]
@@ -24,7 +25,10 @@ medium-ip = ["embassy-net/medium-ip"]
 dns = ["embassy-net/dns"]
 udp = ["embassy-net/udp"]
 tcp = ["embassy-net/tcp"]
+icmp = ["embassy-net/icmp"]
 multicast = ["embassy-net/multicast"]
+dhcpv4 = ["embassy-net/dhcpv4"]
+dhcpv4-hostname = ["embassy-net/dhcpv4-hostname"]
 
 [dependencies]
 log = { version = "0.4", default-features = false, optional = true }
