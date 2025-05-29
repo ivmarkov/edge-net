@@ -1,5 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::large_futures)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(unknown_lints)]
 
 use core::fmt::Display;
 use core::time::Duration;

@@ -1,6 +1,8 @@
 #![no_std]
 #![allow(async_fn_in_trait)]
 #![warn(clippy::large_futures)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(unknown_lints)]
 
 use core::cell::{Cell, UnsafeCell};
 use core::mem::MaybeUninit;
